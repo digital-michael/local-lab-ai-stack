@@ -41,6 +41,8 @@ Pin all images to specific tags or digests before deployment.
 | Grafana | `docker.io/grafana/grafana` | TBD | |
 | Loki | `docker.io/grafana/loki` | TBD | |
 | Promtail | `docker.io/grafana/promtail` | TBD | |
+| Traefik | `docker.io/library/traefik` | TBD | Reverse proxy and TLS termination |
+| Knowledge Index | `localhost/knowledge-index` | TBD | Locally built FastAPI service |
 
 ---
 
@@ -98,6 +100,16 @@ FLOWISE_PASSWORD=<secret>
 DATABASE_PATH=/data/flowise
 ```
 
+### Knowledge Index
+
+```env
+DATABASE_URL=postgresql://aistack:<secret>@postgres.ai-stack:5432/aistack
+QDRANT_HOST=qdrant.ai-stack
+QDRANT_PORT=6333
+ROUTE_CACHE_TTL=60
+LISTEN_PORT=8900
+```
+
 ---
 
 # 3 Resource Limits
@@ -116,6 +128,9 @@ Tune after initial deployment. Set in quadlet files via `PodmanArgs=--cpus=N --m
 | Prometheus | 1 core | 2 GB | — |
 | Grafana | 1 core | 1 GB | — |
 | Loki | 1 core | 2 GB | — |
+| Promtail | 1 core | 1 GB | — |
+| Traefik | 0.5 cores | 256 MB | — |
+| Knowledge Index | 1 core | 512 MB | — |
 
 ---
 
@@ -125,7 +140,8 @@ Tune after initial deployment. Set in quadlet files via `PodmanArgs=--cpus=N --m
 |-----------|---------------|---------|
 | 9090 | 8080 | OpenWebUI |
 | 9000 | 4000 | LiteLLM API gateway |
-| 9443 | 443 | TLS reverse proxy |
+| 80 | 80 | Traefik (HTTP → HTTPS redirect) |
+| 443 | 443 | Traefik (HTTPS) |
 | 6333 | 6333 | Qdrant REST API |
 | 6334 | 6334 | Qdrant gRPC |
 | 5432 | 5432 | PostgreSQL |
@@ -158,6 +174,8 @@ Tune after initial deployment. Set in quadlet files via `PodmanArgs=--cpus=N --m
 | `loki.ai-stack` | Loki |
 | `prometheus.ai-stack` | Prometheus |
 | `authentik.ai-stack` | Authentik |
+| `traefik.ai-stack` | Traefik |
+| `knowledge-index.ai-stack` | Knowledge Index Service |
 
 ---
 
@@ -178,6 +196,9 @@ Use the `:Z` volume suffix for SELinux relabeling on Fedora/RHEL hosts.
 | Prometheus | `$AI_STACK_DIR/configs/prometheus` | `/etc/prometheus` | ro |
 | Loki | `$AI_STACK_DIR/logs/loki` | `/loki` | rw |
 | Promtail | `$AI_STACK_DIR/configs/promtail` | `/etc/promtail` | ro |
+| Traefik | `$AI_STACK_DIR/configs/traefik/traefik.yaml` | `/etc/traefik/traefik.yaml` | ro |
+| Traefik | `$AI_STACK_DIR/configs/traefik/dynamic` | `/etc/traefik/dynamic` | ro |
+| Traefik | `$AI_STACK_DIR/configs/tls` | `/etc/traefik/tls` | ro |
 
 ---
 
@@ -228,9 +249,9 @@ Secret names and the services that consume them. Values are never stored in this
 
 | Secret Name | Consumer(s) | Target Env Var |
 |-------------|------------|----------------|
-| `postgres_password` | PostgreSQL, LiteLLM | `POSTGRES_PASSWORD` |
+| `postgres_password` | PostgreSQL, LiteLLM, Knowledge Index | `POSTGRES_PASSWORD` |
 | `litellm_master_key` | LiteLLM | `LITELLM_MASTER_KEY` |
-| `qdrant_api_key` | Qdrant | `QDRANT__SERVICE__API_KEY` |
+| `qdrant_api_key` | Qdrant, Knowledge Index | `QDRANT__SERVICE__API_KEY` (Qdrant); `QDRANT_API_KEY` (Knowledge Index) |
 | `openwebui_api_key` | OpenWebUI | `OPENAI_API_KEY` |
 | `flowise_password` | Flowise | `FLOWISE_PASSWORD` |
 
@@ -244,9 +265,9 @@ Secret names and the services that consume them. Values are never stored in this
 | Private key path | `$AI_STACK_DIR/configs/tls/key.pem` |
 | CA bundle path | `$AI_STACK_DIR/configs/tls/ca.pem` (if self-signed) |
 | Mode | Self-signed CA for internal traffic; trusted CA for external access |
-| Exposed TLS port | 9443 (see §4) |
+| Exposed TLS port | 443 (see §4) |
 
-TLS termination occurs at the reverse proxy. Internal service-to-service traffic uses plain HTTP over the isolated `ai-stack-net` network.
+TLS termination occurs at Traefik. Internal service-to-service traffic uses plain HTTP over the isolated `ai-stack-net` network.
 
 ---
 
@@ -261,5 +282,7 @@ TLS termination occurs at the reverse proxy. Internal service-to-service traffic
 | OpenWebUI | `curl -sf http://localhost:8080/health` | 30s | 3 | 5s |
 | Grafana | `curl -sf http://localhost:3000/api/health` | 30s | 3 | 5s |
 | Loki | `curl -sf http://localhost:3100/ready` | 30s | 3 | 5s |
+| Traefik | `wget -qO- http://localhost:8080/ping \|\| exit 1` | 30s | 3 | 5s |
+| Knowledge Index | `curl -sf http://localhost:8900/v1/health` | 30s | 3 | 5s |
 
 Applied in quadlet files using `HealthCmd`, `HealthInterval`, `HealthRetries`, and `HealthTimeout` directives. See [implementation §2](ai_stack_implementation.md#2-quadlet-unit-files).

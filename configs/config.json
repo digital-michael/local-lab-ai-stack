@@ -7,6 +7,35 @@
     "internal": false
   },
   "services": {
+    "traefik": {
+      "image": "docker.io/library/traefik",
+      "tag": "TBD",
+      "container_name": "traefik",
+      "dns_alias": "traefik.ai-stack",
+      "depends_on": [],
+      "ports": [
+        { "host": 80, "container": 80 },
+        { "host": 443, "container": 443 }
+      ],
+      "volumes": [
+        { "host": "$AI_STACK_DIR/configs/traefik/traefik.yaml", "container": "/etc/traefik/traefik.yaml", "mode": "ro" },
+        { "host": "$AI_STACK_DIR/configs/traefik/dynamic", "container": "/etc/traefik/dynamic", "mode": "ro" },
+        { "host": "$AI_STACK_DIR/configs/tls", "container": "/etc/traefik/tls", "mode": "ro" }
+      ],
+      "environment": {},
+      "secrets": [],
+      "health_check": {
+        "command": "wget -qO- http://localhost:8080/ping || exit 1",
+        "interval": "30s",
+        "retries": 3,
+        "timeout": "5s"
+      },
+      "resources": {
+        "cpus": 0.5,
+        "memory": "256m",
+        "gpu": null
+      }
+    },
     "postgres": {
       "image": "docker.io/library/postgres",
       "tag": "TBD",
@@ -64,6 +93,39 @@
       "resources": {
         "cpus": 2,
         "memory": "8g",
+        "gpu": null
+      }
+    },
+    "knowledge-index": {
+      "image": "localhost/knowledge-index",
+      "tag": "TBD",
+      "container_name": "knowledge-index",
+      "dns_alias": "knowledge-index.ai-stack",
+      "depends_on": ["postgres", "qdrant"],
+      "ports": [],
+      "volumes": [
+        { "host": "$AI_STACK_DIR/libraries", "container": "/libraries", "mode": "ro" }
+      ],
+      "environment": {
+        "DATABASE_URL": "postgresql://aistack:@postgres.ai-stack:5432/aistack",
+        "QDRANT_HOST": "qdrant.ai-stack",
+        "QDRANT_PORT": "6333",
+        "ROUTE_CACHE_TTL": "60",
+        "LISTEN_PORT": "8900"
+      },
+      "secrets": [
+        { "name": "postgres_password", "target": "POSTGRES_PASSWORD" },
+        { "name": "qdrant_api_key", "target": "QDRANT_API_KEY" }
+      ],
+      "health_check": {
+        "command": "curl -sf http://localhost:8900/v1/health",
+        "interval": "30s",
+        "retries": 3,
+        "timeout": "5s"
+      },
+      "resources": {
+        "cpus": 1,
+        "memory": "512m",
         "gpu": null
       }
     },
