@@ -347,7 +347,7 @@ These are bootstrap scripts. Full deployment procedures and quadlet definitions 
 
 # 14 Implementation Tracking
 
-Items tracked for the implementation phase. See [ai_stack_implementation.md](ai_stack_implementation.md) and [ai_stack_configuration.md](ai_stack_configuration.md) for details.
+Items tracked for the implementation phase. See [ai_stack_checklist.md](ai_stack_checklist.md) for the master task list. Configuration values are in [ai_stack_configuration.md](ai_stack_configuration.md). Procedures are in [ai_stack_implementation.md](ai_stack_implementation.md).
 
 **Blockers** (required before first deployment):
 
