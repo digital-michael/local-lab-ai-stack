@@ -243,6 +243,11 @@ EOF
             [[ -n "$podman_args" ]] && echo "PodmanArgs=${podman_args% }"
             [[ -n "$gpu" ]] && echo "AddDevice=$gpu"
 
+            # Container command override (overrides image CMD)
+            local cmd_override
+            cmd_override=$(jq -r --arg s "$svc" '.services[$s].command // empty' "$CONFIG_FILE")
+            [[ -n "$cmd_override" ]] && echo "Exec=$cmd_override"
+
             echo ""
             echo "[Service]"
             echo "Restart=always"

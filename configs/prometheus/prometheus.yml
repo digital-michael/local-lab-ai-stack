@@ -1,0 +1,31 @@
+# Prometheus scrape configuration
+# Place at: $AI_STACK_DIR/configs/prometheus/prometheus.yml
+# Mounted read-only at /etc/prometheus inside the prometheus container.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    stack: ai-stack
+
+scrape_configs:
+  # Prometheus self-scrape
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Traefik — metrics on internal entrypoint :8080
+  - job_name: 'traefik'
+    static_configs:
+      - targets: ['traefik.ai-stack:8080']
+
+  # LiteLLM — Prometheus metrics at /metrics
+  - job_name: 'litellm'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['litellm.ai-stack:4000']
+
+  # Loki — Prometheus metrics at /metrics
+  - job_name: 'loki'
+    static_configs:
+      - targets: ['loki.ai-stack:3100']

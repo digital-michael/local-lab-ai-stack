@@ -1,0 +1,20 @@
+# Promtail configuration
+# Place at: $AI_STACK_DIR/configs/promtail/config.yml
+# Mounted read-only at /etc/promtail inside the promtail container.
+# Promtail default CMD: /usr/bin/promtail -config.file=/etc/promtail/config.yml
+#
+# NOTE: To scrape Podman container logs, mount the Podman log directory
+# into the container and add a scrape job pointing to the log path.
+# Current config is minimal — validates Promtail start and Loki connectivity.
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki.ai-stack:3100/loki/api/v1/push
+
+scrape_configs: []

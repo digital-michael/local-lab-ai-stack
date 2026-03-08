@@ -19,8 +19,9 @@ entryPoints:
     address: ":443"
     http:
       tls: {}
-  # Internal dashboard and metrics entrypoint — not exposed to host
-  internal:
+  # Internal entrypoint named "traefik" — used by api.insecure, ping, and metrics.
+  # NOT published to host (no PublishPort in traefik container config).
+  traefik:
     address: ":8080"
 
 # Dynamic configuration provider
@@ -29,7 +30,8 @@ providers:
     directory: /etc/traefik/dynamic
     watch: true
 
-# TLS
+# TLS options (static config — cipher suites and minimum version only)
+# Default certificate store is configured in dynamic/tls.yaml
 tls:
   options:
     default:
@@ -42,28 +44,20 @@ tls:
         - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
         - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
 
-# TLS certificate stores
-certificate:
-  stores:
-    default:
-      defaultCertificate:
-        certFile: /etc/traefik/tls/cert.pem
-        keyFile: /etc/traefik/tls/key.pem
-
-# Ping endpoint for health checks (served on :8080 internal)
+# Ping endpoint for health checks (served on :8080 traefik entrypoint)
 ping:
-  entryPoint: internal
+  entryPoint: traefik
 
-# Prometheus metrics (served on :8080 internal)
+# Prometheus metrics (served on :8080 traefik entrypoint)
 metrics:
   prometheus:
-    entryPoint: internal
+    entryPoint: traefik
 
 # Access logs
 accessLog:
   format: json
 
-# Traefik API and dashboard (internal only)
+# Traefik API and dashboard (uses "traefik" entrypoint by default with api.insecure)
 api:
   dashboard: true
-  insecure: true    # safe because internal entrypoint is not host-published
+  insecure: true    # safe because traefik entrypoint is not host-published

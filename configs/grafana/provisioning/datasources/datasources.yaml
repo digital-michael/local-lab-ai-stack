@@ -1,0 +1,19 @@
+# Grafana datasource provisioning
+# Automatically creates Prometheus and Loki datasources on first start.
+# Place at: $AI_STACK_DIR/configs/grafana/provisioning/datasources/datasources.yaml
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    url: http://prometheus.ai-stack:9090
+    access: proxy
+    isDefault: true
+    jsonData:
+      timeInterval: "15s"
+
+  - name: Loki
+    type: loki
+    url: http://loki.ai-stack:3100
+    access: proxy
