@@ -4,7 +4,7 @@
 
 ## Purpose (LLM-Agent Focused)
 This document defines the high-level architecture, component relationships, and design decisions for a distributed, production-grade AI platform using Podman (v5.7+).
-An LLM agent can read this document to understand the system design. Concrete implementation details, configurations, and deployment artifacts are in [ai_stack_implementation.md](ai_stack_implementation.md).
+An LLM agent can read this document to understand the system design. Concrete implementation details and deployment artifacts are in [ai_stack_implementation.md](ai_stack_implementation.md). All tunable configuration values are in [ai_stack_configuration.md](ai_stack_configuration.md).
 
 Key capabilities:
 
@@ -193,7 +193,7 @@ Model management:
 - Model files are cached locally; no re-download on container restart
 - LiteLLM routes requests to the appropriate model/backend
 
-Embeddings stored in Qdrant. Image and version details are in [ai_stack_implementation.md](ai_stack_implementation.md).
+Embeddings stored in Qdrant. Image versions and model parameters are in [ai_stack_configuration.md](ai_stack_configuration.md).
 
 ---
 
@@ -244,7 +244,7 @@ Base path: `/opt/ai-stack/` (or `$HOME/ai-stack` for rootless deployments)
 └── backups/      # Scheduled backup artifacts
 ```
 
-Volume mount mappings per container are defined in [ai_stack_implementation.md](ai_stack_implementation.md).
+Volume mount mappings per container are defined in [ai_stack_configuration.md](ai_stack_configuration.md).
 
 ---
 
@@ -297,7 +297,7 @@ Metrics collected:
 
 Log collection:
 
-Promtail collects container logs via Podman's journald or file-based log driver and ships them to Loki. Alerting rules and dashboard definitions are in [ai_stack_implementation.md](ai_stack_implementation.md).
+Promtail collects container logs via Podman's journald or file-based log driver and ships them to Loki. Alerting rules are in [ai_stack_implementation.md](ai_stack_implementation.md). Dashboard and health check configuration is in [ai_stack_configuration.md](ai_stack_configuration.md).
 
 ---
 
@@ -314,7 +314,7 @@ Security architecture:
 - **Container isolation:** Rootless Podman provides user-namespace isolation; no containers run as host root
 - **Image integrity:** Container images are pulled from pinned digests or signed tags
 
-Concrete OIDC configuration, secret definitions, and TLS setup are in [ai_stack_implementation.md](ai_stack_implementation.md).
+Concrete OIDC configuration and TLS setup are in [ai_stack_implementation.md](ai_stack_implementation.md). Secret definitions and network isolation details are in [ai_stack_configuration.md](ai_stack_configuration.md).
 
 ---
 
@@ -341,37 +341,37 @@ Scripts included:
 | `scripts/validate-system.sh` | Validate prerequisites (Podman, GPU, storage) |
 | `scripts/deploy-stack.sh` | Create network and deploy containers via quadlets |
 
-These are bootstrap scripts. Full deployment procedures and quadlet definitions are in [ai_stack_implementation.md](ai_stack_implementation.md).
+These are bootstrap scripts. Full deployment procedures and quadlet definitions are in [ai_stack_implementation.md](ai_stack_implementation.md). Service configuration values are in [ai_stack_configuration.md](ai_stack_configuration.md).
 
 ---
 
 # 14 Implementation Tracking
 
-Items tracked for the implementation phase. See [ai_stack_implementation.md](ai_stack_implementation.md) for details.
+Items tracked for the implementation phase. See [ai_stack_implementation.md](ai_stack_implementation.md) and [ai_stack_configuration.md](ai_stack_configuration.md) for details.
 
 **Blockers** (required before first deployment):
 
 | Item | Status | Reference |
 |------|--------|----------|
-| Container image references and version pins | Not started | Implementation §1 |
-| Environment variables per service | Not started | Implementation §2 |
-| Volume mount specifications | Not started | Implementation §3 |
-| Secrets management (Podman secrets) | Not started | Implementation §4 |
-| Quadlet unit files | Not started | Implementation §5 |
-| Service dependency and startup order | Not started | Implementation §6 |
+| Container image references and version pins | Not started | Configuration §1 |
+| Environment variables per service | Not started | Configuration §2 |
+| Volume mount specifications | Not started | Configuration §6 |
+| Secrets management (Podman secrets) | Not started | Implementation §1 |
+| Quadlet unit files | Not started | Implementation §2 |
+| Service dependency and startup order | Not started | Implementation §3 |
 
 **Deferrable** (address incrementally post-deployment):
 
 | Item | Status | Reference |
 |------|--------|----------|
-| Resource limits (CPU/memory/GPU) | Not started | Implementation §7 |
-| Health checks and readiness probes | Not started | Implementation §8 |
-| GPU passthrough (CDI) configuration | Not started | Implementation §9 |
-| Authentik OIDC integration details | Not started | Implementation §10 |
-| Library manifest YAML schema | Not started | Implementation §11 |
-| Alerting rules (Prometheus) | Not started | Implementation §12 |
-| Backup and restore procedures | Not started | Implementation §13 |
-| Troubleshooting guide | Not started | Implementation §14 |
+| Resource limits (CPU/memory/GPU) | Not started | Configuration §3 |
+| Health checks and readiness probes | Not started | Configuration §10 |
+| GPU passthrough (CDI) configuration | Not started | Implementation §4 |
+| Authentik OIDC integration details | Not started | Implementation §5 |
+| Library manifest YAML schema | Not started | Implementation §6 |
+| Alerting rules (Prometheus) | Not started | Implementation §7 |
+| Backup and restore procedures | Not started | Implementation §8 |
+| Troubleshooting guide | Not started | Implementation §9 |
 
 ---
 
