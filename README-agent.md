@@ -21,7 +21,9 @@ Every fact has exactly one canonical location. Do not duplicate information acro
 | Machine-readable service definitions | [configs/config.json](configs/config.json) |
 | Task status: blockers, deferrables, future work | [docs/ai_stack_blueprint/ai_stack_checklist.md](docs/ai_stack_blueprint/ai_stack_checklist.md) |
 | Per-component practices, security, and project guidance | [docs/library/framework_components/](docs/library/framework_components/) |
-| Collaboration process, decision record, lateral thinking | [docs/meta.md](docs/meta.md) |
+| Collaboration directives, interaction levels, workflow | [docs/meta.md](docs/meta.md) |
+| Decision record framework and log | [docs/meta_decisions.md](docs/meta_decisions.md) |
+| Collaboration dynamics, lateral thinking | [docs/meta_dynamics.md](docs/meta_dynamics.md) |
 | Reinforcement workflow metrics and review log | [docs/meta_metrics.md](docs/meta_metrics.md) |
 
 When adding or changing a value, put it in the canonical source and reference it from elsewhere. Never introduce a second copy.
