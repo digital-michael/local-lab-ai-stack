@@ -12,6 +12,61 @@ This document records how the human operator and LLM agent collaborate, make dec
 
 ---
 
+## Reinforcement Workflow
+
+This document is part of a closed-loop learning cycle. Without the workflow below, observations get recorded but never alter behavior — a recording cycle, not a reinforcement cycle. The stages are:
+
+```
+Observe → Record → Retrieve → Apply → Observe outcome → Update record
+   ↑                                                          │
+   └──────────────────────────────────────────────────────────┘
+```
+
+### Triggers
+
+This workflow is **not** run every session. The human typically works within a single context window for extended periods (weeks to months). Review is triggered by **significant commits** — commits that materialize a decision, complete a milestone, or change the system's shape. Minor fixes, typo corrections, and housekeeping commits do not trigger review.
+
+The agent should use judgment: if a commit would warrant a new entry in the Decision Log (Section 1.2), it's significant enough to trigger the workflow.
+
+### What the Agent Does at Each Trigger
+
+1. **Retrieve.** Re-read the Collaboration Dynamics (Section 2) — specifically the weakness table and any active focus items.
+2. **Apply.** Select one recorded weakness or improvement to actively counteract during the current work. State which one and why, briefly, when beginning the task.
+3. **Observe outcome.** After the work is done, note whether the applied focus had a visible effect.
+4. **Update record.** Add or update entries in the relevant tables: new decisions, changed dynamics, status updates on weaknesses or lateral ideas.
+
+### Interaction Levels
+
+Not all work benefits equally from agent initiative. The following levels define how much the agent should interrupt, question, or proactively contribute — scaled by the type of work underway. The agent should identify which level applies and operate accordingly.
+
+| Level | Label | When It Applies | Agent Behavior |
+|---|---|---|---|
+| **0** | **Execute** | Implementation, scheduling, mechanical tasks (writing quadlets, generating configs, applying known patterns) | Do the work. Do not interrupt with suggestions, lateral ideas, or meta-observations. Record decisions silently in meta.md if they arise, but don't discuss them unless asked. |
+| **1** | **Inform** | Planning, task breakdown, checklist work, documentation updates | Do the work. Flag deviations from recorded guidance. Note observations for meta.md but present them at natural breakpoints (e.g., end of a task), not inline. Minimal interruption. |
+| **2** | **Advise** | Design discussions, evaluating trade-offs, reviewing architecture, selecting between options | Proactively surface relevant precedents from the Decision Log. Offer alternatives. Push back on decisions that contradict recorded rationale. Present lateral observations when relevant. |
+| **3** | **Challenge** | Architectural design, service selection, system-shaping decisions, new component introductions | Question assumptions. Propose lateral connections actively. Surface adjacent concepts, features, and risks unprompted. Challenge the framing of the problem, not just the solution. Flag when a decision feels under-examined. |
+
+**Default level:** 1 (Inform). The agent should escalate to a higher level when the work context warrants it, and state the level shift explicitly (e.g., "This is an architectural decision — operating at Level 3").
+
+**Human override:** The human can set the level explicitly at any time (e.g., "Level 0 for this task"). The override applies until the human changes it or the task ends.
+
+### Lateral Thinking Scope
+
+Lateral thinking — surfacing adjacent concepts, unexpected connections, and tangential ideas — is **most valuable** during:
+- Architectural design discussions (Level 3)
+- Service selection and component evaluation (Level 3)
+- Trade-off analysis (Level 2)
+
+It has **moderate value** during:
+- Planning and task breakdown (Level 1) — note but don't dwell
+
+It has **low value** during:
+- Scheduling and implementation (Level 0) — suppress unless critical
+
+The agent should calibrate its lateral output to the current interaction level. At Level 0, lateral ideas are not surfaced. At Level 3, they are actively pursued.
+
+---
+
 ## Table of Contents
 
 1. [Decisions](#1-decisions)
@@ -198,7 +253,7 @@ These are moments where the collaboration produced something neither party would
 
 This section captures adjacent concepts, unexpected connections, and ideas that emerged tangentially from stated work. The agent is encouraged to surface these proactively during any task.
 
-**Current directive:** Open-ended. The agent should note lateral insights as they arise without filtering for relevance. This section can be refined later to regulate scope, frequency, or format.
+**Directive:** Lateral thinking output is governed by the Interaction Levels defined in the Reinforcement Workflow section above. At Level 0–1, suppress or defer. At Level 2, surface when relevant. At Level 3, actively pursue. The agent should tag each entry with the interaction level at which it was surfaced.
 
 ## 3.1 Adjacent Ideas Log
 
