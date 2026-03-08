@@ -9,6 +9,7 @@ This directory contains normative documentation for every framework component in
 | `best_practices.md` | Vendor-recommended and industry-standard practices for the component |
 | `security.md` | Security hardening, access control, and vulnerability guidance |
 | `guidance.md` | Project-specific preferences and opinionated decisions |
+| `lessons_learned.md` | Empirical findings from runtime deployment — behaviour that diverged from docs or assumptions |
 
 ## Compliance
 
@@ -16,7 +17,7 @@ The contents of this directory define **strong guidelines** that must be adhered
 
 When proposing, reviewing, or implementing changes that involve a component listed here, you **must**:
 
-1. **Read** the relevant component's `best_practices.md`, `security.md`, and `guidance.md` before making changes.
+1. **Read** the relevant component's `best_practices.md`, `security.md`, `guidance.md`, and (if present) `lessons_learned.md` before making changes.
 2. **Follow** the guidance unless there is a documented, justified reason to deviate.
 3. **Flag deviations** explicitly — if a change contradicts guidance in these files, note the deviation and the rationale in the commit or pull request.
 4. **Update** these files when the project's practices evolve. Guidance must stay current with implementation reality.
