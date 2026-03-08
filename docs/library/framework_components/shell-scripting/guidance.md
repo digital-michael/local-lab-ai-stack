@@ -23,6 +23,7 @@ Project-specific conventions and patterns for bash scripts in this AI stack.
 - Scripts reference `$AI_STACK_DIR` (default: `$HOME/ai-stack`) as the deployment root
 - Config file: `./configs/config.json` — the single source of truth for service definitions
 - Generated artifacts (quadlets, secrets) are written to `$AI_STACK_DIR/`
+- **Every script must support `--help` and `-h` flags.** When invoked with either flag, the script must print its purpose, available options/subcommands, and usage examples, then exit 0. This is a hard requirement — scripts without help output are incomplete.
 
 # 2 Script Patterns
 
@@ -40,7 +41,25 @@ set -euo pipefail
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [options]
+
+Purpose:
+  Brief description of what this script does.
+
+Options:
+  -h, --help    Show this help message and exit
+
+Examples:
+  $(basename "$0")
+EOF
+}
+
 main() {
+    case "${1:-}" in
+        -h|--help) usage; exit 0 ;;
+    esac
     # script logic here
     :
 }
