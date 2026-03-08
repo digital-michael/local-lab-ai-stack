@@ -33,7 +33,7 @@ The agent should use judgment: if a commit would warrant a new entry in the Deci
 1. **Retrieve.** Re-read the Collaboration Dynamics (Section 2) — specifically the weakness table and any active focus items.
 2. **Apply.** Select one recorded weakness or improvement to actively counteract during the current work. State which one and why, briefly, when beginning the task.
 3. **Observe outcome.** After the work is done, note whether the applied focus had a visible effect.
-4. **Update record.** Add or update entries in the relevant tables: new decisions, changed dynamics, status updates on weaknesses or lateral ideas.
+4. **Update record.** Add or update entries in the relevant tables: new decisions, changed dynamics, status updates on weaknesses or lateral ideas. Then append a row to the Review Log in [meta_metrics.md](meta_metrics.md).
 
 ### Interaction Levels
 
