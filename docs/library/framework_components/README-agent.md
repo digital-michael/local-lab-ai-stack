@@ -28,6 +28,7 @@ When proposing, reviewing, or implementing changes that involve a component list
 | `authentik/` | Identity provider and SSO gateway |
 | `flowise/` | Low-code AI workflow builder |
 | `grafana/` | Visualization and dashboarding |
+| `knowledge-index/` | Query-to-library routing microservice (FastAPI) |
 | `litellm/` | LLM API gateway and proxy |
 | `llamacpp/` | CPU-based GGUF model inference |
 | `loki/` | Log aggregation backend |
@@ -38,6 +39,7 @@ When proposing, reviewing, or implementing changes that involve a component list
 | `promtail/` | Log shipping agent |
 | `qdrant/` | Vector database for RAG embeddings |
 | `shell-scripting/` | Bash conventions for project scripts |
+| `traefik/` | Reverse proxy and TLS termination |
 | `vllm/` | GPU-accelerated model inference |
 
 ## Naming Convention
