@@ -2,6 +2,30 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [options]
+
+Purpose:
+  Validate that the host environment meets the prerequisites for the AI stack:
+  Podman installation, optional GPU availability, and storage directory existence.
+
+Options:
+  -h, --help    Show this help message and exit
+
+Environment:
+  AI_STACK_DIR  Base directory for the stack (default: \$HOME/ai-stack)
+
+Examples:
+  $(basename "$0")
+  AI_STACK_DIR=/opt/ai-stack $(basename "$0")
+EOF
+}
+
+case "${1:-}" in
+    -h|--help) usage; exit 0 ;;
+esac
+
 ERRORS=0
 
 echo "Validating environment..."

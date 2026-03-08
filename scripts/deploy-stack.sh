@@ -4,6 +4,28 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [options]
+
+Purpose:
+  Deploy the AI stack by validating configuration, generating systemd quadlet
+  files, and creating the Podman network. After running, reload systemd and
+  start services manually.
+
+Options:
+  -h, --help    Show this help message and exit
+
+Examples:
+  $(basename "$0")
+  $(basename "$0") --help
+EOF
+}
+
+case "${1:-}" in
+    -h|--help) usage; exit 0 ;;
+esac
+
 echo "Deploying AI stack..."
 
 # Validate configuration
