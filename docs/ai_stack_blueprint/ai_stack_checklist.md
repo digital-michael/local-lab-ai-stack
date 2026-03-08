@@ -26,16 +26,16 @@ The `configure.sh` script and its JSON config file are the primary mechanism for
 
 - [ ] **Design JSON config schema** — define structure for services, images, env vars, ports, volumes, secrets, dependencies, resource limits, health checks
 - [ ] **Create `scripts/configure.sh`** — CRUD operations against the JSON config file
-  - [ ] `configure.sh init` — generate default config.json with all services
-  - [ ] `configure.sh set <path> <value>` — update a config value
-  - [ ] `configure.sh get <path>` — read a config value
-  - [ ] `configure.sh validate` — check config completeness (all TBDs resolved, required fields present)
-  - [ ] `configure.sh generate-quadlets` — produce systemd quadlet files from config
-  - [ ] `configure.sh generate-secrets` — prompt for and provision Podman secrets from config inventory
-- [ ] **Create default `configs/config.json`** — populated with current documented defaults
+  - [x] `configure.sh init` — generate default config.json with all services
+  - [x] `configure.sh set <path> <value>` — update a config value
+  - [x] `configure.sh get <path>` — read a config value
+  - [x] `configure.sh validate` — check config completeness (all TBDs resolved, required fields present)
+  - [x] `configure.sh generate-quadlets` — produce systemd quadlet files from config
+  - [x] `configure.sh generate-secrets` — prompt for and provision Podman secrets from config inventory
+- [x] **Create default `configs/config.json`** — populated with current documented defaults
 - [ ] **Support multi-environment configs** — `configs/dev.json`, `configs/prod.json`
 - [ ] **Update `deploy-stack.sh`** — call `configure.sh validate` and `configure.sh generate-quadlets` before deployment
-- [ ] **Update `ai_stack_configuration.md`** — reframe as schema documentation; values live in JSON
+- [ ] **Update `ai_stack_configuration.md`** — reframe as schema documentation; values live in config.json
 
 ---
 

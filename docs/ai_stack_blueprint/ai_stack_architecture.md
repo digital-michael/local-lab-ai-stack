@@ -333,15 +333,16 @@ Deployment steps:
 
 # 13 Automation Scripts
 
-Scripts included:
+Scripts are in the project root `scripts/` directory. Configuration is in `configs/config.json`.
 
 | Script | Purpose |
 |--------|--------|
 | `scripts/install.sh` | Install dependencies and create storage layout |
 | `scripts/validate-system.sh` | Validate prerequisites (Podman, GPU, storage) |
-| `scripts/deploy-stack.sh` | Create network and deploy containers via quadlets |
+| `scripts/configure.sh` | CRUD operations on config.json; generates quadlets and secrets |
+| `scripts/deploy-stack.sh` | Validate config, generate quadlets, create network |
 
-These are bootstrap scripts. Full deployment procedures and quadlet definitions are in [ai_stack_implementation.md](ai_stack_implementation.md). Service configuration values are in [ai_stack_configuration.md](ai_stack_configuration.md).
+These are bootstrap and configuration scripts. Full deployment procedures are in [ai_stack_implementation.md](ai_stack_implementation.md). Tunable values live in `configs/config.json` and are documented in [ai_stack_configuration.md](ai_stack_configuration.md).
 
 ---
 

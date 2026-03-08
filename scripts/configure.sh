@@ -1,0 +1,306 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# configure.sh — CRUD operations on AI Stack config.json
+# Generates quadlet files and Podman secrets from configuration.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CONFIG_FILE="${CONFIG_FILE:-$PROJECT_ROOT/configs/config.json}"
+QUADLET_DIR="${QUADLET_DIR:-$HOME/.config/containers/systemd}"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+usage() {
+    cat <<'EOF'
+Usage: configure.sh <command> [args]
+
+Commands:
+  init                      Generate default config.json (if missing)
+  get <json-path>           Read a value  (e.g. .services.postgres.tag)
+  set <json-path> <value>   Update a value
+  list-services             List all service names
+  validate                  Check config completeness
+  generate-quadlets         Produce systemd quadlet files from config
+  generate-secrets          Prompt for and create Podman secrets
+  help                      Show this message
+
+Environment:
+  CONFIG_FILE   Path to config.json  (default: ./configs/config.json)
+  QUADLET_DIR   Output dir for quadlets (default: ~/.config/containers/systemd)
+EOF
+}
+
+require_jq() {
+    if ! command -v jq &>/dev/null; then
+        echo "ERROR: jq is required. Install with: sudo dnf install -y jq" >&2
+        exit 1
+    fi
+}
+
+require_config() {
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        echo "ERROR: Config file not found at $CONFIG_FILE" >&2
+        echo "Run: configure.sh init" >&2
+        exit 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+cmd_init() {
+    if [[ -f "$CONFIG_FILE" ]]; then
+        echo "Config already exists at $CONFIG_FILE"
+        echo "To reset, remove it first."
+        return 0
+    fi
+    mkdir -p "$(dirname "$CONFIG_FILE")"
+    cp "$PROJECT_ROOT/configs/config.json" "$CONFIG_FILE" 2>/dev/null || {
+        echo "ERROR: Default config template not found at $PROJECT_ROOT/configs/config.json" >&2
+        exit 1
+    }
+    echo "Config initialized at $CONFIG_FILE"
+}
+
+cmd_get() {
+    local path="${1:?Usage: configure.sh get <json-path>}"
+    require_config
+    jq -r "$path" "$CONFIG_FILE"
+}
+
+cmd_set() {
+    local path="${1:?Usage: configure.sh set <json-path> <value>}"
+    local value="${2:?Usage: configure.sh set <json-path> <value>}"
+    require_config
+
+    # Determine if value is a number, boolean, null, or string
+    local jq_expr
+    if [[ "$value" =~ ^(true|false|null)$ ]] || [[ "$value" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
+        jq_expr="$path = $value"
+    else
+        jq_expr="$path = \"$value\""
+    fi
+
+    local tmp
+    tmp=$(mktemp)
+    jq "$jq_expr" "$CONFIG_FILE" > "$tmp" && mv "$tmp" "$CONFIG_FILE"
+    echo "Updated $path"
+}
+
+cmd_list_services() {
+    require_config
+    jq -r '.services | keys[]' "$CONFIG_FILE"
+}
+
+cmd_validate() {
+    require_config
+    local errors=0
+
+    echo "Validating $CONFIG_FILE ..."
+
+    # Check for TBD image tags
+    local tbd_services
+    tbd_services=$(jq -r '.services | to_entries[] | select(.value.tag == "TBD") | .key' "$CONFIG_FILE")
+    if [[ -n "$tbd_services" ]]; then
+        echo "ERROR: Image tag is TBD for:"
+        echo "$tbd_services" | sed 's/^/  - /'
+        errors=$((errors + $(echo "$tbd_services" | wc -l)))
+    fi
+
+    # Check for required secret names that don't exist yet
+    local required_secrets
+    required_secrets=$(jq -r '[.services[].secrets[]?.name] | unique[]' "$CONFIG_FILE")
+    for secret in $required_secrets; do
+        if ! podman secret inspect "$secret" &>/dev/null; then
+            echo "WARN: Podman secret '$secret' does not exist (run: configure.sh generate-secrets)"
+        fi
+    done
+
+    # Check network
+    local net_name
+    net_name=$(jq -r '.network.name' "$CONFIG_FILE")
+    if ! podman network exists "$net_name" 2>/dev/null; then
+        echo "WARN: Network '$net_name' does not exist (deploy-stack.sh will create it)"
+    fi
+
+    # Check AI_STACK_DIR
+    local ai_stack_dir
+    ai_stack_dir=$(jq -r '.ai_stack_dir' "$CONFIG_FILE")
+    ai_stack_dir="${ai_stack_dir//\$HOME/$HOME}"
+    if [[ ! -d "$ai_stack_dir" ]]; then
+        echo "WARN: AI_STACK_DIR=$ai_stack_dir does not exist (run: install.sh)"
+    fi
+
+    if [[ $errors -gt 0 ]]; then
+        echo "Validation FAILED with $errors error(s)."
+        exit 1
+    fi
+
+    echo "Validation passed."
+}
+
+cmd_generate_quadlets() {
+    require_config
+    mkdir -p "$QUADLET_DIR"
+
+    local net_name net_driver net_internal
+    net_name=$(jq -r '.network.name' "$CONFIG_FILE")
+    net_driver=$(jq -r '.network.driver' "$CONFIG_FILE")
+    net_internal=$(jq -r '.network.internal' "$CONFIG_FILE")
+
+    # Network quadlet
+    local net_file="$QUADLET_DIR/ai-stack.network"
+    cat > "$net_file" <<EOF
+# Generated by configure.sh — do not edit manually
+[Network]
+NetworkName=$net_name
+Driver=$net_driver
+Internal=$net_internal
+EOF
+    echo "Generated $net_file"
+
+    # Service quadlets
+    local services
+    services=$(jq -r '.services | keys[]' "$CONFIG_FILE")
+
+    local ai_stack_dir
+    ai_stack_dir=$(jq -r '.ai_stack_dir' "$CONFIG_FILE")
+
+    for svc in $services; do
+        local file="$QUADLET_DIR/${svc}.container"
+        local image tag container_name
+        image=$(jq -r ".services.${svc}.image" "$CONFIG_FILE")
+        tag=$(jq -r ".services.${svc}.tag" "$CONFIG_FILE")
+        container_name=$(jq -r ".services.${svc}.container_name" "$CONFIG_FILE")
+
+        # Start building quadlet
+        {
+            echo "# Generated by configure.sh — do not edit manually"
+            echo "[Unit]"
+            echo "Description=AI Stack $container_name"
+
+            # Dependencies
+            local deps
+            deps=$(jq -r ".services.${svc}.depends_on[]?" "$CONFIG_FILE")
+            echo "After=ai-stack-network.service"
+            for dep in $deps; do
+                echo "After=${dep}.service"
+                echo "Requires=${dep}.service"
+            done
+
+            echo ""
+            echo "[Container]"
+            echo "Image=${image}:${tag}"
+            echo "ContainerName=${container_name}"
+            echo "Network=${net_name}"
+
+            # Volumes
+            jq -r ".services.${svc}.volumes[]? | \"Volume=${ai_stack_dir}/\" + (.host | sub(\"\\$AI_STACK_DIR/\"; \"\")) + \":\" + .container + \":\" + .mode + \"\"" "$CONFIG_FILE" 2>/dev/null | while read -r line; do
+                # Expand $HOME in the ai_stack_dir
+                echo "${line//\$HOME/%h}"
+            done
+
+            # Secrets
+            jq -r ".services.${svc}.secrets[]? | \"Secret=\" + .name + \",type=env,target=\" + .target" "$CONFIG_FILE"
+
+            # Environment
+            jq -r ".services.${svc}.environment // {} | to_entries[] | \"Environment=\" + .key + \"=\" + .value" "$CONFIG_FILE"
+
+            # Ports
+            jq -r ".services.${svc}.ports[]? | \"PublishPort=\" + (.host|tostring) + \":\" + (.container|tostring)" "$CONFIG_FILE"
+
+            # Health check
+            local hc_cmd
+            hc_cmd=$(jq -r ".services.${svc}.health_check.command // empty" "$CONFIG_FILE")
+            if [[ -n "$hc_cmd" ]]; then
+                echo "HealthCmd=$hc_cmd"
+                echo "HealthInterval=$(jq -r ".services.${svc}.health_check.interval" "$CONFIG_FILE")"
+                echo "HealthRetries=$(jq -r ".services.${svc}.health_check.retries" "$CONFIG_FILE")"
+                echo "HealthTimeout=$(jq -r ".services.${svc}.health_check.timeout" "$CONFIG_FILE")"
+            fi
+
+            # Resource limits
+            local cpus mem gpu
+            cpus=$(jq -r ".services.${svc}.resources.cpus // empty" "$CONFIG_FILE")
+            mem=$(jq -r ".services.${svc}.resources.memory // empty" "$CONFIG_FILE")
+            gpu=$(jq -r ".services.${svc}.resources.gpu // empty" "$CONFIG_FILE")
+            local podman_args=""
+            [[ -n "$cpus" ]] && podman_args+="--cpus=$cpus "
+            [[ -n "$mem" ]] && podman_args+="--memory=$mem "
+            [[ -n "$podman_args" ]] && echo "PodmanArgs=${podman_args% }"
+            [[ -n "$gpu" ]] && echo "AddDevice=$gpu"
+
+            echo ""
+            echo "[Service]"
+            echo "Restart=always"
+            echo ""
+            echo "[Install]"
+            echo "WantedBy=default.target"
+        } > "$file"
+
+        echo "Generated $file"
+    done
+
+    echo ""
+    echo "Quadlets written to $QUADLET_DIR"
+    echo "Reload with: systemctl --user daemon-reload"
+}
+
+cmd_generate_secrets() {
+    require_config
+
+    local secrets
+    secrets=$(jq -r '[.services[].secrets[]?.name] | unique[]' "$CONFIG_FILE")
+
+    if [[ -z "$secrets" ]]; then
+        echo "No secrets defined in config."
+        return 0
+    fi
+
+    for secret in $secrets; do
+        if podman secret inspect "$secret" &>/dev/null; then
+            echo "Secret '$secret' already exists — skipping"
+            continue
+        fi
+
+        local value
+        read -rsp "Enter value for secret '$secret': " value
+        echo ""
+
+        if [[ -z "$value" ]]; then
+            echo "WARN: Empty value for '$secret' — skipping"
+            continue
+        fi
+
+        printf '%s' "$value" | podman secret create "$secret" -
+        echo "Created secret '$secret'"
+    done
+
+    echo "Done."
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+require_jq
+
+case "${1:-help}" in
+    init)             cmd_init ;;
+    get)              cmd_get "${2:-}" ;;
+    set)              cmd_set "${2:-}" "${3:-}" ;;
+    list-services)    cmd_list_services ;;
+    validate)         cmd_validate ;;
+    generate-quadlets) cmd_generate_quadlets ;;
+    generate-secrets) cmd_generate_secrets ;;
+    help|--help|-h)   usage ;;
+    *)
+        echo "Unknown command: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+esac

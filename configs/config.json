@@ -1,0 +1,316 @@
+{
+  "schema_version": "1.0",
+  "ai_stack_dir": "$HOME/ai-stack",
+  "network": {
+    "name": "ai-stack-net",
+    "driver": "bridge",
+    "internal": false
+  },
+  "services": {
+    "postgres": {
+      "image": "docker.io/library/postgres",
+      "tag": "TBD",
+      "container_name": "postgres",
+      "dns_alias": "postgres.ai-stack",
+      "depends_on": [],
+      "ports": [
+        { "host": 5432, "container": 5432 }
+      ],
+      "volumes": [
+        { "host": "$AI_STACK_DIR/postgres", "container": "/var/lib/postgresql/data", "mode": "rw" }
+      ],
+      "environment": {
+        "POSTGRES_USER": "aistack",
+        "POSTGRES_DB": "aistack"
+      },
+      "secrets": [
+        { "name": "postgres_password", "target": "POSTGRES_PASSWORD" }
+      ],
+      "health_check": {
+        "command": "pg_isready -U aistack",
+        "interval": "30s",
+        "retries": 3,
+        "timeout": "5s"
+      },
+      "resources": {
+        "cpus": 2,
+        "memory": "4g",
+        "gpu": null
+      }
+    },
+    "qdrant": {
+      "image": "docker.io/qdrant/qdrant",
+      "tag": "TBD",
+      "container_name": "qdrant",
+      "dns_alias": "qdrant.ai-stack",
+      "depends_on": [],
+      "ports": [
+        { "host": 6333, "container": 6333 },
+        { "host": 6334, "container": 6334 }
+      ],
+      "volumes": [
+        { "host": "$AI_STACK_DIR/qdrant", "container": "/qdrant/storage", "mode": "rw" }
+      ],
+      "environment": {},
+      "secrets": [
+        { "name": "qdrant_api_key", "target": "QDRANT__SERVICE__API_KEY" }
+      ],
+      "health_check": {
+        "command": "curl -sf http://localhost:6333/healthz",
+        "interval": "30s",
+        "retries": 3,
+        "timeout": "5s"
+      },
+      "resources": {
+        "cpus": 2,
+        "memory": "8g",
+        "gpu": null
+      }
+    },
+    "authentik": {
+      "image": "ghcr.io/goauthentik/server",
+      "tag": "TBD",
+      "container_name": "authentik",
+      "dns_alias": "authentik.ai-stack",
+      "depends_on": ["postgres"],
+      "ports": [],
+      "volumes": [],
+      "environment": {},
+      "secrets": [],
+      "health_check": null,
+      "resources": {
+        "cpus": 2,
+        "memory": "2g",
+        "gpu": null
+      }
+    },
+    "litellm": {
+      "image": "ghcr.io/berriai/litellm",
+      "tag": "TBD",
+      "container_name": "litellm",
+      "dns_alias": "litellm.ai-stack",
+      "depends_on": ["postgres"],
+      "ports": [
+        { "host": 9000, "container": 4000 }
+      ],
+      "volumes": [],
+      "environment": {
+        "DATABASE_URL": "postgresql://aistack:@postgres.ai-stack:5432/aistack"
+      },
+      "secrets": [
+        { "name": "litellm_master_key", "target": "LITELLM_MASTER_KEY" },
+        { "name": "postgres_password", "target": "POSTGRES_PASSWORD" }
+      ],
+      "health_check": {
+        "command": "curl -sf http://localhost:4000/health",
+        "interval": "30s",
+        "retries": 3,
+        "timeout": "5s"
+      },
+      "resources": {
+        "cpus": 2,
+        "memory": "2g",
+        "gpu": null
+      }
+    },
+    "vllm": {
+      "image": "vllm/vllm-openai",
+      "tag": "TBD",
+      "container_name": "vllm",
+      "dns_alias": "vllm.ai-stack",
+      "depends_on": ["litellm"],
+      "ports": [
+        { "host": 8000, "container": 8000 }
+      ],
+      "volumes": [
+        { "host": "$AI_STACK_DIR/models", "container": "/models", "mode": "ro" }
+      ],
+      "environment": {
+        "MODEL_NAME": "llama3.1-8b",
+        "TENSOR_PARALLEL_SIZE": "1",
+        "MAX_MODEL_LEN": "4096",
+        "GPU_MEMORY_UTILIZATION": "0.9"
+      },
+      "secrets": [],
+      "health_check": {
+        "command": "curl -sf http://localhost:8000/health",
+        "interval": "60s",
+        "retries": 3,
+        "timeout": "10s"
+      },
+      "resources": {
+        "cpus": 4,
+        "memory": "24g",
+        "gpu": "nvidia.com/gpu=all"
+      }
+    },
+    "llamacpp": {
+      "image": "ghcr.io/ggerganov/llama.cpp",
+      "tag": "TBD",
+      "container_name": "llamacpp",
+      "dns_alias": "llamacpp.ai-stack",
+      "depends_on": ["litellm"],
+      "ports": [],
+      "volumes": [
+        { "host": "$AI_STACK_DIR/models", "container": "/models", "mode": "ro" }
+      ],
+      "environment": {
+        "MODEL_PATH": "/models/llama3.1-8b.gguf",
+        "CONTEXT_SIZE": "4096",
+        "THREADS": "4",
+        "BATCH_SIZE": "512"
+      },
+      "secrets": [],
+      "health_check": null,
+      "resources": {
+        "cpus": 4,
+        "memory": "16g",
+        "gpu": null
+      }
+    },
+    "flowise": {
+      "image": "docker.io/flowiseai/flowise",
+      "tag": "TBD",
+      "container_name": "flowise",
+      "dns_alias": "flowise.ai-stack",
+      "depends_on": ["litellm", "qdrant"],
+      "ports": [
+        { "host": 3001, "container": 3000 }
+      ],
+      "volumes": [],
+      "environment": {
+        "FLOWISE_USERNAME": "admin",
+        "DATABASE_PATH": "/data/flowise"
+      },
+      "secrets": [
+        { "name": "flowise_password", "target": "FLOWISE_PASSWORD" }
+      ],
+      "health_check": null,
+      "resources": {
+        "cpus": 1,
+        "memory": "1g",
+        "gpu": null
+      }
+    },
+    "openwebui": {
+      "image": "ghcr.io/open-webui/open-webui",
+      "tag": "TBD",
+      "container_name": "openwebui",
+      "dns_alias": "webui.ai-stack",
+      "depends_on": ["litellm"],
+      "ports": [
+        { "host": 9090, "container": 8080 }
+      ],
+      "volumes": [],
+      "environment": {
+        "OPENAI_API_BASE": "http://litellm.ai-stack:4000"
+      },
+      "secrets": [
+        { "name": "openwebui_api_key", "target": "OPENAI_API_KEY" }
+      ],
+      "health_check": {
+        "command": "curl -sf http://localhost:8080/health",
+        "interval": "30s",
+        "retries": 3,
+        "timeout": "5s"
+      },
+      "resources": {
+        "cpus": 1,
+        "memory": "1g",
+        "gpu": null
+      }
+    },
+    "prometheus": {
+      "image": "docker.io/prom/prometheus",
+      "tag": "TBD",
+      "container_name": "prometheus",
+      "dns_alias": "prometheus.ai-stack",
+      "depends_on": [],
+      "ports": [
+        { "host": 9091, "container": 9090 }
+      ],
+      "volumes": [
+        { "host": "$AI_STACK_DIR/configs/prometheus", "container": "/etc/prometheus", "mode": "ro" }
+      ],
+      "environment": {},
+      "secrets": [],
+      "health_check": null,
+      "resources": {
+        "cpus": 1,
+        "memory": "2g",
+        "gpu": null
+      }
+    },
+    "grafana": {
+      "image": "docker.io/grafana/grafana",
+      "tag": "TBD",
+      "container_name": "grafana",
+      "dns_alias": "grafana.ai-stack",
+      "depends_on": ["prometheus"],
+      "ports": [
+        { "host": 3000, "container": 3000 }
+      ],
+      "volumes": [
+        { "host": "$AI_STACK_DIR/configs/grafana", "container": "/etc/grafana", "mode": "ro" }
+      ],
+      "environment": {},
+      "secrets": [],
+      "health_check": {
+        "command": "curl -sf http://localhost:3000/api/health",
+        "interval": "30s",
+        "retries": 3,
+        "timeout": "5s"
+      },
+      "resources": {
+        "cpus": 1,
+        "memory": "1g",
+        "gpu": null
+      }
+    },
+    "loki": {
+      "image": "docker.io/grafana/loki",
+      "tag": "TBD",
+      "container_name": "loki",
+      "dns_alias": "loki.ai-stack",
+      "depends_on": [],
+      "ports": [
+        { "host": 3100, "container": 3100 }
+      ],
+      "volumes": [
+        { "host": "$AI_STACK_DIR/logs/loki", "container": "/loki", "mode": "rw" }
+      ],
+      "environment": {},
+      "secrets": [],
+      "health_check": {
+        "command": "curl -sf http://localhost:3100/ready",
+        "interval": "30s",
+        "retries": 3,
+        "timeout": "5s"
+      },
+      "resources": {
+        "cpus": 1,
+        "memory": "2g",
+        "gpu": null
+      }
+    },
+    "promtail": {
+      "image": "docker.io/grafana/promtail",
+      "tag": "TBD",
+      "container_name": "promtail",
+      "dns_alias": "promtail.ai-stack",
+      "depends_on": ["loki"],
+      "ports": [],
+      "volumes": [
+        { "host": "$AI_STACK_DIR/configs/promtail", "container": "/etc/promtail", "mode": "ro" }
+      ],
+      "environment": {},
+      "secrets": [],
+      "health_check": null,
+      "resources": {
+        "cpus": 1,
+        "memory": "1g",
+        "gpu": null
+      }
+    }
+  }
+}
