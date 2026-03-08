@@ -26,10 +26,11 @@ This section defines the reproducible, sequenced implementation plan across all 
 **Goal:** Any agent or human executing this plan should arrive at the same result.
 
 **Decisions already made (recorded in [decisions.md](../meta_local/decisions.md)):**
-- **D-010 (pending):** Traefik as reverse proxy (resolves Consideration #23)
-- **D-011 (pending):** Knowledge Index Service as standalone Python/FastAPI microservice (resolves Consideration #24)
-- **D-012 (pending):** Volume manifest specification (`.ai-library` package format)
-- **D-013 (pending):** Discovery profiles: localhost, local, WAN
+- **D-010 (recorded):** Meta framework extraction (resolved this session)
+- **D-011 (pending):** Traefik as reverse proxy (resolves Consideration #23)
+- **D-012 (pending):** Knowledge Index Service as standalone Python/FastAPI microservice (resolves Consideration #24)
+- **D-013 (pending):** Volume manifest specification (`.ai-library` package format)
+- **D-014 (pending):** Discovery profiles: localhost, local, WAN
 
 ---
 
@@ -37,23 +38,23 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 **Goal:** Formalize the four pending decisions and update the architecture doc to reflect two new components and the discovery profile concept.
 
-**Inputs:** Decisions from conversation (D-010 through D-013), current architecture doc.
+**Inputs:** Decisions from conversation (D-011 through D-014), current architecture doc.
 
 ### Steps
 
-1.1. **Record D-010 in [decisions.md](../meta_local/decisions.md)**
+1.1. **Record D-011 in [decisions.md](../meta_local/decisions.md)**
    - Decision: Traefik as the reverse proxy / TLS termination layer
    - Rationale: Label-based discovery fits Podman containers; native forward-auth with Authentik; dynamic configuration without restarts
    - Alternatives considered: Caddy (simpler but less dynamic), nginx (manual config)
 
-1.2. **Record D-011 in [decisions.md](../meta_local/decisions.md)**
+1.2. **Record D-012 in [decisions.md](../meta_local/decisions.md)**
    - Decision: Knowledge Index Service is a standalone Python/FastAPI microservice
    - API: REST, versioned (`/v1/`), OpenAPI spec
    - Design: lightweight, internal, with short-lived query→volume routing cache
    - Rationale: routing is a distinct concern from vector search; stands alone on the critical query path; standard API enables future transport swap (gRPC) or reimplementation
    - Alternatives considered: Qdrant metadata layer, Flowise workflow, LiteLLM plugin
 
-1.3. **Record D-012 in [decisions.md](../meta_local/decisions.md)**
+1.3. **Record D-013 in [decisions.md](../meta_local/decisions.md)**
    - Decision: `.ai-library` volume manifest specification
    - Structure: `manifest.yaml`, `metadata.json`, `topics.json`, `documents/`, `vectors/`, `checksums.txt`, `signature.asc`
    - `manifest.yaml` — volume identity, version, author, license, profile compatibility
@@ -62,7 +63,7 @@ This section defines the reproducible, sequenced implementation plan across all 
    - `checksums.txt` — integrity verification (all profiles)
    - `signature.asc` — provenance verification (WAN mandatory, local optional, localhost skip)
 
-1.4. **Record D-013 in [decisions.md](../meta_local/decisions.md)**
+1.4. **Record D-014 in [decisions.md](../meta_local/decisions.md)**
    - Decision: Three discovery profiles — localhost, local, WAN
    - Profiles are a property of both the deployment instance (which mechanisms are active) and the volume (where it advertises)
    - localhost: filesystem scan, implicit trust
@@ -75,14 +76,14 @@ This section defines the reproducible, sequenced implementation plan across all 
    - Add Traefik to §3 Component Responsibilities table
    - Update §2 Core Architecture mermaid: add Traefik between User and WebUI; add Traefik as TLS termination point
    - Add §9 Networking: Traefik routing and TLS termination description
-   - Update §4 Knowledge Library System: add discovery profile concept, update package structure to match D-012
+   - Update §4 Knowledge Library System: add discovery profile concept, update package structure to match D-013
    - Update §7 Distributed Node Architecture: Traefik on controller node
    - Add Knowledge Index Service API overview to §4 or new subsection
 
 1.6. **Update [ai_stack_implementation.md](ai_stack_implementation.md)**
    - §2: Add `traefik.container` and `knowledge-index.container` to quadlet file list
    - §3: Insert Traefik after network (position 2); Knowledge Index stays at position 7; insert Traefik's dependencies
-   - §6: Update library manifest schema to match D-012 specification
+   - §6: Update library manifest schema to match D-013 specification
    - Add new §10: Knowledge Index Service API Specification (OpenAPI contract, endpoints, caching behavior)
    - Add new §11: Discovery Profile Specification (three profiles, discovery mechanisms, trust models, verification rules)
 
@@ -94,7 +95,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 ### Verification
 - `grep -c "traefik\|Traefik" ai_stack_architecture.md` returns ≥ 5
 - §3 Component Responsibilities has 15 rows (13 original + Traefik + Knowledge Index already listed)
-- D-010 through D-013 exist in meta_local/decisions.md
+- D-011 through D-014 exist in meta_local/decisions.md
 - Implementation §10 and §11 exist
 
 ---
