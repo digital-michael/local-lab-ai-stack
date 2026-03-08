@@ -1,0 +1,20 @@
+# Editor and OS
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets and credentials — never commit
+*.key
+*.pem
+*.crt
+*.env
+secrets/
+
+# Runtime and temp
+*.log
+*.pid
+tmp/
