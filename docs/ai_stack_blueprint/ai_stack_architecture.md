@@ -41,6 +41,7 @@ Key capabilities:
 
 This AI stack provides a modular platform built on:
 
+- Traefik reverse proxy and TLS termination
 - LiteLLM gateway
 - vLLM GPU inference
 - llama.cpp fallback inference
@@ -66,7 +67,13 @@ Goals:
 ```mermaid
 flowchart LR
 
-User --> WebUI
+User --> Traefik
+Traefik --> WebUI
+Traefik --> Grafana
+Traefik --> Authentik
+
+Traefik -- forward-auth --> Authentik
+
 WebUI --> LiteLLM
 LiteLLM --> vLLM
 LiteLLM --> LlamaCPP
@@ -88,6 +95,7 @@ Prometheus --> Grafana
 
 | Component | Function |
 |----------|----------|
+| Traefik | Reverse proxy, TLS termination, forward-auth with Authentik |
 | OpenWebUI | User interface |
 | Flowise | Workflow orchestration |
 | LiteLLM | Model routing gateway |
@@ -126,14 +134,28 @@ Library package format:
 Contents:
 
 ```
-manifest.yaml
-metadata.json
-topics.json
-documents/
-vectors/
-checksums.txt
-signature.asc
+manifest.yaml       # Volume identity, version, author, license, profile compatibility
+metadata.json       # Machine-readable: topic tags, embedding model, document count, vector dimensions
+topics.json         # Human/LLM-readable topic taxonomy
+documents/          # Source documents
+vectors/            # Pre-computed embeddings
+checksums.txt       # Integrity verification (all profiles)
+signature.asc       # Provenance verification (WAN mandatory, local optional, localhost skip)
 ```
+
+See D-013 in the project decision log for the full specification rationale.
+
+### Discovery Profiles
+
+Knowledge libraries are discovered through one of three profiles, selected per deployment context:
+
+| Profile | Mechanism | Trust Model | Verification |
+|---------|-----------|-------------|--------------|
+| **localhost** | Filesystem scan of `$AI_STACK_DIR/libraries/` | Implicit — operator placed the files | `checksums.txt` only |
+| **local** | mDNS/DNS-SD on local network | Network membership + optional signature | `checksums.txt` + optional `signature.asc` |
+| **WAN** | Registry/federation protocol | Mandatory cryptographic verification | `checksums.txt` + mandatory `signature.asc` |
+
+Profiles are a property of both the deployment instance (which mechanisms it activates) and the volume (which profiles it advertises in `manifest.yaml`). MVP implements localhost only; local and WAN are specified but deferred. See D-014 in the project decision log.
 
 Ingestion overview:
 
@@ -211,6 +233,7 @@ MacNode --> llama.cpp
 
 Controller node services:
 
+- Traefik
 - LiteLLM
 - Flowise
 - OpenWebUI
@@ -256,25 +279,39 @@ Podman network:
 ai-stack-net
 ```
 
+### Traefik Reverse Proxy
+
+Traefik is the network edge — the only component that exposes ports to the host. All user-facing services (OpenWebUI, Grafana, Flowise, Authentik) are accessed through Traefik. Internal services (LiteLLM, Qdrant, PostgreSQL, etc.) are only reachable on the internal Podman network.
+
+Traefik provides:
+- **TLS termination** — HTTPS on ports 443 (HTTPS) and 80 (HTTP → redirect to HTTPS)
+- **Forward-auth** — Authentik middleware validates session tokens before routing to backend services
+- **Dynamic routing** — file-based dynamic configuration (Podman does not expose a Docker-compatible socket by default; labels are read via a file provider)
+
+Routing is configured via Traefik's file provider, with one dynamic config file per service. Configuration files live in `$AI_STACK_DIR/configs/traefik/dynamic/`.
+
 Internal DNS examples:
 
 ```
+traefik.ai-stack
 litellm.ai-stack
 qdrant.ai-stack
 postgres.ai-stack
 flowise.ai-stack
 webui.ai-stack
+authentik.ai-stack
 ```
 
 Ports:
 
 | Port | Service |
 |------|--------|
-| 9090 | OpenWebUI |
-| 9000 | LiteLLM API gateway |
-| 9443 | TLS reverse proxy |
-| 6333 | Qdrant REST API |
-| 6334 | Qdrant gRPC |
+| 443 | Traefik HTTPS (TLS termination) |
+| 80 | Traefik HTTP (redirect to HTTPS) |
+| 9090 | OpenWebUI (internal, behind Traefik) |
+| 9000 | LiteLLM API gateway (internal) |
+| 6333 | Qdrant REST API (internal) |
+| 6334 | Qdrant gRPC (internal) |
 
 ---
 

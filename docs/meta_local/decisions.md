@@ -144,4 +144,60 @@ This file records decisions made during work on this project. For the decision r
 | **Rationale** | Option 3 (framework + distillation) maintains a clean separation: the framework defines the protocol, each project instantiates it locally. Promotion from local to framework is the feedback mechanism — project-local insights earn a place in the framework when they prove reusable across contexts. The "repo-" prefix (option 1) flags noise rather than removing it. A full journal (option 2) carries project-specific entries that are meaningless in other contexts. |
 | **Driver** | Human-initiated, jointly refined (Level 4 discussion) |
 | **Trigger** | The human observed that meta files aren't tightly coupled to this repo but to the working relationship. Applied separation of concerns to the meta system itself — separating the protocol from its instances. |
+| **Commit** | `eaeec5d` |
+
+---
+
+### D-011 — Traefik as Reverse Proxy and TLS Termination
+
+| Field | Value |
+|---|---|
+| **Decision** | Use Traefik as the reverse proxy and TLS termination layer for all user-facing services. Traefik sits at the network edge, terminates TLS, and routes traffic to OpenWebUI, Grafana, Flowise, and Authentik. |
+| **Context** | Consideration #23 — the architecture referenced a "TLS reverse proxy" on port 9443 but never specified which reverse proxy. Multiple candidates existed; a decision was needed before deployment. |
+| **Options Considered** | (1) **Traefik** — label-based dynamic discovery, native forward-auth with Authentik, file-based dynamic config for Podman. (2) **Caddy** — simpler config, automatic HTTPS, but less dynamic routing and no native label discovery. (3) **nginx** — industry standard but manual configuration, no dynamic discovery, higher operational friction. |
+| **Rationale** | Traefik's label-based discovery fits the Podman container model — new services are automatically routed without config file changes. Native forward-auth middleware integrates cleanly with Authentik for SSO. File-based dynamic configuration (since Podman lacks Docker's socket API) allows config reload without restarts. The operational cost is slightly higher than Caddy at initial setup but significantly lower at steady-state. |
+| **Driver** | Human-selected, agent-evaluated |
+| **Trigger** | Blocker — reverse proxy selection was required before deployment and TLS configuration could proceed. |
+| **Commit** | *(this commit)* |
+
+---
+
+### D-012 — Knowledge Index Service as Standalone Microservice
+
+| Field | Value |
+|---|---|
+| **Decision** | The Knowledge Index Service is a standalone Python/FastAPI microservice with a REST API (versioned at `/v1/`), backed by PostgreSQL for metadata and Qdrant for vector search. It provides query→volume routing with a short-lived cache. |
+| **Context** | Consideration #24 — the architecture described a "Knowledge Index Service" for library indexing and retrieval but gave no implementation spec. The service needed a clear identity: is routing logic embedded in another component or standalone? |
+| **Options Considered** | (1) **Qdrant metadata layer** — use Qdrant's payload filtering for routing. Tight coupling to Qdrant; breaks if vector DB swaps. (2) **Flowise workflow** — implement routing as a Flowise flow. Mixes orchestration with routing; not independently testable. (3) **LiteLLM plugin** — extend LiteLLM with routing middleware. Couples routing to the model gateway; wrong separation of concerns. (4) **Standalone FastAPI microservice** — independent service with its own API, caching, and dependencies. |
+| **Rationale** | Routing is a distinct concern from vector search, model inference, and workflow orchestration. A standalone service can be tested, deployed, cached, and replaced independently. The REST API (versioned, OpenAPI-documented) enables future transport swaps (gRPC) or reimplementation without affecting consumers. FastAPI is a pragmatic MVP choice — lightweight, well-documented, async-native. |
+| **Driver** | Human-directed, agent-proposed alternatives |
+| **Trigger** | Blocker — the Knowledge Index was referenced throughout the architecture but had no implementation specification. |
+| **Commit** | *(this commit)* |
+
+---
+
+### D-013 — Volume Manifest Specification (.ai-library)
+
+| Field | Value |
+|---|---|
+| **Decision** | Define a `.ai-library` package format for knowledge library volumes with the following structure: `manifest.yaml` (identity/version/author/license/profile compatibility), `metadata.json` (machine-readable topic tags, embedding model, document count, vector dimensions), `topics.json` (human/LLM-readable topic taxonomy), `documents/` (source documents), `vectors/` (pre-computed embeddings), `checksums.txt` (integrity verification), `signature.asc` (provenance verification). |
+| **Context** | The architecture described library packages but the format was underspecified. A concrete manifest was needed for the Knowledge Index Service to discover, validate, and ingest volumes. |
+| **Options Considered** | (1) Ad hoc directory structure with no manifest. (2) Single `manifest.yaml` covering all metadata. (3) Split manifest: `manifest.yaml` for identity, `metadata.json` for machine-readable data, `topics.json` for human-readable taxonomy, separate integrity/provenance files. |
+| **Rationale** | Option 3 applies separation of concerns: identity metadata (stable) is separate from topic taxonomy (changes with content) and machine-readable indexes (changes with re-embedding). `checksums.txt` and `signature.asc` serve orthogonal verification purposes — integrity (all profiles) vs. provenance (profile-dependent). Split files enable independent tooling: a CLI can validate checksums without parsing YAML, a registry can index metadata.json without downloading vectors. |
+| **Driver** | Joint |
+| **Trigger** | Design dependency — the Knowledge Index Service (D-012) and discovery profiles (D-014) both require a concrete manifest specification. |
+| **Commit** | *(this commit)* |
+
+---
+
+### D-014 — Discovery Profiles: localhost, local, WAN
+
+| Field | Value |
+|---|---|
+| **Decision** | Define three discovery profiles that govern how knowledge library volumes are found, trusted, and verified. Profiles are a property of both the deployment instance (which mechanisms it activates) and the volume (which profiles it supports). |
+| **Context** | The architecture described a knowledge library system and distributed nodes but never specified how volumes are discovered across deployment contexts. A single trust model can't serve all scenarios: a developer's laptop has different security requirements than a WAN-federated node. |
+| **Options Considered** | (1) Single discovery mechanism (filesystem scan only). (2) Two tiers (local vs. remote). (3) Three profiles mapped to network topology and trust boundaries. |
+| **Rationale** | Three profiles map cleanly to real deployment contexts: **localhost** (filesystem scan, implicit trust — the operator placed the files there), **local** (mDNS/DNS-SD discovery, trust by network membership + optional signature), **WAN** (registry/federation protocol, mandatory signature verification). Each profile has escalating verification requirements that match escalating trust boundaries. MVP implements localhost only; local and WAN are specified but deferred. |
+| **Driver** | Joint |
+| **Trigger** | Design dependency — distributed node architecture (§7) and volume manifest (D-013) both reference discovery and trust without specifying the model. |
 | **Commit** | *(this commit)* |

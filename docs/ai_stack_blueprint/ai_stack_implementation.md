@@ -19,6 +19,8 @@ An LLM agent can read this document to generate quadlet files, execute deploymen
 7. Alerting Rules
 8. Backup and Restore
 9. Troubleshooting
+10. Knowledge Index Service API Specification
+11. Discovery Profile Specification
 
 ---
 
@@ -100,6 +102,7 @@ WantedBy=default.target
 ### Quadlet files to create
 
 - `ai-stack.network`
+- `traefik.container`
 - `postgres.container`
 - `qdrant.container`
 - `litellm.container`
@@ -108,6 +111,7 @@ WantedBy=default.target
 - `flowise.container`
 - `openwebui.container`
 - `authentik.container`
+- `knowledge-index.container`
 - `prometheus.container`
 - `grafana.container`
 - `loki.container`
@@ -122,17 +126,20 @@ WantedBy=default.target
 Start services in this order:
 
 ```
-1. ai-stack-net (network)
-2. PostgreSQL
-3. Qdrant
-4. Authentik
-5. LiteLLM
-6. vLLM / llama.cpp
-7. Knowledge Index
-8. Flowise
-9. OpenWebUI
-10. Prometheus → Grafana → Loki → Promtail
+1.  ai-stack-net (network)
+2.  Traefik
+3.  PostgreSQL
+4.  Qdrant
+5.  Authentik
+6.  LiteLLM
+7.  vLLM / llama.cpp
+8.  Knowledge Index
+9.  Flowise
+10. OpenWebUI
+11. Prometheus → Grafana → Loki → Promtail
 ```
+
+Traefik starts immediately after the network — it has no service dependencies and must be ready before user-facing services come online. Knowledge Index depends on PostgreSQL and Qdrant (steps 3–4).
 
 Express dependencies using `After=` and `Requires=` directives in quadlet unit files. Services that depend on PostgreSQL or Qdrant should not start until those services pass their health checks (see [configuration §10](ai_stack_configuration.md#10-health-check-parameters)).
 
@@ -188,6 +195,8 @@ Authentik provider configuration and client IDs/secrets to be generated during s
 
 > **Status:** Deferrable — define before building knowledge libraries.
 
+The `.ai-library` package format is specified in the architecture doc (§4 Knowledge Library System) and formalized in D-013.
+
 ### Example `manifest.yaml`
 
 ```yaml
@@ -196,17 +205,50 @@ library:
   name: "golang-best-practices"
   version: "0.1.0"
   description: "Best practices for Go development"
+  author: "operator"
+  license: "internal"
   created: "2026-03-08"
-  topics:
-    - name: "concurrency"
-      document_count: 12
-    - name: "error-handling"
-      document_count: 8
+  profiles:
+    - localhost
+    - local
   embedding_model: "BAAI/bge-large-en-v1.5"
   chunk_strategy:
     method: "recursive"
     chunk_size: 512
     overlap: 50
+```
+
+### Example `metadata.json`
+
+```json
+{
+  "schema_version": "1.0",
+  "topic_count": 2,
+  "document_count": 20,
+  "vector_dimensions": 1024,
+  "embedding_model": "BAAI/bge-large-en-v1.5",
+  "topics": ["concurrency", "error-handling"]
+}
+```
+
+### Example `topics.json`
+
+```json
+{
+  "schema_version": "1.0",
+  "topics": [
+    {
+      "name": "concurrency",
+      "description": "Go concurrency patterns, goroutines, channels, sync primitives",
+      "document_count": 12
+    },
+    {
+      "name": "error-handling",
+      "description": "Error wrapping, sentinel errors, custom error types",
+      "document_count": 8
+    }
+  ]
+}
 ```
 
 Full JSON Schema to be defined during implementation. The schema should validate library packages before ingestion.
@@ -276,3 +318,118 @@ TBD — document restore steps for each data source during implementation.
 | Service fails to start | Dependency not ready | Check startup order (§3) and health checks ([configuration §10](ai_stack_configuration.md#10-health-check-parameters)) |
 
 Additional troubleshooting entries will be added as issues are encountered.
+
+---
+
+# 10 Knowledge Index Service API Specification
+
+> **Status:** Deferrable — define before building the Knowledge Index Service.
+
+The Knowledge Index Service (D-012) is a standalone Python/FastAPI microservice providing query→volume routing and library metadata access.
+
+### Base URL
+
+```
+http://knowledge-index.ai-stack:8900/v1/
+```
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/health` | Health check |
+| `GET` | `/v1/libraries` | List all discovered libraries |
+| `GET` | `/v1/libraries/{name}` | Get library metadata (manifest + topics) |
+| `GET` | `/v1/libraries/{name}/topics` | List topics for a library |
+| `POST` | `/v1/route` | Given a query, return ranked list of relevant libraries and topics |
+| `POST` | `/v1/ingest` | Trigger ingestion of a new or updated library volume |
+
+### Route Request
+
+```json
+{
+  "query": "How do Go channels handle buffering?",
+  "max_results": 5
+}
+```
+
+### Route Response
+
+```json
+{
+  "routes": [
+    {
+      "library": "golang-best-practices",
+      "topic": "concurrency",
+      "relevance": 0.92,
+      "collection": "golang-best-practices-concurrency"
+    }
+  ],
+  "cached": false
+}
+```
+
+### Caching
+
+The service maintains a short-lived in-memory cache (TTL configurable, default 60s) for query→route mappings. Cache is invalidated on library ingestion. The cache is a performance optimization, not a correctness requirement — cache misses fall through to PostgreSQL + Qdrant.
+
+### Dependencies
+
+- **PostgreSQL** — library metadata, topic indexes
+- **Qdrant** — vector similarity for routing queries to relevant topics
+
+### OpenAPI
+
+FastAPI auto-generates an OpenAPI spec at `/v1/docs` (Swagger UI) and `/v1/openapi.json`.
+
+---
+
+# 11 Discovery Profile Specification
+
+> **Status:** Deferrable — specify before implementing discovery beyond localhost.
+
+Discovery profiles (D-014) define how knowledge library volumes are found, trusted, and verified across deployment contexts.
+
+### Profile Summary
+
+| Profile | Discovery Mechanism | Trust Model | Verification | MVP Status |
+|---------|-------------------|-------------|--------------|------------|
+| **localhost** | Filesystem scan of `$AI_STACK_DIR/libraries/` | Implicit — operator placed the files | `checksums.txt` integrity only | **Implement** |
+| **local** | mDNS/DNS-SD service advertisement | Network membership + optional signature | `checksums.txt` + optional `signature.asc` | Specify, defer |
+| **WAN** | Registry/federation protocol (TBD) | Mandatory cryptographic verification | `checksums.txt` + mandatory `signature.asc` | Specify, defer |
+
+### localhost Profile (MVP)
+
+The Knowledge Index Service scans `$AI_STACK_DIR/libraries/` on startup and on a configurable interval (default: 300s). Each subdirectory containing a valid `manifest.yaml` is registered as an available library.
+
+Validation steps:
+1. Parse `manifest.yaml` — reject if missing or schema-invalid
+2. Verify `checksums.txt` — reject if any file fails integrity check
+3. Parse `metadata.json` and `topics.json` — register topics in PostgreSQL
+4. Index vectors in Qdrant if `vectors/` contains pre-computed embeddings
+
+No signature verification is required for localhost — the operator's act of placing files in the directory constitutes implicit trust.
+
+### local Profile (Deferred)
+
+Nodes advertise available libraries via mDNS/DNS-SD on the local network. Discovering nodes query for `_ai-library._tcp.local` service records. Each record includes the library name, version, and a URL to fetch the manifest.
+
+Trust is established by network membership. Signatures in `signature.asc` are optional but recommended. If present, they are verified before ingestion.
+
+### WAN Profile (Deferred)
+
+Libraries are published to a registry (protocol TBD — likely a simple REST API with signed manifests). Discovering nodes query the registry for available libraries matching their topic interests.
+
+All WAN-sourced libraries **must** include a valid `signature.asc`. Unsigned or invalid-signature libraries are rejected. The signing key trust model (TOFU, CA-based, or web-of-trust) is a future design decision.
+
+### Volume Manifest Integration
+
+Each `.ai-library` package declares its supported profiles in `manifest.yaml`:
+
+```yaml
+profiles:
+  - localhost
+  - local
+```
+
+The Knowledge Index Service only attempts discovery mechanisms that match both the instance's active profiles and the volume's declared profiles.
