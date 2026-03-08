@@ -1,4 +1,4 @@
-# Meta Decisions — Decision Record
+# Project Decisions — llm-agent-local-2
 **Last Updated:** 2026-03-08 UTC
 **Target Audience:** LLM Agents
 
@@ -6,37 +6,11 @@
 
 ## Purpose
 
-This file records decisions made during collaboration between the human operator and LLM agent. It is the canonical location for the decision record framework and the decision log. For the active workflow directives that govern how decisions are made, see [meta.md](meta.md).
+This file records decisions made during work on this project. For the decision record framework (field definitions and template), see [../meta/meta_decisions.md](../meta/meta_decisions.md).
 
 ---
 
-## Table of Contents
-
-1. [Decision Record Framework](#1-decision-record-framework)
-2. [Decision Log](#2-decision-log)
-
----
-
-# 1 Decision Record Framework
-
-Each decision is recorded with the following fields:
-
-| Field | Description |
-|---|---|
-| **ID** | Sequential identifier (D-001, D-002, ...) |
-| **Decision** | What was decided |
-| **Context** | What problem or question prompted it |
-| **Options Considered** | Alternatives that were on the table (if applicable) |
-| **Rationale** | Why this option won |
-| **Driver** | Who drove the decision: `human`, `agent`, or `joint` |
-| **Trigger** | What prompted the decision: a blocker, a question, a pattern recognition, a lateral insight |
-| **Commit** | The commit(s) where this materialized (if applicable) |
-
-Not every field is required for every decision. Favor capturing the decision and rationale over completeness for its own sake.
-
----
-
-# 2 Decision Log
+## Decision Log
 
 ### D-001 — Three-Document Split
 
@@ -156,4 +130,18 @@ Not every field is required for every decision. Favor capturing the decision and
 | **Rationale** | Applied separation of concerns: each file has a single reason to change, a clear access pattern, and a predictable growth trajectory. meta.md stays small as the always-read "operating system." Historical/accumulating content moves to files that are read when the workflow says to read them, not on every session. This is the same principle that drove D-001 (three-doc split) and D-003 (three files per component) — the human recognizes it as a reusable pattern. |
 | **Driver** | Human-initiated, jointly refined |
 | **Trigger** | The agent flagged meta.md's length as a scaling pressure point; the human proposed the split and named the underlying principle ("applied separation of concerns"). |
+| **Commit** | `257fdcd` |
+
+---
+
+### D-010 — Meta Framework Extraction
+
+| Field | Value |
+|---|---|
+| **Decision** | Extract the portable collaboration framework (meta.md, meta_decisions.md, meta_dynamics.md, meta_metrics.md) into a standalone git repo (`meta-framework`). Project-specific content (decision entries, eureka moments, lateral ideas, review log rows) stays local in `docs/meta_local/`. The framework is symlinked into consuming projects at `docs/meta/`. |
+| **Context** | The meta files described how we work together, not what we work on. Three of four files were entirely relationship-scoped; the fourth (meta_decisions.md) mixed a portable framework with project-specific entries. Keeping them in the project repo would couple the collaboration protocol to a single project and prevent reuse. |
+| **Options Considered** | (1) Keep meta in this repo, prefix project-coupled entries with "repo-". (2) Move everything to an external repo as a collaboration journal. (3) Extract as a framework repo with distilled portable patterns; project-specific instances stay local. |
+| **Rationale** | Option 3 (framework + distillation) maintains a clean separation: the framework defines the protocol, each project instantiates it locally. Promotion from local to framework is the feedback mechanism — project-local insights earn a place in the framework when they prove reusable across contexts. The "repo-" prefix (option 1) flags noise rather than removing it. A full journal (option 2) carries project-specific entries that are meaningless in other contexts. |
+| **Driver** | Human-initiated, jointly refined (Level 4 discussion) |
+| **Trigger** | The human observed that meta files aren't tightly coupled to this repo but to the working relationship. Applied separation of concerns to the meta system itself — separating the protocol from its instances. |
 | **Commit** | *(this commit)* |

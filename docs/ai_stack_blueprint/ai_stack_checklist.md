@@ -25,7 +25,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 **Goal:** Any agent or human executing this plan should arrive at the same result.
 
-**Decisions already made (recorded in [meta_decisions.md](../meta_decisions.md)):**
+**Decisions already made (recorded in [decisions.md](../meta_local/decisions.md)):**
 - **D-010 (pending):** Traefik as reverse proxy (resolves Consideration #23)
 - **D-011 (pending):** Knowledge Index Service as standalone Python/FastAPI microservice (resolves Consideration #24)
 - **D-012 (pending):** Volume manifest specification (`.ai-library` package format)
@@ -41,19 +41,19 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ### Steps
 
-1.1. **Record D-010 in [meta_decisions.md](../meta_decisions.md)**
+1.1. **Record D-010 in [decisions.md](../meta_local/decisions.md)**
    - Decision: Traefik as the reverse proxy / TLS termination layer
    - Rationale: Label-based discovery fits Podman containers; native forward-auth with Authentik; dynamic configuration without restarts
    - Alternatives considered: Caddy (simpler but less dynamic), nginx (manual config)
 
-1.2. **Record D-011 in [meta_decisions.md](../meta_decisions.md)**
+1.2. **Record D-011 in [decisions.md](../meta_local/decisions.md)**
    - Decision: Knowledge Index Service is a standalone Python/FastAPI microservice
    - API: REST, versioned (`/v1/`), OpenAPI spec
    - Design: lightweight, internal, with short-lived query→volume routing cache
    - Rationale: routing is a distinct concern from vector search; stands alone on the critical query path; standard API enables future transport swap (gRPC) or reimplementation
    - Alternatives considered: Qdrant metadata layer, Flowise workflow, LiteLLM plugin
 
-1.3. **Record D-012 in [meta_decisions.md](../meta_decisions.md)**
+1.3. **Record D-012 in [decisions.md](../meta_local/decisions.md)**
    - Decision: `.ai-library` volume manifest specification
    - Structure: `manifest.yaml`, `metadata.json`, `topics.json`, `documents/`, `vectors/`, `checksums.txt`, `signature.asc`
    - `manifest.yaml` — volume identity, version, author, license, profile compatibility
@@ -62,7 +62,7 @@ This section defines the reproducible, sequenced implementation plan across all 
    - `checksums.txt` — integrity verification (all profiles)
    - `signature.asc` — provenance verification (WAN mandatory, local optional, localhost skip)
 
-1.4. **Record D-013 in [meta_decisions.md](../meta_decisions.md)**
+1.4. **Record D-013 in [decisions.md](../meta_local/decisions.md)**
    - Decision: Three discovery profiles — localhost, local, WAN
    - Profiles are a property of both the deployment instance (which mechanisms are active) and the volume (where it advertises)
    - localhost: filesystem scan, implicit trust
@@ -87,14 +87,14 @@ This section defines the reproducible, sequenced implementation plan across all 
    - Add new §11: Discovery Profile Specification (three profiles, discovery mechanisms, trust models, verification rules)
 
 ### Outputs
-- 4 decision entries in meta_decisions.md
+- 4 decision entries in meta_local/decisions.md
 - Architecture doc reflects 14 → 16 components (Traefik + Knowledge Index)
 - Implementation doc has quadlet list, dependency order, API spec, and discovery spec
 
 ### Verification
 - `grep -c "traefik\|Traefik" ai_stack_architecture.md` returns ≥ 5
 - §3 Component Responsibilities has 15 rows (13 original + Traefik + Knowledge Index already listed)
-- D-010 through D-013 exist in meta_decisions.md
+- D-010 through D-013 exist in meta_local/decisions.md
 - Implementation §10 and §11 exist
 
 ---
@@ -370,8 +370,8 @@ This section defines the reproducible, sequenced implementation plan across all 
    - Implement localhost discovery profile
    - Specify local and WAN discovery profiles
    - Build volume ingestion pipeline
-6.5. **Record any meta observations** in meta_dynamics.md and meta_decisions.md
-6.6. **Append row to [meta_metrics.md](../meta_metrics.md)** Review Log
+6.5. **Record any meta observations** in [meta_local/dynamics.md](../meta_local/dynamics.md) and [meta_local/decisions.md](../meta_local/decisions.md)
+6.6. **Append row to [meta_local/review_log.md](../meta_local/review_log.md)** Review Log
 
 ### Outputs
 - Checklist accurate to current state
