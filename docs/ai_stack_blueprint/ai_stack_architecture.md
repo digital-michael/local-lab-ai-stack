@@ -1,10 +1,10 @@
 
 # AI Multivolume RAG Platform (Podman) Architecture
-**Last Updated:** 2026-03-08 14:21 UTC
+**Last Updated:** 2026-03-08 UTC
 
 ## Purpose (LLM-Agent Focused)
-This document defines the architecture, deployment plan, and artifacts required to build a distributed, production-grade AI platform using Podman (v5.7+).
-An LLM agent can read this document to generate infrastructure, deploy containers, configure services, and operate the system.
+This document defines the high-level architecture, component relationships, and design decisions for a distributed, production-grade AI platform using Podman (v5.7+).
+An LLM agent can read this document to understand the system design. Concrete implementation details, configurations, and deployment artifacts are in [ai_stack_implementation.md](ai_stack_implementation.md).
 
 Key capabilities:
 
@@ -32,7 +32,8 @@ Key capabilities:
 11. Security
 12. Deployment Plan
 13. Automation Scripts
-14. Future Iterations
+14. Implementation Tracking
+15. Future Iterations
 
 ---
 
@@ -70,13 +71,14 @@ WebUI --> LiteLLM
 LiteLLM --> vLLM
 LiteLLM --> LlamaCPP
 
-LiteLLM --> Flowise
+WebUI --> Flowise
+Flowise --> LiteLLM
 Flowise --> KnowledgeIndex
 
 KnowledgeIndex --> Qdrant
 KnowledgeIndex --> Postgres
 
-LiteLLM --> Loki
+Promtail --> Loki
 Prometheus --> Grafana
 ```
 
@@ -86,18 +88,19 @@ Prometheus --> Grafana
 
 | Component | Function |
 |----------|----------|
-OpenWebUI | user interface |
-Flowise | workflow orchestration |
-LiteLLM | model routing |
-vLLM | GPU inference |
-llama.cpp | CPU / Mac inference |
-Qdrant | vector storage |
-PostgreSQL | metadata database |
-Knowledge Index | library indexing |
-Authentik | identity provider |
-Prometheus | metrics |
-Grafana | dashboards |
-Loki | logging |
+| OpenWebUI | User interface |
+| Flowise | Workflow orchestration |
+| LiteLLM | Model routing gateway |
+| vLLM | GPU inference |
+| llama.cpp | CPU / Mac inference |
+| Qdrant | Vector storage |
+| PostgreSQL | Metadata database |
+| Knowledge Index | Library indexing and retrieval |
+| Authentik | Identity provider (SSO/OIDC) |
+| Prometheus | Metrics collection |
+| Grafana | Dashboards and alerting |
+| Loki | Log aggregation |
+| Promtail | Log shipping to Loki |
 
 ---
 
@@ -132,6 +135,16 @@ checksums.txt
 signature.asc
 ```
 
+Ingestion overview:
+
+1. Documents are added to a library's `documents/` directory
+2. The Knowledge Index Service chunks and embeds documents
+3. Embeddings are stored in Qdrant under the library's collection
+4. Metadata is recorded in PostgreSQL
+5. `checksums.txt` and `manifest.yaml` are updated
+
+Schema and detailed ingestion configuration are defined in [ai_stack_implementation.md](ai_stack_implementation.md).
+
 ---
 
 # 5 Hierarchical Retrieval
@@ -148,15 +161,15 @@ Embedding --> Qdrant
 
 Retrieval pipeline:
 
-1 user request
-2 select library
-3 topic search
-4 document retrieval
-5 chunk similarity search
+1. User request
+2. Select library
+3. Topic search
+4. Document retrieval
+5. Chunk similarity search
 
 ---
 
-# 6 Model Strategy
+# 6 Model and Embedding Strategy
 
 Default inference models:
 
@@ -172,7 +185,15 @@ Embedding model:
 BAAI/bge-large-en-v1.5
 ```
 
-Embeddings stored in Qdrant.
+Embedding service: vLLM serves the embedding model alongside inference models. A dedicated embedding endpoint is exposed through LiteLLM.
+
+Model management:
+
+- Models are downloaded to `/opt/ai-stack/models/` and shared across inference containers via bind mounts
+- Model files are cached locally; no re-download on container restart
+- LiteLLM routes requests to the appropriate model/backend
+
+Embeddings stored in Qdrant. Image and version details are in [ai_stack_implementation.md](ai_stack_implementation.md).
 
 ---
 
@@ -197,22 +218,33 @@ Controller node services:
 - PostgreSQL
 - Knowledge Index
 
+Minimum hardware requirements:
+
+| Node Type | CPU | RAM | Storage | GPU |
+|-----------|-----|-----|---------|-----|
+| Controller | 8 cores | 32 GB | 500 GB SSD | None required |
+| GPU Node | 8 cores | 32 GB | 200 GB SSD | 24 GB VRAM (e.g. RTX 3090/4090) |
+| Mac Node | Apple M1+ | 16 GB unified | 200 GB SSD | Integrated (Metal) |
+
 ---
 
 # 8 Storage Layout
 
+Base path: `/opt/ai-stack/` (or `$HOME/ai-stack` for rootless deployments)
+
 ```
 /opt/ai-stack/
-
-models/
-libraries/
-qdrant/
-postgres/
-logs/
-configs/
-scripts/
-backups/
+├── models/       # Downloaded LLM and embedding model files
+├── libraries/    # Knowledge library packages
+├── qdrant/       # Qdrant persistent storage
+├── postgres/     # PostgreSQL data directory
+├── logs/         # Centralized log output
+├── configs/      # Service configuration files
+├── scripts/      # Automation and deployment scripts
+└── backups/      # Scheduled backup artifacts
 ```
+
+Volume mount mappings per container are defined in [ai_stack_implementation.md](ai_stack_implementation.md).
 
 ---
 
@@ -238,41 +270,51 @@ Ports:
 
 | Port | Service |
 |------|--------|
-9090 | WebUI |
-9000 | API |
-9443 | TLS |
-91434 | Qdrant |
+| 9090 | OpenWebUI |
+| 9000 | LiteLLM API gateway |
+| 9443 | TLS reverse proxy |
+| 6333 | Qdrant REST API |
+| 6334 | Qdrant gRPC |
 
 ---
 
-# 10 Monitoring
+# 10 Monitoring and Telemetry
 
 Observability stack:
 
-- Prometheus
-- Grafana
-- Loki
+- Prometheus — metrics collection and storage
+- Grafana — dashboards and alerting
+- Loki — log aggregation
+- Promtail — log shipping from containers to Loki
 
 Metrics collected:
 
 - GPU utilization
-- inference latency
-- token usage
-- retrieval latency
+- Inference latency
+- Token throughput
+- Retrieval latency
+- Container resource usage
+
+Log collection:
+
+Promtail collects container logs via Podman's journald or file-based log driver and ships them to Loki. Alerting rules and dashboard definitions are in [ai_stack_implementation.md](ai_stack_implementation.md).
 
 ---
 
 # 11 Security
 
-Authentication provider:
+Authentication provider: Authentik
 
-Authentik
+Security architecture:
 
-Features:
+- **Authentication:** Authentik provides SSO via OIDC for all user-facing services (OpenWebUI, Grafana, Flowise)
+- **Authorization:** RBAC controls access to knowledge libraries and administrative functions
+- **Network isolation:** Services communicate over the internal `ai-stack-net` Podman network; only designated ports are exposed to the host
+- **Secrets management:** Sensitive values (database passwords, API keys, TLS certificates) are managed via Podman secrets — never stored in plain text in configuration files
+- **Container isolation:** Rootless Podman provides user-namespace isolation; no containers run as host root
+- **Image integrity:** Container images are pulled from pinned digests or signed tags
 
-- SSO
-- RBAC
-- library access control
+Concrete OIDC configuration, secret definitions, and TLS setup are in [ai_stack_implementation.md](ai_stack_implementation.md).
 
 ---
 
@@ -280,11 +322,12 @@ Features:
 
 Deployment steps:
 
-1 install Podman
-2 validate system
-3 create storage directories
-4 configure container services
-5 start systemd quadlets
+1. Install Podman and dependencies
+2. Validate system prerequisites
+3. Create storage directories
+4. Configure secrets and environment
+5. Deploy container services via systemd quadlets
+6. Verify health checks and connectivity
 
 ---
 
@@ -292,21 +335,53 @@ Deployment steps:
 
 Scripts included:
 
-```
-scripts/install.sh
-scripts/validate-system.sh
-scripts/deploy-stack.sh
-```
+| Script | Purpose |
+|--------|--------|
+| `scripts/install.sh` | Install dependencies and create storage layout |
+| `scripts/validate-system.sh` | Validate prerequisites (Podman, GPU, storage) |
+| `scripts/deploy-stack.sh` | Create network and deploy containers via quadlets |
 
-These prepare the environment and deploy the containers.
+These are bootstrap scripts. Full deployment procedures and quadlet definitions are in [ai_stack_implementation.md](ai_stack_implementation.md).
 
 ---
 
-# 14 Future Iterations
+# 14 Implementation Tracking
+
+Items tracked for the implementation phase. See [ai_stack_implementation.md](ai_stack_implementation.md) for details.
+
+**Blockers** (required before first deployment):
+
+| Item | Status | Reference |
+|------|--------|----------|
+| Container image references and version pins | Not started | Implementation §1 |
+| Environment variables per service | Not started | Implementation §2 |
+| Volume mount specifications | Not started | Implementation §3 |
+| Secrets management (Podman secrets) | Not started | Implementation §4 |
+| Quadlet unit files | Not started | Implementation §5 |
+| Service dependency and startup order | Not started | Implementation §6 |
+
+**Deferrable** (address incrementally post-deployment):
+
+| Item | Status | Reference |
+|------|--------|----------|
+| Resource limits (CPU/memory/GPU) | Not started | Implementation §7 |
+| Health checks and readiness probes | Not started | Implementation §8 |
+| GPU passthrough (CDI) configuration | Not started | Implementation §9 |
+| Authentik OIDC integration details | Not started | Implementation §10 |
+| Library manifest YAML schema | Not started | Implementation §11 |
+| Alerting rules (Prometheus) | Not started | Implementation §12 |
+| Backup and restore procedures | Not started | Implementation §13 |
+| Troubleshooting guide | Not started | Implementation §14 |
+
+---
+
+# 15 Future Iterations
 
 Planned improvements:
 
-- service registry
-- distributed vector shards
-- GPU scheduling
-- automated knowledge library generation
+- Service registry and discovery
+- Distributed vector shards (multi-node Qdrant)
+- GPU scheduling and multi-tenant inference
+- Automated knowledge library generation
+- Multi-model A/B testing through LiteLLM
+- Federated RAG across remote library nodes
