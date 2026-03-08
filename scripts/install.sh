@@ -32,6 +32,8 @@ echo "Installing dependencies..."
 sudo dnf install -y podman git python3
 
 echo "Creating storage layout at $AI_STACK_DIR..."
-mkdir -p "$AI_STACK_DIR"/{models,libraries,qdrant,postgres,logs,configs,scripts,backups}
+mkdir -p "$AI_STACK_DIR"/{models,libraries,qdrant,postgres,flowise,openwebui,grafana,backups}
+mkdir -p "$AI_STACK_DIR"/logs/loki
+mkdir -p "$AI_STACK_DIR"/configs/{traefik/dynamic,loki,tls,run,prometheus,grafana,promtail}
 
 echo "Install complete. AI_STACK_DIR=$AI_STACK_DIR"

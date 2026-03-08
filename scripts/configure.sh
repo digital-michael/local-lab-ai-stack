@@ -173,9 +173,9 @@ EOF
     for svc in $services; do
         local file="$QUADLET_DIR/${svc}.container"
         local image tag container_name
-        image=$(jq -r ".services.${svc}.image" "$CONFIG_FILE")
-        tag=$(jq -r ".services.${svc}.tag" "$CONFIG_FILE")
-        container_name=$(jq -r ".services.${svc}.container_name" "$CONFIG_FILE")
+        image=$(jq -r --arg s "$svc" '.services[$s].image' "$CONFIG_FILE")
+        tag=$(jq -r --arg s "$svc" '.services[$s].tag' "$CONFIG_FILE")
+        container_name=$(jq -r --arg s "$svc" '.services[$s].container_name' "$CONFIG_FILE")
 
         # Start building quadlet
         {
@@ -185,8 +185,9 @@ EOF
 
             # Dependencies
             local deps
-            deps=$(jq -r ".services.${svc}.depends_on[]?" "$CONFIG_FILE")
+            deps=$(jq -r --arg s "$svc" '.services[$s].depends_on[]?' "$CONFIG_FILE")
             echo "After=ai-stack-network.service"
+            echo "Requires=ai-stack-network.service"
             for dep in $deps; do
                 echo "After=${dep}.service"
                 echo "Requires=${dep}.service"
@@ -196,38 +197,46 @@ EOF
             echo "[Container]"
             echo "Image=${image}:${tag}"
             echo "ContainerName=${container_name}"
-            echo "Network=${net_name}"
+            local dns_alias
+            dns_alias=$(jq -r --arg s "$svc" '.services[$s].dns_alias' "$CONFIG_FILE")
+            echo "Network=${net_name}:alias=${dns_alias}"
 
-            # Volumes
-            jq -r ".services.${svc}.volumes[]? | \"Volume=${ai_stack_dir}/\" + (.host | sub(\"\\$AI_STACK_DIR/\"; \"\")) + \":\" + .container + \":\" + .mode + \"\"" "$CONFIG_FILE" 2>/dev/null | while read -r line; do
-                # Expand $HOME in the ai_stack_dir
+            # Volumes — rw mode maps to :Z (SELinux relabel), ro mode maps to :ro,Z
+            jq -r --arg s "$svc" --arg dir "${ai_stack_dir}" \
+                '.services[$s].volumes[]? | "Volume=" + $dir + "/" + (.host | sub("[$]AI_STACK_DIR/"; "")) + ":" + .container + ":" + (if .mode == "ro" then "ro,Z" else "Z" end)' \
+                "$CONFIG_FILE" 2>/dev/null | while read -r line; do
                 echo "${line//\$HOME/%h}"
             done
 
             # Secrets
-            jq -r ".services.${svc}.secrets[]? | \"Secret=\" + .name + \",type=env,target=\" + .target" "$CONFIG_FILE"
+            jq -r --arg s "$svc" '.services[$s].secrets[]? | "Secret=" + .name + ",type=env,target=" + .target' "$CONFIG_FILE"
 
-            # Environment
-            jq -r ".services.${svc}.environment // {} | to_entries[] | \"Environment=\" + .key + \"=\" + .value" "$CONFIG_FILE"
+            # Environment — DATABASE_URL uses EnvironmentFile for credential injection at deploy time
+            local has_db_url
+            has_db_url=$(jq -r --arg s "$svc" '.services[$s].environment // {} | has("DATABASE_URL")' "$CONFIG_FILE")
+            if [[ "$has_db_url" == "true" ]]; then
+                echo "EnvironmentFile=${ai_stack_dir//\$HOME/%h}/configs/run/${svc}.env"
+            fi
+            jq -r --arg s "$svc" '.services[$s].environment // {} | to_entries[] | select(.key != "DATABASE_URL") | "Environment=" + .key + "=" + .value' "$CONFIG_FILE"
 
             # Ports
-            jq -r ".services.${svc}.ports[]? | \"PublishPort=\" + (.host|tostring) + \":\" + (.container|tostring)" "$CONFIG_FILE"
+            jq -r --arg s "$svc" '.services[$s].ports[]? | "PublishPort=" + (.host|tostring) + ":" + (.container|tostring)' "$CONFIG_FILE"
 
             # Health check
             local hc_cmd
-            hc_cmd=$(jq -r ".services.${svc}.health_check.command // empty" "$CONFIG_FILE")
+            hc_cmd=$(jq -r --arg s "$svc" '.services[$s].health_check.command // empty' "$CONFIG_FILE")
             if [[ -n "$hc_cmd" ]]; then
                 echo "HealthCmd=$hc_cmd"
-                echo "HealthInterval=$(jq -r ".services.${svc}.health_check.interval" "$CONFIG_FILE")"
-                echo "HealthRetries=$(jq -r ".services.${svc}.health_check.retries" "$CONFIG_FILE")"
-                echo "HealthTimeout=$(jq -r ".services.${svc}.health_check.timeout" "$CONFIG_FILE")"
+                echo "HealthInterval=$(jq -r --arg s "$svc" '.services[$s].health_check.interval' "$CONFIG_FILE")"
+                echo "HealthRetries=$(jq -r --arg s "$svc" '.services[$s].health_check.retries' "$CONFIG_FILE")"
+                echo "HealthTimeout=$(jq -r --arg s "$svc" '.services[$s].health_check.timeout' "$CONFIG_FILE")"
             fi
 
             # Resource limits
             local cpus mem gpu
-            cpus=$(jq -r ".services.${svc}.resources.cpus // empty" "$CONFIG_FILE")
-            mem=$(jq -r ".services.${svc}.resources.memory // empty" "$CONFIG_FILE")
-            gpu=$(jq -r ".services.${svc}.resources.gpu // empty" "$CONFIG_FILE")
+            cpus=$(jq -r --arg s "$svc" '.services[$s].resources.cpus // empty' "$CONFIG_FILE")
+            mem=$(jq -r --arg s "$svc" '.services[$s].resources.memory // empty' "$CONFIG_FILE")
+            gpu=$(jq -r --arg s "$svc" '.services[$s].resources.gpu // empty' "$CONFIG_FILE")
             local podman_args=""
             [[ -n "$cpus" ]] && podman_args+="--cpus=$cpus "
             [[ -n "$mem" ]] && podman_args+="--memory=$mem "
@@ -261,6 +270,8 @@ cmd_generate_secrets() {
         return 0
     fi
 
+    local captured_postgres_pw=""
+
     for secret in $secrets; do
         if podman secret inspect "$secret" &>/dev/null; then
             echo "Secret '$secret' already exists — skipping"
@@ -278,7 +289,32 @@ cmd_generate_secrets() {
 
         printf '%s' "$value" | podman secret create "$secret" -
         echo "Created secret '$secret'"
+
+        if [[ "$secret" == "postgres_password" ]]; then
+            captured_postgres_pw="$value"
+        fi
     done
+
+    # Write DATABASE_URL env files for services that embed the postgres password
+    if [[ -n "$captured_postgres_pw" ]]; then
+        local ai_stack_dir run_dir
+        ai_stack_dir=$(jq -r '.ai_stack_dir' "$CONFIG_FILE")
+        ai_stack_dir="${ai_stack_dir//\$HOME/$HOME}"
+        run_dir="$ai_stack_dir/configs/run"
+        mkdir -p "$run_dir"
+
+        local db_services
+        db_services=$(jq -r '.services | to_entries[] | select(.value.environment.DATABASE_URL != null) | .key' "$CONFIG_FILE")
+        for svc in $db_services; do
+            local db_url
+            db_url=$(jq -r --arg s "$svc" '.services[$s].environment.DATABASE_URL' "$CONFIG_FILE")
+            # Inject password: aistack:@host → aistack:PASSWORD@host
+            db_url="${db_url/:@/:${captured_postgres_pw}@}"
+            printf 'DATABASE_URL=%s\n' "$db_url" > "$run_dir/${svc}.env"
+            chmod 0600 "$run_dir/${svc}.env"
+            echo "Wrote env file: $run_dir/${svc}.env"
+        done
+    fi
 
     echo "Done."
 }

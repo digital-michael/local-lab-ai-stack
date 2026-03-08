@@ -1,0 +1,71 @@
+# Traefik dynamic configuration — per-service routers
+# Hot-reloaded. Edit hostnames to match your deployment environment.
+# Place at: $AI_STACK_DIR/configs/traefik/dynamic/services.yaml
+#
+# Hostname convention:
+#   Internal (localhost): webui.localhost, grafana.localhost, etc.
+#   LAN/WAN: configure your DNS to point these names to this host.
+#
+# Replace all hostnames with your actual domain or subdomain before deployment.
+
+http:
+  routers:
+    openwebui:
+      rule: "Host(`webui.localhost`)"
+      entryPoints:
+        - websecure
+      service: openwebui
+      middlewares:
+        - authentik
+        - secure-headers
+      tls: {}
+
+    grafana:
+      rule: "Host(`grafana.localhost`)"
+      entryPoints:
+        - websecure
+      service: grafana
+      middlewares:
+        - authentik
+        - secure-headers
+      tls: {}
+
+    flowise:
+      rule: "Host(`flowise.localhost`)"
+      entryPoints:
+        - websecure
+      service: flowise
+      middlewares:
+        - authentik
+        - secure-headers
+      tls: {}
+
+    authentik:
+      rule: "Host(`auth.localhost`)"
+      entryPoints:
+        - websecure
+      service: authentik
+      middlewares:
+        - secure-headers
+      tls: {}
+
+  services:
+    openwebui:
+      loadBalancer:
+        servers:
+          - url: "http://webui.ai-stack:8080"
+
+    grafana:
+      loadBalancer:
+        servers:
+          - url: "http://grafana.ai-stack:3000"
+
+    flowise:
+      loadBalancer:
+        servers:
+          - url: "http://flowise.ai-stack:3000"
+
+    authentik:
+      loadBalancer:
+        servers:
+          - url: "http://authentik.ai-stack:9000"
