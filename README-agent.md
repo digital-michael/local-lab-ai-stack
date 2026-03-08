@@ -26,7 +26,22 @@ When adding or changing a value, put it in the canonical source and reference it
 
 ---
 
-## 3 Mandatory Reading Before Changes
+## 3 The `README-agent.md` Convention
+
+Any file named `README-agent.md` is a **directive document for LLM agents**, scoped to the directory where it resides and all descendant directories. By default, an agent operating on files within a directory must discover and adhere to the nearest `README-agent.md` at or above its working scope.
+
+**Rules:**
+
+1. **Directory-scoped authority.** A `README-agent.md` governs the directory it lives in and every subdirectory beneath it, unless a more specific `README-agent.md` exists deeper in the tree.
+2. **Most-specific wins.** When multiple `README-agent.md` files exist in the ancestor chain, the closest one to the working directory takes precedence. Parent directives still apply where the child does not override them.
+3. **Read before acting.** Before modifying files in any directory, check for a `README-agent.md` in that directory or its nearest ancestor and follow its instructions.
+4. **Distinct from `README.md`.** `README-agent.md` targets LLM agents. `README.md` targets humans. Do not mix audiences or merge these files.
+
+This convention allows governance to be layered: broad rules live at the repo root, while component- or domain-specific rules live closer to the code they govern.
+
+---
+
+## 4 Mandatory Reading Before Changes
 
 Before modifying any file in this repo, read the relevant documents in this order:
 
@@ -43,7 +58,7 @@ The component guidance in `docs/library/framework_components/` is **normative**.
 
 ---
 
-## 4 Repository Layout
+## 5 Repository Layout
 
 ```
 .
@@ -64,7 +79,7 @@ The component guidance in `docs/library/framework_components/` is **normative**.
 
 ---
 
-## 5 Rules for Scripts
+## 6 Rules for Scripts
 
 All scripts in `./scripts/` must follow the conventions in [docs/library/framework_components/shell-scripting/guidance.md](docs/library/framework_components/shell-scripting/guidance.md). Key requirements:
 
@@ -79,7 +94,7 @@ See also: [shell-scripting/best_practices.md](docs/library/framework_components/
 
 ---
 
-## 6 Rules for Configuration
+## 7 Rules for Configuration
 
 - **`configs/config.json`** is the machine-readable single source of truth for all service definitions (images, ports, volumes, env vars, secrets, health checks, resources, dependencies).
 - **`docs/ai_stack_blueprint/ai_stack_configuration.md`** documents the schema and rationale. It does not contain the values themselves.
@@ -88,7 +103,7 @@ See also: [shell-scripting/best_practices.md](docs/library/framework_components/
 
 ---
 
-## 7 Rules for Documentation
+## 8 Rules for Documentation
 
 - Do not duplicate content. Cross-reference the canonical source.
 - When adding a new component, create a subdirectory under `docs/library/framework_components/` with `best_practices.md`, `security.md`, and `guidance.md`.
@@ -98,7 +113,7 @@ See also: [shell-scripting/best_practices.md](docs/library/framework_components/
 
 ---
 
-## 8 Deviation Policy
+## 9 Deviation Policy
 
 If a change must deviate from the guidance in `docs/library/framework_components/`, you must:
 
@@ -108,7 +123,7 @@ If a change must deviate from the guidance in `docs/library/framework_components
 
 ---
 
-## 9 File Naming Conventions
+## 10 File Naming Conventions
 
 | Pattern | Audience | Purpose |
 |---|---|---|
