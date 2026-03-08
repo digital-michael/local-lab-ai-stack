@@ -9,7 +9,7 @@
   "services": {
     "traefik": {
       "image": "docker.io/library/traefik",
-      "tag": "TBD",
+      "tag": "v3.6.10",
       "container_name": "traefik",
       "dns_alias": "traefik.ai-stack",
       "depends_on": [],
@@ -38,7 +38,7 @@
     },
     "postgres": {
       "image": "docker.io/library/postgres",
-      "tag": "TBD",
+      "tag": "17.9",
       "container_name": "postgres",
       "dns_alias": "postgres.ai-stack",
       "depends_on": [],
@@ -69,7 +69,7 @@
     },
     "qdrant": {
       "image": "docker.io/qdrant/qdrant",
-      "tag": "TBD",
+      "tag": "v1.17.0",
       "container_name": "qdrant",
       "dns_alias": "qdrant.ai-stack",
       "depends_on": [],
@@ -98,7 +98,7 @@
     },
     "knowledge-index": {
       "image": "localhost/knowledge-index",
-      "tag": "TBD",
+      "tag": "0.1.0",
       "container_name": "knowledge-index",
       "dns_alias": "knowledge-index.ai-stack",
       "depends_on": ["postgres", "qdrant"],
@@ -131,14 +131,23 @@
     },
     "authentik": {
       "image": "ghcr.io/goauthentik/server",
-      "tag": "TBD",
+      "tag": "2026.2.1",
       "container_name": "authentik",
       "dns_alias": "authentik.ai-stack",
       "depends_on": ["postgres"],
       "ports": [],
       "volumes": [],
-      "environment": {},
-      "secrets": [],
+      "environment": {
+        "AUTHENTIK_POSTGRESQL__HOST": "postgres.ai-stack",
+        "AUTHENTIK_POSTGRESQL__NAME": "aistack",
+        "AUTHENTIK_POSTGRESQL__USER": "aistack",
+        "AUTHENTIK_ERROR_REPORTING__ENABLED": "false",
+        "AUTHENTIK_LOG_LEVEL": "info"
+      },
+      "secrets": [
+        { "name": "postgres_password", "target": "AUTHENTIK_POSTGRESQL__PASSWORD" },
+        { "name": "authentik_secret_key", "target": "AUTHENTIK_SECRET_KEY" }
+      ],
       "health_check": null,
       "resources": {
         "cpus": 2,
@@ -148,7 +157,7 @@
     },
     "litellm": {
       "image": "ghcr.io/berriai/litellm",
-      "tag": "TBD",
+      "tag": "main-v1.81.14-stable",
       "container_name": "litellm",
       "dns_alias": "litellm.ai-stack",
       "depends_on": ["postgres"],
@@ -177,7 +186,7 @@
     },
     "vllm": {
       "image": "vllm/vllm-openai",
-      "tag": "TBD",
+      "tag": "v0.17.0",
       "container_name": "vllm",
       "dns_alias": "vllm.ai-stack",
       "depends_on": ["litellm"],
@@ -208,7 +217,7 @@
     },
     "llamacpp": {
       "image": "ghcr.io/ggerganov/llama.cpp",
-      "tag": "TBD",
+      "tag": "server--b8238",
       "container_name": "llamacpp",
       "dns_alias": "llamacpp.ai-stack",
       "depends_on": ["litellm"],
@@ -232,14 +241,16 @@
     },
     "flowise": {
       "image": "docker.io/flowiseai/flowise",
-      "tag": "TBD",
+      "tag": "3.0.13",
       "container_name": "flowise",
       "dns_alias": "flowise.ai-stack",
-      "depends_on": ["litellm", "qdrant"],
+      "depends_on": ["litellm", "qdrant", "knowledge-index"],
       "ports": [
         { "host": 3001, "container": 3000 }
       ],
-      "volumes": [],
+      "volumes": [
+        { "host": "$AI_STACK_DIR/flowise", "container": "/data/flowise", "mode": "rw" }
+      ],
       "environment": {
         "FLOWISE_USERNAME": "admin",
         "DATABASE_PATH": "/data/flowise"
@@ -256,14 +267,16 @@
     },
     "openwebui": {
       "image": "ghcr.io/open-webui/open-webui",
-      "tag": "TBD",
+      "tag": "v0.8.9",
       "container_name": "openwebui",
       "dns_alias": "webui.ai-stack",
       "depends_on": ["litellm"],
       "ports": [
         { "host": 9090, "container": 8080 }
       ],
-      "volumes": [],
+      "volumes": [
+        { "host": "$AI_STACK_DIR/openwebui", "container": "/app/backend/data", "mode": "rw" }
+      ],
       "environment": {
         "OPENAI_API_BASE": "http://litellm.ai-stack:4000"
       },
@@ -284,7 +297,7 @@
     },
     "prometheus": {
       "image": "docker.io/prom/prometheus",
-      "tag": "TBD",
+      "tag": "v3.10.0",
       "container_name": "prometheus",
       "dns_alias": "prometheus.ai-stack",
       "depends_on": [],
@@ -305,7 +318,7 @@
     },
     "grafana": {
       "image": "docker.io/grafana/grafana",
-      "tag": "TBD",
+      "tag": "12.4.0",
       "container_name": "grafana",
       "dns_alias": "grafana.ai-stack",
       "depends_on": ["prometheus"],
@@ -313,7 +326,8 @@
         { "host": 3000, "container": 3000 }
       ],
       "volumes": [
-        { "host": "$AI_STACK_DIR/configs/grafana", "container": "/etc/grafana", "mode": "ro" }
+        { "host": "$AI_STACK_DIR/configs/grafana", "container": "/etc/grafana", "mode": "ro" },
+        { "host": "$AI_STACK_DIR/grafana", "container": "/var/lib/grafana", "mode": "rw" }
       ],
       "environment": {},
       "secrets": [],
@@ -331,7 +345,7 @@
     },
     "loki": {
       "image": "docker.io/grafana/loki",
-      "tag": "TBD",
+      "tag": "3.6.7",
       "container_name": "loki",
       "dns_alias": "loki.ai-stack",
       "depends_on": [],
@@ -339,6 +353,7 @@
         { "host": 3100, "container": 3100 }
       ],
       "volumes": [
+        { "host": "$AI_STACK_DIR/configs/loki", "container": "/etc/loki", "mode": "ro" },
         { "host": "$AI_STACK_DIR/logs/loki", "container": "/loki", "mode": "rw" }
       ],
       "environment": {},
@@ -357,7 +372,7 @@
     },
     "promtail": {
       "image": "docker.io/grafana/promtail",
-      "tag": "TBD",
+      "tag": "3.6.7",
       "container_name": "promtail",
       "dns_alias": "promtail.ai-stack",
       "depends_on": ["loki"],

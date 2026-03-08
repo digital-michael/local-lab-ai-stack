@@ -29,20 +29,20 @@ Pin all images to specific tags or digests before deployment.
 
 | Service | Image | Tag/Digest | Notes |
 |---------|-------|------------|-------|
-| OpenWebUI | `ghcr.io/open-webui/open-webui` | TBD | |
-| LiteLLM | `ghcr.io/berriai/litellm` | TBD | |
-| vLLM | `vllm/vllm-openai` | TBD | GPU inference |
-| llama.cpp | `ghcr.io/ggerganov/llama.cpp` | TBD | CPU/Mac inference |
-| Qdrant | `docker.io/qdrant/qdrant` | TBD | |
-| PostgreSQL | `docker.io/library/postgres` | TBD | |
-| Flowise | `docker.io/flowiseai/flowise` | TBD | |
-| Authentik | `ghcr.io/goauthentik/server` | TBD | |
-| Prometheus | `docker.io/prom/prometheus` | TBD | |
-| Grafana | `docker.io/grafana/grafana` | TBD | |
-| Loki | `docker.io/grafana/loki` | TBD | |
-| Promtail | `docker.io/grafana/promtail` | TBD | |
-| Traefik | `docker.io/library/traefik` | TBD | Reverse proxy and TLS termination |
-| Knowledge Index | `localhost/knowledge-index` | TBD | Locally built FastAPI service |
+| OpenWebUI | `ghcr.io/open-webui/open-webui` | `v0.8.9` | |
+| LiteLLM | `ghcr.io/berriai/litellm` | `main-v1.81.14-stable` | |
+| vLLM | `vllm/vllm-openai` | `v0.17.0` | GPU inference |
+| llama.cpp | `ghcr.io/ggerganov/llama.cpp` | `server--b8238` | CPU/Mac inference |
+| Qdrant | `docker.io/qdrant/qdrant` | `v1.17.0` | |
+| PostgreSQL | `docker.io/library/postgres` | `17.9` | |
+| Flowise | `docker.io/flowiseai/flowise` | `3.0.13` | |
+| Authentik | `ghcr.io/goauthentik/server` | `2026.2.1` | |
+| Prometheus | `docker.io/prom/prometheus` | `v3.10.0` | |
+| Grafana | `docker.io/grafana/grafana` | `12.4.0` | |
+| Loki | `docker.io/grafana/loki` | `3.6.7` | |
+| Promtail | `docker.io/grafana/promtail` | `3.6.7` | |
+| Traefik | `docker.io/library/traefik` | `v3.6.10` | Reverse proxy and TLS termination |
+| Knowledge Index | `localhost/knowledge-index` | `0.1.0` | Locally built FastAPI service |
 
 ---
 
@@ -98,6 +98,18 @@ OPENAI_API_KEY=<secret>
 FLOWISE_USERNAME=admin
 FLOWISE_PASSWORD=<secret>
 DATABASE_PATH=/data/flowise
+```
+
+### Authentik
+
+```env
+AUTHENTIK_POSTGRESQL__HOST=postgres.ai-stack
+AUTHENTIK_POSTGRESQL__NAME=aistack
+AUTHENTIK_POSTGRESQL__USER=aistack
+AUTHENTIK_POSTGRESQL__PASSWORD=<secret>
+AUTHENTIK_SECRET_KEY=<secret>
+AUTHENTIK_ERROR_REPORTING__ENABLED=false
+AUTHENTIK_LOG_LEVEL=info
 ```
 
 ### Knowledge Index
@@ -199,6 +211,10 @@ Use the `:Z` volume suffix for SELinux relabeling on Fedora/RHEL hosts.
 | Traefik | `$AI_STACK_DIR/configs/traefik/traefik.yaml` | `/etc/traefik/traefik.yaml` | ro |
 | Traefik | `$AI_STACK_DIR/configs/traefik/dynamic` | `/etc/traefik/dynamic` | ro |
 | Traefik | `$AI_STACK_DIR/configs/tls` | `/etc/traefik/tls` | ro |
+| Flowise | `$AI_STACK_DIR/flowise` | `/data/flowise` | rw |
+| OpenWebUI | `$AI_STACK_DIR/openwebui` | `/app/backend/data` | rw |
+| Grafana (data) | `$AI_STACK_DIR/grafana` | `/var/lib/grafana` | rw |
+| Loki (config) | `$AI_STACK_DIR/configs/loki` | `/etc/loki` | ro |
 
 ---
 
@@ -254,6 +270,7 @@ Secret names and the services that consume them. Values are never stored in this
 | `qdrant_api_key` | Qdrant, Knowledge Index | `QDRANT__SERVICE__API_KEY` (Qdrant); `QDRANT_API_KEY` (Knowledge Index) |
 | `openwebui_api_key` | OpenWebUI | `OPENAI_API_KEY` |
 | `flowise_password` | Flowise | `FLOWISE_PASSWORD` |
+| `authentik_secret_key` | Authentik | `AUTHENTIK_SECRET_KEY` |
 
 ---
 

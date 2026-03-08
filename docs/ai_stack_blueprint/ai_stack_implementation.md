@@ -21,6 +21,7 @@ An LLM agent can read this document to generate quadlet files, execute deploymen
 9. Troubleshooting
 10. Knowledge Index Service API Specification
 11. Discovery Profile Specification
+12. Quadlet Translation Specification
 
 ---
 
@@ -38,6 +39,7 @@ echo "<value>" | podman secret create litellm_master_key -
 echo "<value>" | podman secret create qdrant_api_key -
 echo "<value>" | podman secret create openwebui_api_key -
 echo "<value>" | podman secret create flowise_password -
+echo "<value>" | podman secret create authentik_secret_key -
 ```
 
 ### Reference in quadlet files
@@ -134,7 +136,7 @@ Start services in this order:
 6.  LiteLLM
 7.  vLLM / llama.cpp
 8.  Knowledge Index
-9.  Flowise
+9.  Flowise           ← depends on LiteLLM + Qdrant + Knowledge Index
 10. OpenWebUI
 11. Prometheus → Grafana → Loki → Promtail
 ```
@@ -433,3 +435,122 @@ profiles:
 ```
 
 The Knowledge Index Service only attempts discovery mechanisms that match both the instance's active profiles and the volume's declared profiles.
+
+---
+
+# 12 Quadlet Translation Specification
+
+> **Status:** Blocker — required to generate quadlet files in Phase 5.
+
+This section documents how each field in `configs/config.json` maps to directives in a Podman systemd quadlet `.container` unit file. `configure.sh generate-quadlets` uses this mapping to produce the 15 unit files.
+
+---
+
+## 12.1 config.json Field → Quadlet Directive Mapping
+
+| config.json field | Quadlet directive | Format / Notes |
+|---|---|---|
+| `image` + `tag` | `Image=` | `{image}:{tag}` |
+| `container_name` | `ContainerName=` | |
+| (all services) | `Network=` | `ai-stack-net:alias={dns_alias}` |
+| `ports[].host:container` | `PublishPort=` | `{host}:{container}` — one directive per entry; omit if `ports` is empty |
+| `volumes[].host:container:mode` | `Volume=` | `{host}:{container}:Z` — append `:Z` for SELinux; include `,ro` if mode is `ro` |
+| `environment.KEY` | `Environment=` | `KEY=VALUE` — one directive per entry |
+| `secrets[].name + target` | `Secret=` | `{name},type=env,target={target}` |
+| `health_check.command` | `HealthCmd=` | Omit section if `health_check` is null |
+| `health_check.interval` | `HealthInterval=` | |
+| `health_check.retries` | `HealthRetries=` | |
+| `health_check.timeout` | `HealthStartPeriod=` | Use as startup grace period |
+| `resources.cpus` + `resources.memory` | `PodmanArgs=` | `--cpus={cpus} --memory={memory}` — single directive |
+| `resources.gpu` (non-null) | `AddDevice=nvidia.com/gpu=all` | Only include when gpu is non-null |
+| `depends_on` | `After=` + `Requires=` | See §12.4 |
+
+---
+
+## 12.2 Unit File Template
+
+```ini
+# {service_name}.container
+[Unit]
+Description=AI Stack {ServiceDisplayName}
+After=ai-stack-network.service{after_deps}
+Requires=ai-stack-network.service{requires_deps}
+
+[Container]
+Image={image}:{tag}
+ContainerName={container_name}
+Network=ai-stack-net:alias={dns_alias}
+{PublishPort= entries}
+{Volume= entries}
+{Environment= entries}
+{Secret= entries}
+{HealthCmd= block}
+PodmanArgs=--cpus={cpus} --memory={memory}
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target
+```
+
+Notes:
+- `{after_deps}` and `{requires_deps}` are space-prefixed service names derived from `depends_on` (see §12.4)
+- Omit the `HealthCmd=` block entirely when `health_check` is null
+- For GPU services, add `AddDevice=nvidia.com/gpu=all` before `PodmanArgs=`
+
+---
+
+## 12.3 Special Cases
+
+**1. DATABASE_URL with embedded password**
+
+`LiteLLM` and `Knowledge Index` use `DATABASE_URL` containing the database password. Podman `Environment=` does not perform variable substitution. The `generate-quadlets` script must write an `EnvironmentFile=` pointing to `$AI_STACK_DIR/configs/run/{service}.env`, where the file is generated at deploy time with the password injected from the Podman secret. Format:
+
+```
+DATABASE_URL=postgresql://aistack:<resolved_password>@postgres.ai-stack:5432/aistack
+```
+
+**2. Network alias**
+
+Use the `Network=ai-stack-net:alias={dns_alias}` form (Podman 4.4+) to register the container under its DNS alias on `ai-stack-net`. This replaces a separate `NetworkAlias=` directive.
+
+**3. SELinux volume labels**
+
+All volume mounts require `:Z` for SELinux relabeling on Fedora/RHEL. Append `:Z` to every `Volume=` entry. For read-only volumes, the combined suffix is `:ro,Z`. config.json stores the logical mode; the generator appends the SELinux label.
+
+**4. Multiple PodmanArgs lines**
+
+Do not use multiple `PodmanArgs=` lines — they are not additive in Podman quadlet. Combine all extra arguments into a single `PodmanArgs=` line.
+
+**5. Network unit service name**
+
+The `ai-stack.network` quadlet generates a systemd service named `ai-stack-network.service` (Podman appends `-network` to the base name of `.network` files). All containers must declare `After=ai-stack-network.service`.
+
+**6. Container unit service names**
+
+A `foo.container` file generates `foo.service`. The `depends_on` array values map directly: `"postgres"` → `After=postgres.service`.
+
+---
+
+## 12.4 Complete Dependency Chain
+
+| Quadlet file | After= | Requires= |
+|---|---|---|
+| `traefik.container` | `ai-stack-network.service` | `ai-stack-network.service` |
+| `postgres.container` | `ai-stack-network.service` | `ai-stack-network.service` |
+| `qdrant.container` | `ai-stack-network.service` | `ai-stack-network.service` |
+| `authentik.container` | `ai-stack-network.service postgres.service` | `ai-stack-network.service postgres.service` |
+| `litellm.container` | `ai-stack-network.service postgres.service` | `ai-stack-network.service postgres.service` |
+| `vllm.container` | `ai-stack-network.service litellm.service` | `ai-stack-network.service litellm.service` |
+| `llamacpp.container` | `ai-stack-network.service litellm.service` | `ai-stack-network.service litellm.service` |
+| `knowledge-index.container` | `ai-stack-network.service postgres.service qdrant.service` | `ai-stack-network.service postgres.service qdrant.service` |
+| `flowise.container` | `ai-stack-network.service litellm.service qdrant.service knowledge-index.service` | `ai-stack-network.service litellm.service qdrant.service knowledge-index.service` |
+| `openwebui.container` | `ai-stack-network.service litellm.service` | `ai-stack-network.service litellm.service` |
+| `prometheus.container` | `ai-stack-network.service` | `ai-stack-network.service` |
+| `grafana.container` | `ai-stack-network.service prometheus.service` | `ai-stack-network.service prometheus.service` |
+| `loki.container` | `ai-stack-network.service` | `ai-stack-network.service` |
+| `promtail.container` | `ai-stack-network.service loki.service` | `ai-stack-network.service loki.service` |
+
+`Requires=` means systemd will refuse to start the unit if its dependency fails. All service-to-service `Requires=` here are intentional — if a dependency is down at startup, the dependent service should not attempt to start.
+

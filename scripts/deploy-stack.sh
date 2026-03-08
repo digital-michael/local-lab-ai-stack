@@ -28,6 +28,14 @@ esac
 
 echo "Deploying AI stack..."
 
+# Create required directories
+mkdir -p "${AI_STACK_DIR:-$HOME/ai-stack}/configs/traefik/dynamic"
+mkdir -p "${AI_STACK_DIR:-$HOME/ai-stack}/configs/loki"
+mkdir -p "${AI_STACK_DIR:-$HOME/ai-stack}/configs/tls"
+mkdir -p "${AI_STACK_DIR:-$HOME/ai-stack}/flowise"
+mkdir -p "${AI_STACK_DIR:-$HOME/ai-stack}/openwebui"
+mkdir -p "${AI_STACK_DIR:-$HOME/ai-stack}/grafana"
+
 # Validate configuration
 "$SCRIPT_DIR/configure.sh" validate
 
