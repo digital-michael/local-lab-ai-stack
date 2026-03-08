@@ -27,10 +27,10 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 **Decisions already made (recorded in [decisions.md](../meta_local/decisions.md)):**
 - **D-010 (recorded):** Meta framework extraction (resolved this session)
-- **D-011 (pending):** Traefik as reverse proxy (resolves Consideration #23)
-- **D-012 (pending):** Knowledge Index Service as standalone Python/FastAPI microservice (resolves Consideration #24)
-- **D-013 (pending):** Volume manifest specification (`.ai-library` package format)
-- **D-014 (pending):** Discovery profiles: localhost, local, WAN
+- **D-011 (recorded):** Traefik as reverse proxy (resolves Consideration #23)
+- **D-012 (recorded):** Knowledge Index Service as standalone Python/FastAPI microservice (resolves Consideration #24)
+- **D-013 (recorded):** Volume manifest specification (`.ai-library` package format)
+- **D-014 (recorded):** Discovery profiles: localhost, local, WAN
 
 ---
 
@@ -401,8 +401,8 @@ The `configure.sh` script and its JSON config file are the primary mechanism for
 
 ### Tasks
 
-- [ ] **Design JSON config schema** — define structure for services, images, env vars, ports, volumes, secrets, dependencies, resource limits, health checks
-- [ ] **Create `scripts/configure.sh`** — CRUD operations against the JSON config file
+- [x] **Design JSON config schema** — define structure for services, images, env vars, ports, volumes, secrets, dependencies, resource limits, health checks
+- [x] **Create `scripts/configure.sh`** — CRUD operations against the JSON config file
   - [x] `configure.sh init` — generate default config.json with all services
   - [x] `configure.sh set <path> <value>` — update a config value
   - [x] `configure.sh get <path>` — read a config value
@@ -411,7 +411,7 @@ The `configure.sh` script and its JSON config file are the primary mechanism for
   - [x] `configure.sh generate-secrets` — prompt for and provision Podman secrets from config inventory
 - [x] **Create default `configs/config.json`** — populated with current documented defaults
 - [ ] **Support multi-environment configs** — `configs/dev.json`, `configs/prod.json`
-- [ ] **Update `deploy-stack.sh`** — call `configure.sh validate` and `configure.sh generate-quadlets` before deployment
+- [x] **Update `deploy-stack.sh`** — call `configure.sh validate` and `configure.sh generate-quadlets` before deployment
 - [ ] **Update `ai_stack_configuration.md`** — reframe as schema documentation; values live in config.json
 
 ---
@@ -420,14 +420,14 @@ The `configure.sh` script and its JSON config file are the primary mechanism for
 
 These collapse into the configuration system above. Tracked individually for visibility.
 
-- [ ] **Pin all container image tags/digests** — resolve all TBD entries (Configuration §1)
-- [ ] **Finalize environment variables per service** — confirm defaults, secret references (Configuration §2)
-- [ ] **Confirm volume mount paths per container** — verify host/container path mappings (Configuration §6)
-- [ ] **Provision Podman secrets** — create secrets from inventory; integrate with configure.sh (Implementation §1)
-- [ ] **Generate quadlet unit files** — from config.json via configure.sh (Implementation §2)
-- [ ] **Define service dependency/startup order** — encode as `depends_on` in config.json (Implementation §3)
-- [ ] **Resolve reverse proxy service** — no proxy container defined; port 9443 TLS has no backing service (see Consideration #23)
-- [ ] **Resolve Knowledge Index Service** — listed as component but no image/repo/spec exists (see Consideration #24)
+- [x] **Pin all container image tags/digests** — resolve all TBD entries (Configuration §1)
+- [x] **Finalize environment variables per service** — confirm defaults, secret references (Configuration §2)
+- [x] **Confirm volume mount paths per container** — verify host/container path mappings (Configuration §6)
+- [x] **Provision Podman secrets** — create secrets from inventory; integrate with configure.sh (Implementation §1)
+- [x] **Generate quadlet unit files** — from config.json via configure.sh (Implementation §2)
+- [x] **Define service dependency/startup order** — encode as `depends_on` in config.json (Implementation §3)
+- [x] **Resolve reverse proxy service** — no proxy container defined; port 9443 TLS has no backing service (see Consideration #23)
+- [x] **Resolve Knowledge Index Service** — listed as component but no image/repo/spec exists (see Consideration #24)
 
 ---
 
@@ -448,6 +448,7 @@ These collapse into the configuration system above. Tracked individually for vis
 - [ ] **Build Knowledge Index Service** — implement Python/FastAPI microservice per spec in Implementation §10 (see D-011)
 - [ ] **Implement localhost discovery profile** — filesystem scan of volumes directory, manifest parsing (see D-013)
 - [ ] **Specify local and WAN discovery profiles** — mDNS/DNS-SD for local, registry/federation for WAN (see D-013)
+- [ ] **Build volume ingestion pipeline** — process raw documents into `.ai-library` manifest structure; handle embedding, vector storage, and checksum generation (see D-013)
 
 ---
 
@@ -469,8 +470,8 @@ Items requiring a decision before or during implementation.
 
 | # | Consideration | Status | Resolution |
 |---|--------------|--------|------------|
-| 23 | **Reverse proxy service** — port 9443 TLS termination referenced but no proxy container (Traefik/Caddy/nginx) defined in component list or config | Open | — |
-| 24 | **Knowledge Index Service** — listed as core component but no image, repository, or specification exists; needs to be built or an existing tool identified | Open | — |
+| 23 | **Reverse proxy service** — port 9443 TLS termination referenced but no proxy container (Traefik/Caddy/nginx) defined in component list or config | Resolved | Traefik selected as reverse proxy and TLS termination layer (D-011) |
+| 24 | **Knowledge Index Service** — listed as core component but no image, repository, or specification exists; needs to be built or an existing tool identified | Resolved | Standalone Python/FastAPI microservice; spec in Implementation §10 (D-012) |
 | 25 | **Flowise database backend** — config shows local `DATABASE_PATH=/data/flowise` (SQLite); should it share the PostgreSQL instance? | Open | — |
 | 26 | **Log retention policy** — Loki storage will grow unbounded without a retention/compaction config | Open | — |
 | 27 | **Multi-environment support** — only one set of config values exists; no dev/staging/prod separation | Open | Addressed by configure.sh multi-env support |
