@@ -51,7 +51,6 @@ cp -r "$PROJECT_ROOT/configs/prometheus/." "$AI_STACK_CONFIGS/prometheus/"
 cp -r "$PROJECT_ROOT/configs/loki/." "$AI_STACK_CONFIGS/loki/"
 cp -r "$PROJECT_ROOT/configs/promtail/." "$AI_STACK_CONFIGS/promtail/"
 cp -r "$PROJECT_ROOT/configs/grafana/." "$AI_STACK_CONFIGS/grafana/"
-
 # Validate configuration
 "$SCRIPT_DIR/configure.sh" validate
 

@@ -210,7 +210,12 @@
           "target": "AUTHENTIK_SECRET_KEY"
         }
       ],
-      "health_check": null,
+      "health_check": {
+        "command": "curl -sf http://localhost:9000/-/health/live/ || exit 1",
+        "interval": "30s",
+        "retries": 5,
+        "timeout": "10s"
+      },
       "resources": {
         "cpus": 2,
         "memory": "2g",
@@ -321,7 +326,12 @@
         "BATCH_SIZE": "512"
       },
       "secrets": [],
-      "health_check": null,
+      "health_check": {
+        "command": "curl -sf http://localhost:8080/health || exit 1",
+        "interval": "60s",
+        "retries": 3,
+        "timeout": "10s"
+      },
       "resources": {
         "cpus": 4,
         "memory": "16g",
@@ -360,7 +370,12 @@
           "target": "FLOWISE_PASSWORD"
         }
       ],
-      "health_check": null,
+      "health_check": {
+        "command": "curl -sf http://localhost:3000/api/v1/ping || exit 1",
+        "interval": "30s",
+        "retries": 3,
+        "timeout": "5s"
+      },
       "resources": {
         "cpus": 1,
         "memory": "1g",
@@ -430,7 +445,12 @@
       ],
       "environment": {},
       "secrets": [],
-      "health_check": null,
+      "health_check": {
+        "command": "wget -qO- http://localhost:9090/-/healthy || exit 1",
+        "interval": "30s",
+        "retries": 3,
+        "timeout": "5s"
+      },
       "resources": {
         "cpus": 1,
         "memory": "2g",
@@ -533,7 +553,12 @@
       ],
       "environment": {},
       "secrets": [],
-      "health_check": null,
+      "health_check": {
+        "command": "wget -qO- http://localhost:9080/ready || exit 1",
+        "interval": "30s",
+        "retries": 3,
+        "timeout": "5s"
+      },
       "resources": {
         "cpus": 1,
         "memory": "1g",

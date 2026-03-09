@@ -8,6 +8,10 @@ global:
   external_labels:
     stack: ai-stack
 
+# Alert rules — evaluated every evaluation_interval
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
 scrape_configs:
   # Prometheus self-scrape
   - job_name: 'prometheus'

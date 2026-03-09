@@ -1,0 +1,175 @@
+# Prometheus alerting rules — AI Stack
+# Place at: $AI_STACK_DIR/configs/prometheus/rules/ai_stack_alerts.yml
+# Mounted into Prometheus via the /etc/prometheus volume.
+# Thresholds can be overridden by editing this file and sending SIGHUP to
+# Prometheus (or restarting the container).
+
+groups:
+
+  # ---------------------------------------------------------------------------
+  # Service health
+  # ---------------------------------------------------------------------------
+  - name: service_health
+    interval: 60s
+    rules:
+      - alert: ContainerDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Container {{ $labels.job }} is down"
+          description: >
+            Prometheus cannot scrape {{ $labels.job }} ({{ $labels.instance }}).
+            The container may have crashed or lost network connectivity.
+            Check with: systemctl --user status {{ $labels.job }}.service
+
+      - alert: PostgresUnhealthy
+        expr: up{job="postgres"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL is not reachable"
+          description: >
+            The postgres scrape target has been down for 2 minutes.
+            Run: podman exec postgres pg_isready -U aistack
+
+      - alert: QdrantUnhealthy
+        expr: up{job="qdrant"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Qdrant is not reachable"
+          description: >
+            The qdrant scrape target has been down for 2 minutes.
+            Run: curl http://localhost:6333/healthz
+
+      - alert: LiteLLMUnhealthy
+        expr: up{job="litellm"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "LiteLLM is not reachable"
+          description: >
+            LiteLLM has been unreachable for 2 minutes. Inference requests will fail.
+            Run: curl http://localhost:9000/health
+
+  # ---------------------------------------------------------------------------
+  # Inference performance
+  # ---------------------------------------------------------------------------
+  - name: inference_performance
+    rules:
+      - alert: InferenceLatencyHigh
+        # LiteLLM exposes litellm_request_total_latency_metric_bucket via /metrics
+        expr: >
+          histogram_quantile(0.95,
+            rate(litellm_request_total_latency_metric_bucket[5m])
+          ) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Inference p95 latency > 10s"
+          description: >
+            The 95th percentile end-to-end inference latency has exceeded 10 seconds
+            for 5 minutes. Current value: {{ $value | humanizeDuration }}.
+            Check model load and available VRAM.
+
+      - alert: InferenceErrorRateHigh
+        # LiteLLM exposes litellm_llm_api_failed_requests_metric_total
+        expr: >
+          rate(litellm_llm_api_failed_requests_metric_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LiteLLM error rate > 10% (5m window)"
+          description: >
+            More than 10% of inference requests are failing over the last 5 minutes.
+            Current rate: {{ $value | humanize }} req/s.
+            Check LiteLLM logs: journalctl --user -u litellm.service
+
+  # ---------------------------------------------------------------------------
+  # GPU resources
+  # ---------------------------------------------------------------------------
+  - name: gpu_resources
+    rules:
+      - alert: GPUMemoryHigh
+        # DCGM or nvidia_gpu exporter metric — skip if no GPU exporter is deployed
+        expr: >
+          (nvidia_gpu_memory_used_bytes / nvidia_gpu_memory_total_bytes) * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "GPU memory utilization > 90%"
+          description: >
+            GPU memory usage is above 90% for 5 minutes. Model serving may OOM.
+            Current utilization: {{ $value | humanize }}%.
+            Consider reducing MAX_MODEL_LEN or GPU_MEMORY_UTILIZATION in config.
+
+  # ---------------------------------------------------------------------------
+  # Host disk and system
+  # ---------------------------------------------------------------------------
+  - name: host_resources
+    rules:
+      - alert: DiskUsageHigh
+        expr: >
+          (1 - (node_filesystem_avail_bytes{mountpoint="/"} /
+                node_filesystem_size_bytes{mountpoint="/"})) * 100 > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Root filesystem usage > 85%"
+          description: >
+            Root filesystem is {{ $value | humanize }}% full.
+            Models, vector storage, and logs will consume significant space.
+            Consider pruning old models or expanding storage.
+
+      - alert: DiskUsageCritical
+        expr: >
+          (1 - (node_filesystem_avail_bytes{mountpoint="/"} /
+                node_filesystem_size_bytes{mountpoint="/"})) * 100 > 95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Root filesystem usage > 95% — services may fail"
+          description: >
+            Root filesystem is {{ $value | humanize }}% full. Writes will fail.
+            Immediately free space or expand the disk.
+
+      - alert: ContainerRestartLooping
+        # Prometheus Podman exporter or cadvisor exposes container_start_time_seconds
+        expr: >
+          increase(container_start_time_seconds{name!=""}[10m]) > 3
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} restarted >3 times in 10m"
+          description: >
+            Container {{ $labels.name }} has restarted more than 3 times in the
+            last 10 minutes, indicating a crash loop.
+            Check: journalctl --user -u {{ $labels.name }}.service
+
+  # ---------------------------------------------------------------------------
+  # Loki log pipeline
+  # ---------------------------------------------------------------------------
+  - name: loki_pipeline
+    rules:
+      - alert: LokiIngestionStalled
+        expr: up{job="loki"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Loki not reachable — log ingestion stalled"
+          description: >
+            Loki has been unreachable for 5 minutes. Promtail will buffer logs
+            locally, but long-term unavailability will cause log loss.
+            Check: systemctl --user status loki.service

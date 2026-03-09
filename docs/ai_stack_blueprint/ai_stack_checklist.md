@@ -434,17 +434,17 @@ These collapse into the configuration system above. Tracked individually for vis
 # 3 Deferrable (address incrementally post-deployment)
 
 - [ ] **Tune resource limits** — CPU/memory/GPU per container after observing baseline (Configuration §3)
-- [ ] **Add health checks and readiness probes** — incrementally per service (Configuration §10)
-- [ ] **Configure GPU passthrough / CDI** — required only for GPU nodes (Implementation §4)
-- [ ] **Authentik OIDC integration** — redirect URIs, client config, scopes (Implementation §5)
+- [x] **Add health checks and readiness probes** — all 11 deployed services now have HealthCmd in config.json; llamacpp, flowise, prometheus, promtail, authentik health checks added 2026-03-08
+- [x] **Configure GPU passthrough / CDI** — procedure documented in Implementation §4; `nvidia-ctk cdi generate` + `AddDevice=` quadlet directive
+- [x] **Authentik OIDC integration** — forward-auth already deployed (middlewares.yaml); per-service OIDC config (Grafana, OpenWebUI) documented in Implementation §5
 - [ ] **Define library manifest YAML schema** — JSON Schema for .ai-library packages (Implementation §6)
-- [ ] **Create Prometheus alerting rules** — after monitoring stack is operational (Implementation §7)
-- [ ] **Document backup and restore procedures** — including restore runbook (Implementation §8)
-- [ ] **Build troubleshooting guide** — incrementally from operational experience (Implementation §9)
-- [ ] **TLS certificate setup** — self-signed CA vs trusted CA for port 9443 (Configuration §9)
-- [ ] **Add config subdirectories to install.sh** — `configs/tls`, `configs/grafana`, `configs/prometheus`, `configs/promtail`
-- [ ] **Define log retention/rotation policy** — Loki storage unbounded without config (see Consideration #26)
-- [ ] **Decide Flowise database backend** — local SQLite path vs shared PostgreSQL (see Consideration #25)
+- [x] **Create Prometheus alerting rules** — `configs/prometheus/rules/ai_stack_alerts.yml` created; 11 rules across 5 groups; prometheus.yml updated with rule_files stanza
+- [x] **Document backup and restore procedures** — `scripts/backup.sh` created; full restore procedure in Implementation §8; daily systemd timer included
+- [x] **Build troubleshooting guide** — Implementation §9 expanded with diagnostic commands, 13 common issues, reset and health-check oneliners
+- [x] **TLS certificate setup** — `scripts/generate-tls.sh` created; generates local CA + server cert; install trust instructions included; traefik dynamic/tls.yaml updated to reference correct filenames
+- [x] **Add config subdirectories to install.sh** — `configs/tls`, `configs/grafana`, `configs/prometheus`, `configs/promtail` all present in install.sh
+- [x] **Define log retention/rotation policy** — Loki configured with `retention_period: 168h` (7 days) and compactor enabled in `configs/loki/local-config.yaml`
+- [x] **Decide Flowise database backend** — **Decision: SQLite (local `DATABASE_PATH`)** for MVP. Rationale: Flowise stores flow definitions and API keys only — low-volume metadata unsuitable for shared PostgreSQL without added complexity. Migrate to PostgreSQL if multi-instance Flowise or shared workflow DB becomes a requirement. (Resolves Consideration #25)
 - [ ] **Build Knowledge Index Service** — implement Python/FastAPI microservice per spec in Implementation §10 (see D-011)
 - [ ] **Implement localhost discovery profile** — filesystem scan of volumes directory, manifest parsing (see D-013)
 - [ ] **Specify local and WAN discovery profiles** — mDNS/DNS-SD for local, registry/federation for WAN (see D-013)
@@ -472,6 +472,6 @@ Items requiring a decision before or during implementation.
 |---|--------------|--------|------------|
 | 23 | **Reverse proxy service** — port 9443 TLS termination referenced but no proxy container (Traefik/Caddy/nginx) defined in component list or config | Resolved | Traefik selected as reverse proxy and TLS termination layer (D-011) |
 | 24 | **Knowledge Index Service** — listed as core component but no image, repository, or specification exists; needs to be built or an existing tool identified | Resolved | Standalone Python/FastAPI microservice; spec in Implementation §10 (D-012) |
-| 25 | **Flowise database backend** — config shows local `DATABASE_PATH=/data/flowise` (SQLite); should it share the PostgreSQL instance? | Open | — |
-| 26 | **Log retention policy** — Loki storage will grow unbounded without a retention/compaction config | Open | — |
+| 25 | **Flowise database backend** — config shows local `DATABASE_PATH=/data/flowise` (SQLite); should it share the PostgreSQL instance? | Resolved | SQLite for MVP. Migrate to PostgreSQL if multi-instance Flowise becomes a requirement. |
+| 26 | **Log retention policy** — Loki storage will grow unbounded without a retention/compaction config | Resolved | `retention_period: 168h` (7 days) + compactor enabled in `configs/loki/local-config.yaml` |
 | 27 | **Multi-environment support** — only one set of config values exists; no dev/staging/prod separation | Open | Addressed by configure.sh multi-env support |

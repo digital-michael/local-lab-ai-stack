@@ -179,17 +179,85 @@ AddDevice=nvidia.com/gpu=all
 
 # 5 Authentik OIDC Integration
 
-> **Status:** Deferrable — can use direct authentication initially.
+> **Status:** Deferrable — can use direct authentication initially. Traefik forward-auth (already configured) provides session enforcement without per-service OIDC; per-service OIDC adds SSO convenience.
 
-Services to configure as OIDC relying parties:
+### Overview
 
-| Service | Redirect URI | Notes |
-|---------|-------------|-------|
-| OpenWebUI | `http://webui.ai-stack:9090/oauth/callback` | TBD |
-| Grafana | `http://grafana.ai-stack:3000/login/generic_oauth` | TBD |
-| Flowise | `http://flowise.ai-stack:3001/api/v1/oauth/callback` | TBD |
+Authentik handles authentication in two complementary ways:
 
-Authentik provider configuration and client IDs/secrets to be generated during setup. Each service requires an OIDC application configured in Authentik with the appropriate redirect URIs and scopes.
+1. **Forward-auth** (already configured in `configs/traefik/dynamic/middlewares.yaml`) — Traefik intercepts every request to a protected service and calls Authentik's outpost to verify the session. No per-service configuration required. This is the MVP.
+2. **Per-service OIDC** (this section) — Each service gets its own OIDC application in Authentik, enabling native SSO (single sign-on/out, user attribute mapping). Adds convenience but is not required for security.
+
+### Forward-Auth Setup (required first)
+
+The embedded Authentik outpost handles forward-auth at `http://authentik.ai-stack:9000/outpost.goauthentik.io/auth/traefik`. This is already defined in `middlewares.yaml` and applied to all user-facing routers in `services.yaml`.
+
+**Initial Authentik setup steps (one-time, via browser):**
+
+1. Browse to `https://auth.localhost` (after Traefik + Authentik are started)
+2. Complete the initial admin setup wizard
+3. Create a default provider of type **Proxy** (for forward-auth):
+   - Type: Forward auth (single application)
+   - External host: `https://auth.localhost`
+4. Embed the proxy provider in the default embedded outpost (`Admin > Outposts`)
+5. Restart the embedded outpost to apply changes
+
+### Per-Service OIDC Configuration
+
+For each service, create an **OAuth2/OpenID Connect Provider** and **Application** in Authentik:
+
+**Prerequisite:** Note the Authentik base URL (e.g. `https://auth.localhost`) and generate a provider client ID and secret in Authentik Admin UI.
+
+#### Grafana
+
+Add to `configs/grafana/grafana.ini` under `[auth.generic_oauth]`:
+
+```ini
+[auth.generic_oauth]
+enabled = true
+name = Authentik
+allow_sign_up = true
+client_id = <grafana-client-id>
+client_secret = <grafana-client-secret>
+scopes = openid email profile
+auth_url = https://auth.localhost/application/o/authorize/
+token_url = https://auth.localhost/application/o/token/
+api_url = https://auth.localhost/application/o/userinfo/
+role_attribute_path = contains(groups[*], 'grafana-admins') && 'Admin' || 'Viewer'
+```
+
+Authentik Application settings:
+- Redirect URI: `https://grafana.localhost/login/generic_oauth`
+- Scopes: `openid`, `email`, `profile`
+
+#### OpenWebUI
+
+Add environment variables to `config.json` under `openwebui.environment`:
+
+```json
+"OAUTH_CLIENT_ID": "<openwebui-client-id>",
+"OAUTH_CLIENT_SECRET": "<openwebui-client-secret>",
+"OPENID_PROVIDER_URL": "https://auth.localhost/application/o/openwebui/.well-known/openid-configuration",
+"OAUTH_SCOPES": "openid email profile",
+"ENABLE_OAUTH_SIGNUP": "true"
+```
+
+Authentik Application settings:
+- Redirect URI: `https://webui.localhost/oauth/callback`
+- Scopes: `openid`, `email`, `profile`
+
+#### Flowise
+
+Flowise v3 does not natively support OIDC. Protection is handled entirely via Traefik forward-auth (already applied by the `authentik` middleware in `services.yaml`). No per-service OIDC configuration is needed.
+
+### Service OIDC Summary
+
+| Service | OIDC Support | Redirect URI | Method |
+|---------|-------------|--------------|--------|
+| OpenWebUI | Native (`OAUTH_*` env vars) | `https://webui.localhost/oauth/callback` | Per-service OIDC |
+| Grafana | Native (`generic_oauth`) | `https://grafana.localhost/login/generic_oauth` | Per-service OIDC |
+| Flowise | None — proxy only | N/A | Traefik forward-auth only |
+| Prometheus | None — proxy only | N/A | Traefik forward-auth only |
 
 ---
 
@@ -259,67 +327,219 @@ Full JSON Schema to be defined during implementation. The schema should validate
 
 # 7 Alerting Rules
 
-> **Status:** Deferrable — add after monitoring stack is operational.
+Alert rules are stored in `configs/prometheus/rules/ai_stack_alerts.yml` (repo) and deployed to `$AI_STACK_DIR/configs/prometheus/rules/` by `deploy-stack.sh`. Prometheus is configured to load them via `rule_files` in `configs/prometheus/prometheus.yml`.
 
-Planned Prometheus alert rules:
+### Defined Alerts
 
-| Alert | Condition | Severity |
-|-------|-----------|----------|
-| InferenceLatencyHigh | `inference_latency_seconds > 10` for 5m | Warning |
-| GPUMemoryHigh | `gpu_memory_used_percent > 90` for 5m | Critical |
-| ContainerRestart | `container_restart_count > 3` in 10m | Warning |
-| DiskUsageHigh | `disk_used_percent > 85` | Warning |
-| QdrantUnhealthy | Qdrant health check failing for 2m | Critical |
-| PostgresUnhealthy | PostgreSQL health check failing for 2m | Critical |
+| Alert | Group | Condition | For | Severity |
+|-------|-------|-----------|-----|----------|
+| `ContainerDown` | service_health | `up == 0` | 2m | Critical |
+| `PostgresUnhealthy` | service_health | `up{job="postgres"} == 0` | 2m | Critical |
+| `QdrantUnhealthy` | service_health | `up{job="qdrant"} == 0` | 2m | Critical |
+| `LiteLLMUnhealthy` | service_health | `up{job="litellm"} == 0` | 2m | Critical |
+| `InferenceLatencyHigh` | inference_performance | p95 latency > 10s | 5m | Warning |
+| `InferenceErrorRateHigh` | inference_performance | LiteLLM error rate > 10% | 5m | Warning |
+| `GPUMemoryHigh` | gpu_resources | GPU VRAM > 90% | 5m | Critical |
+| `DiskUsageHigh` | host_resources | Root FS > 85% | 10m | Warning |
+| `DiskUsageCritical` | host_resources | Root FS > 95% | 5m | Critical |
+| `ContainerRestartLooping` | host_resources | >3 restarts in 10m | 0m | Warning |
+| `LokiIngestionStalled` | loki_pipeline | `up{job="loki"} == 0` | 5m | Warning |
 
-Alert rules will be defined as Prometheus YAML and stored in `$AI_STACK_DIR/configs/prometheus/rules/`. Alert threshold values may be extracted to [ai_stack_configuration.md](ai_stack_configuration.md) once rules are concrete.
+### Alertmanager
+
+Prometheus fires alerts to Alertmanager (not yet deployed). To receive notifications, add Alertmanager to the stack:
+
+1. Add `alertmanager` service to `config.json`
+2. Configure notification channel (email, PagerDuty, Slack) in `configs/prometheus/alertmanager.yml`
+3. Add `alerting.alertmanagers` stanza to `configs/prometheus/prometheus.yml`
+
+Without Alertmanager, alerts are visible in the Prometheus UI at `http://prometheus.localhost/alerts`.
+
+### Updating rules
+
+Prometheus hot-reloads rules on SIGHUP:
+```bash
+kill -HUP $(podman exec prometheus cat /tmp/prometheus.pid 2>/dev/null) 2>/dev/null || \
+    curl -sf -X POST http://localhost:9091/-/reload
+```
 
 ---
 
 # 8 Backup and Restore
 
-> **Status:** Deferrable — implement before production use.
+The `scripts/backup.sh` script handles all data backup and restore. See that file for full usage. This section documents the procedure and important notes.
 
-### What to back up
+### What is backed up
 
-| Data | Path | Method |
-|------|------|--------|
-| PostgreSQL | `$AI_STACK_DIR/postgres/` | `pg_dump` via cron |
-| Qdrant snapshots | `$AI_STACK_DIR/qdrant/` | Qdrant snapshot API |
-| Knowledge libraries | `$AI_STACK_DIR/libraries/` | rsync / tar |
-| Configuration | `$AI_STACK_DIR/configs/` | git-tracked |
-| Secrets | Podman secret store | `podman secret inspect` + encrypted export |
+| Data | Backup method | Retention | Restore method |
+|------|--------------|-----------|----------------|
+| PostgreSQL | `pg_dumpall` via `podman exec` | 7 backup sets | `psql` restore via `podman exec -i` |
+| Qdrant | Snapshot API per collection | 7 backup sets | Upload snapshot via REST API |
+| Knowledge libraries | `tar -czf` of `$AI_STACK_DIR/libraries/` | 7 backup sets | `tar -xzf` |
+| Service configuration | `tar -czf` of `$AI_STACK_DIR/configs/` (excludes TLS private keys) | 7 backup sets | `tar -xzf` |
+| Podman secrets | Not automated — manual export required | Operator responsibility | `printf '%s' <value> \| podman secret create --replace <name> -` |
+| TLS certificates | Not in backup — regenerate with `generate-tls.sh` | N/A | `scripts/generate-tls.sh` |
 
-### Backup schedule
+### Running a backup
 
-| Data | Frequency | Retention |
-|------|-----------|-----------|
-| PostgreSQL | Daily | 7 days |
-| Qdrant snapshots | Daily | 7 days |
-| Configuration | On change (git) | Full history |
+```bash
+# One-off backup
+scripts/backup.sh
+
+# With custom retention (keep 14 sets)
+BACKUP_KEEP=14 scripts/backup.sh
+
+# Dry run (see what would be done)
+scripts/backup.sh --dry-run
+```
+
+Backup sets are stored in `$AI_STACK_DIR/backups/<timestamp>/`.
+
+### Setting up a daily backup timer
+
+```ini
+# ~/.config/systemd/user/ai-stack-backup.service
+[Unit]
+Description=AI Stack daily backup
+After=postgres.service qdrant.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/Projects/active/llm-agent-local-2/scripts/backup.sh
+Environment=AI_STACK_DIR=%h/ai-stack
+```
+
+```ini
+# ~/.config/systemd/user/ai-stack-backup.timer
+[Unit]
+Description=Run AI Stack backup daily at 02:00
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now ai-stack-backup.timer
+```
 
 ### Restore procedure
 
-TBD — document restore steps for each data source during implementation.
+**Before restoring:**
+1. Stop all stack services (the restore script does this automatically when run interactively)
+2. Confirm the backup timestamp to restore from: `ls $AI_STACK_DIR/backups/`
+3. Ensure Podman secrets are still intact (secrets are not backed up automatically)
+
+```bash
+# List available backup sets
+ls $AI_STACK_DIR/backups/
+
+# Restore from a specific backup set
+scripts/backup.sh --restore 20260308T020000
+```
+
+The restore script will:
+1. Prompt for confirmation
+2. Stop all running services
+3. Start PostgreSQL temporarily and restore from `postgres_all.sql`
+4. Start Qdrant temporarily and upload each collection's snapshot
+5. Extract `libraries.tar.gz` and `configs.tar.gz` in place
+6. Print instructions for restarting services in the correct order
+
+**After restoring:**
+- If TLS certificates were not in the backup, run `scripts/generate-tls.sh`
+- Verify all services start cleanly: `journalctl --user -u <service>.service -n 50`
+- Run `bats testing/layer1_smoke.bats` to validate service reachability
+
+### Secrets export (manual)
+
+Podman secrets cannot be read back after creation. Store the source values in a secure secrets manager (e.g., pass, Bitwarden, HashiCorp Vault) and re-create them after a restore:
+
+```bash
+printf '%s' '<value>' | podman secret create --replace postgres_password -
+printf '%s' '<value>' | podman secret create --replace litellm_master_key -
+printf '%s' '<value>' | podman secret create --replace qdrant_api_key -
+printf '%s' '<value>' | podman secret create --replace openwebui_api_key -
+printf '%s' '<value>' | podman secret create --replace flowise_password -
+printf '%s' '<value>' | podman secret create --replace authentik_secret_key -
+```
 
 ---
 
 # 9 Troubleshooting
 
-> **Status:** Deferrable — build incrementally from operational experience.
+### Diagnostic commands
+
+```bash
+# Check service status and recent logs
+journalctl --user -u <service>.service -n 50
+
+# Fast go/no-go signal — all 11 deployed services
+bats testing/layer0_preflight.bats testing/layer1_smoke.bats
+
+# Full component-level diagnostics
+bats testing/layer2_*.bats
+
+# Container health state
+podman ps --format "table {{.Names}}\t{{.Status}}\t{{.Health}}"
+
+# List failed units
+systemctl --user list-units --state=failed
+```
 
 ### Common issues
 
 | Symptom | Likely Cause | Resolution |
 |---------|-------------|------------|
-| GPU not visible in container | CDI not configured | Run `nvidia-ctk cdi generate` (see §4) |
-| vLLM OOM | Model too large for VRAM | Use a smaller model or enable tensor parallelism ([configuration §7](ai_stack_configuration.md#7-model-configuration)) |
-| Qdrant disk full | Vector storage unbounded | Add retention policy or expand storage |
-| Containers fail to resolve DNS | Network not created | Run `podman network create ai-stack-net` ([configuration §5](ai_stack_configuration.md#5-network-configuration)) |
-| Permission denied on volumes | Rootless UID mapping | Use `:Z` suffix on volume mounts ([configuration §6](ai_stack_configuration.md#6-volume-paths)) |
-| Service fails to start | Dependency not ready | Check startup order (§3) and health checks ([configuration §10](ai_stack_configuration.md#10-health-check-parameters)) |
+| Service unit fails to start | Dependency not ready; secret missing | Check `journalctl --user -u <svc>.service`; run `configure.sh validate` |
+| `podman: secret not found` | Secret not created | Run `scripts/configure.sh generate-secrets` |
+| GPU not visible in container | CDI not configured | Run `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` (§4) |
+| vLLM OOM crash | Model too large for VRAM | Lower `GPU_MEMORY_UTILIZATION` or `MAX_MODEL_LEN` in config.json; use a smaller GGUF |
+| Qdrant disk growing unbounded | No vector TTL configured | Set per-collection TTL via Qdrant API; expand `$AI_STACK_DIR/qdrant` volume path |
+| Containers fail to resolve DNS | Network not yet created | `podman network create ai-stack-net`; or `scripts/deploy-stack.sh` creates it |
+| Permission denied on volumes | Rootless UID/SELinux | Ensure all volume mounts use `:Z` (done by `configure.sh generate-quadlets`) |
+| Traefik 502 Bad Gateway | Backend container not running | Check backend service: `podman ps`, `systemctl --user start <svc>.service` |
+| Authentik outpost not responding | Outpost not started or embedded outpost misconfigured | `journalctl --user -u authentik.service -n 100`; check outpost config in Authentik admin |
+| LiteLLM returns 500 for all models | No model backend is reachable | Check vllm/llamacpp service status; verify model file exists in `$AI_STACK_DIR/models/` |
+| Grafana datasource shows error | Prometheus/Loki not reachable from Grafana container | Verify Prometheus/Loki are running; check internal DNS `prometheus.ai-stack:9090` from Grafana network |
+| TLS certificate not trusted | CA cert not installed in browser/OS | Trust `$AI_STACK_DIR/configs/tls/ca.crt`: `sudo update-ca-trust` (see `scripts/generate-tls.sh`) |
+| `pg_isready` fails after restart | PostgreSQL data directory ownership issue | Check `:Z` on volume mount; run `podman unshare ls -la $AI_STACK_DIR/postgres` |
+| Loki log gaps | Promtail not running or watched path missing | `systemctl --user status promtail.service`; verify `scrape_configs.static_configs.labels.__path__` in promtail config |
 
-Additional troubleshooting entries will be added as issues are encountered.
+### Container does not start after `daemon-reload`
+
+```bash
+# Validate the generated quadlet file
+systemd-analyze verify ~/.config/containers/systemd/<service>.container
+
+# Regenerate quadlets from config
+scripts/configure.sh generate-quadlets
+systemctl --user daemon-reload
+```
+
+### Reset a single service to a clean state
+
+```bash
+svc=<service>
+systemctl --user stop ${svc}.service
+podman rm -f "$svc" 2>/dev/null || true
+systemctl --user start ${svc}.service
+journalctl --user -u ${svc}.service -f
+```
+
+### Inspect all container health states
+
+```bash
+for svc in traefik postgres qdrant authentik litellm openwebui \
+           prometheus grafana loki flowise promtail; do
+    health=$(podman inspect --format '{{.State.Health.Status}}' "$svc" 2>/dev/null || echo 'not running')
+    printf '  %-15s %s\n' "$svc" "$health"
+done
+```
 
 ---
 
