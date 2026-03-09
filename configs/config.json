@@ -16,11 +16,18 @@
       "ports": [
         {
           "host": 80,
-          "container": 80
+          "container": 80,
+          "bind": "0.0.0.0"
         },
         {
           "host": 443,
-          "container": 443
+          "container": 443,
+          "bind": "0.0.0.0"
+        },
+        {
+          "host": 8080,
+          "container": 8080,
+          "bind": "127.0.0.1"
         }
       ],
       "volumes": [
@@ -63,7 +70,8 @@
       "ports": [
         {
           "host": 5432,
-          "container": 5432
+          "container": 5432,
+          "bind": "127.0.0.1"
         }
       ],
       "volumes": [
@@ -104,11 +112,13 @@
       "ports": [
         {
           "host": 6333,
-          "container": 6333
+          "container": 6333,
+          "bind": "127.0.0.1"
         },
         {
           "host": 6334,
-          "container": 6334
+          "container": 6334,
+          "bind": "127.0.0.1"
         }
       ],
       "volumes": [
@@ -234,7 +244,8 @@
       "ports": [
         {
           "host": 9000,
-          "container": 4000
+          "container": 4000,
+          "bind": "127.0.0.1"
         }
       ],
       "volumes": [],
@@ -350,7 +361,8 @@
       "ports": [
         {
           "host": 3001,
-          "container": 3000
+          "container": 3000,
+          "bind": "127.0.0.1"
         }
       ],
       "volumes": [
@@ -393,7 +405,8 @@
       "ports": [
         {
           "host": 9090,
-          "container": 8080
+          "container": 8080,
+          "bind": "127.0.0.1"
         }
       ],
       "volumes": [
@@ -433,7 +446,8 @@
       "ports": [
         {
           "host": 9091,
-          "container": 9090
+          "container": 9090,
+          "bind": "127.0.0.1"
         }
       ],
       "volumes": [
@@ -468,7 +482,8 @@
       "ports": [
         {
           "host": 3000,
-          "container": 3000
+          "container": 3000,
+          "bind": "127.0.0.1"
         }
       ],
       "volumes": [
@@ -506,7 +521,8 @@
       "ports": [
         {
           "host": 3100,
-          "container": 3100
+          "container": 3100,
+          "bind": "127.0.0.1"
         }
       ],
       "volumes": [
@@ -548,6 +564,11 @@
         {
           "host": "$AI_STACK_DIR/configs/promtail",
           "container": "/etc/promtail",
+          "mode": "ro"
+        },
+        {
+          "host": "$AI_STACK_DIR/logs",
+          "container": "/data/logs",
           "mode": "ro"
         }
       ],

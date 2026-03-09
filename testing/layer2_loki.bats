@@ -130,8 +130,8 @@ setup_file() {
         return 1
     }
 
-    echo "$output" | grep "retention_period" | grep -q "168h" || {
-        echo "Expected retention_period: 168h but found:" >&3
+    echo "$output" | grep "retention_period" | grep -qE "168h|1w" || {
+        echo "Expected retention_period: 168h (or equivalent 1w) but found:" >&3
         echo "$output" | grep "retention_period" >&3
         return 1
     }

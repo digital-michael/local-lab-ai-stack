@@ -30,9 +30,17 @@ setup_file() {
         return 1
     fi
 
-    # Find any running container on ai-stack-net to use as exec proxy
-    EXEC_CONTAINER=$(podman ps --format '{{.Names}}' \
-        | grep -E "^(traefik|prometheus|grafana|loki)" | head -1)
+    # Ensure the test log directory exists
+    mkdir -p "${AI_STACK_DIR}/logs"
+
+    # Find a running container with curl available to use as exec proxy
+    EXEC_CONTAINER=""
+    for _ctr in grafana loki openwebui flowise; do
+        if podman exec "$_ctr" sh -c 'command -v curl' &>/dev/null 2>&1; then
+            EXEC_CONTAINER="$_ctr"
+            break
+        fi
+    done
 
     if [[ -z "$EXEC_CONTAINER" ]]; then
         echo "ERROR: No container available on ai-stack-net for exec proxy" >&3

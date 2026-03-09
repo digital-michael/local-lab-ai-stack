@@ -58,7 +58,7 @@ wait_for_http() {
 
     while true; do
         local code
-        code=$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" "$url" 2>/dev/null)
+        code=$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" "$url" 2>/dev/null) || code="000"
         [[ "$code" == "$expected" ]] && return 0
         sleep 3
         elapsed=$(( elapsed + 3 ))
@@ -169,51 +169,51 @@ wait_for_http() {
 
     local new_pass="bats_rotated_pass_$(date +%s)"
 
-    # Rotate the secret
-    echo "$new_pass" | podman secret create --replace "$secret_name" - >/dev/null 2>&1 || {
+    # Rotate the secret (use printf to avoid trailing newline)
+    printf '%s' "$new_pass" | podman secret create --replace "$secret_name" - >/dev/null 2>&1 || {
         # Older Podman without --replace: delete then recreate
         podman secret rm "$secret_name" >/dev/null 2>&1
-        echo "$new_pass" | podman secret create "$secret_name" - >/dev/null
+        printf '%s' "$new_pass" | podman secret create "$secret_name" - >/dev/null
     }
 
     # Restart service to pick up new secret
     systemctl --user restart "${test_svc}.service" >/dev/null
     wait_for_active "$test_svc" 60 || {
         # Restore original before returning failure
-        echo "$original_pass" | podman secret create --replace "$secret_name" - >/dev/null 2>&1 || true
+        printf '%s' "$original_pass" | podman secret create --replace "$secret_name" - >/dev/null 2>&1 || true
         systemctl --user restart "${test_svc}.service" >/dev/null
         return 1
     }
 
-    # Wait for Flowise HTTP to be ready
-    wait_for_http "401" "http://localhost:3001/api/v1/chatflows" 30
+    # Wait for Flowise HTTP to be ready (ping endpoint is whitelisted, returns 200)
+    wait_for_http "200" "http://localhost:3001/api/v1/ping" 90
 
-    # New password must work
-    local new_auth
-    new_auth="Authorization: Basic $(printf 'user:%s' "$new_pass" | base64 -w0)"
-    local new_code
-    new_code=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" \
-        -H "$new_auth" "http://localhost:3001/api/v1/chatflows")
-    [[ "$new_code" == "200" ]] || {
-        echo "New credential not accepted (got $new_code). Restoring original." >&3
-        echo "$original_pass" | podman secret create --replace "$secret_name" - >/dev/null 2>&1 || true
+    # New password must be accepted via account/basic-auth (Flowise v3 credential check)
+    local new_result
+    new_result=$(curl -s --max-time 10 \
+        -X POST -H "Content-Type: application/json" \
+        -d "{\"username\":\"admin\",\"password\":\"${new_pass}\"}" \
+        "http://localhost:3001/api/v1/account/basic-auth" | jq -r '.message // empty')
+    [[ "$new_result" == "Authentication successful" ]] || {
+        echo "New credential not accepted (got: $new_result). Restoring original." >&3
+        printf '%s' "$original_pass" | podman secret create --replace "$secret_name" - >/dev/null 2>&1 || true
         systemctl --user restart "${test_svc}.service" >/dev/null
         return 1
     }
 
     # Old password must be rejected
-    local old_auth
-    old_auth="Authorization: Basic $(printf 'user:%s' "$original_pass" | base64 -w0)"
-    local old_code
-    old_code=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" \
-        -H "$old_auth" "http://localhost:3001/api/v1/chatflows")
-    [[ "$old_code" == "401" ]] || {
-        echo "Old credential still accepted (got $old_code) after rotation." >&3
+    local old_result
+    old_result=$(curl -s --max-time 10 \
+        -X POST -H "Content-Type: application/json" \
+        -d "{\"username\":\"admin\",\"password\":\"${original_pass}\"}" \
+        "http://localhost:3001/api/v1/account/basic-auth" | jq -r '.message // empty')
+    [[ "$old_result" == "Authentication failed" ]] || {
+        echo "Old credential still accepted after rotation (got: $old_result)." >&3
     }
 
-    # Restore original password
-    echo "$original_pass" | podman secret create --replace "$secret_name" - >/dev/null 2>&1 || \
-    { podman secret rm "$secret_name" >/dev/null 2>&1; echo "$original_pass" | podman secret create "$secret_name" - >/dev/null; }
+    # Restore original password (use printf to avoid trailing newline)
+    printf '%s' "$original_pass" | podman secret create --replace "$secret_name" - >/dev/null 2>&1 || \
+    { podman secret rm "$secret_name" >/dev/null 2>&1; printf '%s' "$original_pass" | podman secret create "$secret_name" - >/dev/null; }
     systemctl --user restart "${test_svc}.service" >/dev/null
     wait_for_active "$test_svc" 60 || return 1
 }

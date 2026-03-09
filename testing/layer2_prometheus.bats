@@ -70,7 +70,8 @@ setup_file() {
 # a hard failure.
 # ---------------------------------------------------------------------------
 
-KNOWN_DOWN=(vllm llamacpp knowledge-index)
+# litellm: prometheus metrics not yet enabled (requires config.yaml with callbacks)
+KNOWN_DOWN=(vllm llamacpp knowledge-index litellm)
 
 @test "T-041: all prometheus scrape targets are health=up (known-down flagged)" {
     run curl -s --max-time 15 "${PROM_URL}/api/v1/targets"

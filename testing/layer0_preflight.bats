@@ -116,10 +116,10 @@ setup_file() {
 # ---------------------------------------------------------------------------
 
 @test "T-005: ai-stack Podman network exists" {
-    run podman network inspect ai-stack
+    run podman network inspect ai-stack-net
     if [[ "$status" -ne 0 ]]; then
-        echo "Network 'ai-stack' not found." >&3
-        echo "Run: podman network create ai-stack" >&3
+        echo "Network 'ai-stack-net' not found." >&3
+        echo "Run: podman network create ai-stack-net" >&3
         return 1
     fi
 }

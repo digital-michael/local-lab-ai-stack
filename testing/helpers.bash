@@ -130,3 +130,14 @@ read_secret() {
         docker.io/library/alpine:latest \
         sh -c "cat /run/secrets/$name" 2>/dev/null
 }
+
+# ---------------------------------------------------------------------------
+# Helper: fail <message>
+# ---------------------------------------------------------------------------
+# Compatibility shim for bats-assert's fail() — not installed on the host.
+# Prints message to fd 3 (captured by BATS) and returns 1 to fail the test.
+# ---------------------------------------------------------------------------
+fail() {
+    echo "$*" >&3
+    return 1
+}

@@ -27,25 +27,30 @@ setup_file() {
         return 1
     fi
 
-    # Build basic-auth header: Flowise uses username "user" by default.
-    FLOWISE_USER="${FLOWISE_USER:-user}"
-    FLOWISE_AUTH_HEADER="Authorization: Basic $(
-        printf '%s:%s' "$FLOWISE_USER" "$FLOWISE_PASS" | base64 -w0
-    )"
-    export FLOWISE_PASS FLOWISE_USER FLOWISE_AUTH_HEADER
+    # Flowise v3 uses JWT/API-key auth for API calls; FLOWISE_USERNAME/PASSWORD
+    # are only used for the web UI login.  The /api/v1/account/basic-auth
+    # endpoint (whitelisted) accepts a JSON body and verifies against the env vars.
+    FLOWISE_USER="${FLOWISE_USER:-admin}"
+    export FLOWISE_PASS FLOWISE_USER
 }
 
 # ---------------------------------------------------------------------------
 # T-048 — GET /api/v1/chatflows returns a JSON array
 # ---------------------------------------------------------------------------
-# An empty array is a valid response when no chatflows have been created yet.
-# The key assertion is that the endpoint responds and returns parseable JSON.
+# T-048 — POST /api/v1/account/basic-auth verifies correct credentials
+# ---------------------------------------------------------------------------
+# Flowise v3 uses JWT / API-key auth for REST API calls; FLOWISE_USERNAME and
+# FLOWISE_PASSWORD are only used for the web-UI login.  The whitelisted
+# /api/v1/account/basic-auth endpoint accepts a JSON body and compares
+# against those env vars.  This confirms the correct secret is deployed.
 # ---------------------------------------------------------------------------
 
-@test "T-048: flowise GET /api/v1/chatflows returns 200 JSON array" {
+@test "T-048: flowise /api/v1/account/basic-auth accepts configured credentials" {
     run curl -s --max-time 15 \
-        -H "$FLOWISE_AUTH_HEADER" \
-        "${FLOWISE_URL}/api/v1/chatflows"
+        -X POST \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"${FLOWISE_USER}\",\"password\":\"${FLOWISE_PASS}\"}" \
+        "${FLOWISE_URL}/api/v1/account/basic-auth"
 
     [[ "$status" -eq 0 ]] || {
         echo "curl failed connecting to Flowise (exit $status)" >&3
@@ -57,8 +62,11 @@ setup_file() {
         return 1
     }
 
-    echo "$output" | jq -e 'type == "array"' >/dev/null 2>&1 || {
-        echo "Expected a JSON array, got: $(echo "$output" | jq 'type')" >&3
+    local msg
+    msg=$(echo "$output" | jq -r '.message // empty')
+    [[ "$msg" == "Authentication successful" ]] || {
+        echo "Expected 'Authentication successful', got: $msg" >&3
+        echo "Full response: $output" >&3
         return 1
     }
 }

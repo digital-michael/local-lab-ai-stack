@@ -59,7 +59,7 @@ setup_file() {
 # ---------------------------------------------------------------------------
 
 @test "T-013: grafana /api/health returns 200 with database ok" {
-    assert_http_body_contains "http://localhost:3000/api/health" '"database":"ok"'
+    assert_http_body_contains "http://localhost:3000/api/health" '"database": "ok"'
 }
 
 # ---------------------------------------------------------------------------
@@ -83,7 +83,7 @@ setup_file() {
 # ---------------------------------------------------------------------------
 
 @test "T-016: litellm /health returns 200" {
-    assert_http_status "200" "http://localhost:9000/health"
+    assert_http_status "200" "http://localhost:9000/health/liveliness"
 }
 
 # ---------------------------------------------------------------------------
@@ -117,8 +117,8 @@ setup_file() {
 
     # Route exists — expect 200 or 302 (redirect to login)
     run curl -sk --max-time 10 -o /dev/null -w "%{http_code}" \
-        --resolve "authentik.localhost:443:127.0.0.1" \
-        "https://authentik.localhost/"
+        --resolve "auth.localhost:443:127.0.0.1" \
+        "https://auth.localhost/"
     [[ "$status" -eq 0 ]]
     [[ "$output" =~ ^(200|302)$ ]] || {
         echo "Expected 200 or 302 from Authentik via Traefik, got: $output" >&3

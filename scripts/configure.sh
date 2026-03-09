@@ -222,7 +222,7 @@ EOF
             jq -r --arg s "$svc" '.services[$s].environment // {} | to_entries[] | select(.key != "DATABASE_URL") | "Environment=" + .key + "=" + .value' "$CONFIG_FILE"
 
             # Ports
-            jq -r --arg s "$svc" '.services[$s].ports[]? | "PublishPort=" + (.host|tostring) + ":" + (.container|tostring)' "$CONFIG_FILE"
+            jq -r --arg s "$svc" '.services[$s].ports[]? | "PublishPort=" + (if .bind then .bind + ":" else "" end) + (.host|tostring) + ":" + (.container|tostring)' "$CONFIG_FILE"
 
             # Health check
             local hc_cmd
