@@ -107,3 +107,26 @@ assert_http_body_contains() {
 http_status() {
     curl -s --max-time 10 -o /dev/null -w "%{http_code}" "$@"
 }
+
+# ---------------------------------------------------------------------------
+# Helper: read a Podman secret value
+# ---------------------------------------------------------------------------
+# Usage: value=$(read_secret "postgres_password")
+#
+# Checks for an environment variable override first (name uppercased, e.g.
+# POSTGRES_PASSWORD for postgres_password), then falls back to mounting the
+# secret into a temporary alpine container.
+#
+# Requires: alpine image available locally for the fallback path.
+read_secret() {
+    local name="$1"
+    local env_var="${name^^}"          # bash 4+ case-modification
+    local env_val="${!env_var:-}"
+    if [[ -n "$env_val" ]]; then
+        echo "$env_val"
+        return 0
+    fi
+    podman run --rm --secret "$name" \
+        docker.io/library/alpine:latest \
+        sh -c "cat /run/secrets/$name" 2>/dev/null
+}
