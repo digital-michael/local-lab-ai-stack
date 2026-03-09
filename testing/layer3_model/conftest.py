@@ -129,7 +129,7 @@ def default_test_model() -> str:
             return models[0]["id"]
 
     # Fallback — will be skipped by model_available if not loaded
-    return "llamacpp/phi-3-mini-4k-instruct-q4"
+    return "llama3.1-8b"
 
 
 @pytest.fixture(scope="session")
