@@ -184,12 +184,12 @@ def model_available(
             pytest.skip(
                 f"Model '{default_test_model}' is registered but its backend is not "
                 f"responding (HTTP {warmup_resp.status_code}). "
-                f"Start the inference service (e.g. llamacpp) then re-run."
+                f"Start the inference service (e.g. ollama) then re-run."
             )
     except Exception as exc:
         pytest.skip(
             f"Model '{default_test_model}' warmup inference failed: {exc}. "
-            f"Start the inference service (e.g. llamacpp) then re-run."
+            f"Start the inference service (e.g. ollama) then re-run."
         )
 
     return default_test_model

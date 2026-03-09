@@ -314,34 +314,34 @@
         "gpu": "nvidia.com/gpu=all"
       }
     },
-    "llamacpp": {
-      "image": "ghcr.io/ggerganov/llama.cpp",
-      "tag": "server--b8238",
-      "container_name": "llamacpp",
-      "dns_alias": "llamacpp.ai-stack",
+    "ollama": {
+      "image": "docker.io/ollama/ollama",
+      "tag": "0.17.7",
+      "container_name": "ollama",
+      "dns_alias": "ollama.ai-stack",
       "depends_on": [
         "litellm"
       ],
       "ports": [],
       "volumes": [
         {
+          "host": "$AI_STACK_DIR/ollama",
+          "container": "/root/.ollama",
+          "mode": "rw"
+        },
+        {
           "host": "$AI_STACK_DIR/models",
-          "container": "/models",
+          "container": "/gguf",
           "mode": "ro"
         }
       ],
-      "environment": {
-        "MODEL_PATH": "/models/llama3.1-8b.gguf",
-        "CONTEXT_SIZE": "4096",
-        "THREADS": "4",
-        "BATCH_SIZE": "512"
-      },
+      "environment": {},
       "secrets": [],
       "health_check": {
-        "command": "curl -sf http://localhost:8080/health || exit 1",
-        "interval": "60s",
+        "command": "curl -sf http://localhost:11434/",
+        "interval": "30s",
         "retries": 3,
-        "timeout": "10s"
+        "timeout": "5s"
       },
       "resources": {
         "cpus": 4,
@@ -396,7 +396,7 @@
     },
     "openwebui": {
       "image": "ghcr.io/open-webui/open-webui",
-      "tag": "v0.8.9",
+      "tag": "v0.8.10",
       "container_name": "openwebui",
       "dns_alias": "webui.ai-stack",
       "depends_on": [

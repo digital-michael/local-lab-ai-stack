@@ -3,10 +3,10 @@
   "default_models": [
     {
       "id": "llama3.1-8b",
-      "description": "Llama 3.1 8B GGUF — primary local inference model, served by llamacpp",
+      "description": "Llama 3.1 8B — primary local inference model, served by ollama",
       "litellm_params": {
-        "model": "openai/llama3.1-8b",
-        "api_base": "http://llamacpp:8080/v1",
+        "model": "ollama_chat/llama3.1:8b",
+        "api_base": "http://ollama.ai-stack:11434",
         "api_key": "none",
         "max_tokens": 4096
       },

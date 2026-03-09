@@ -22,19 +22,19 @@ export CONFIG_FILE="$PROJECT_ROOT/configs/config.json"
 # All 14 services defined in configs/config.json
 SERVICES_ALL=(
     authentik flowise grafana knowledge-index litellm
-    llamacpp loki openwebui postgres prometheus promtail qdrant traefik vllm
+    loki ollama openwebui postgres prometheus promtail qdrant traefik vllm
 )
 export SERVICES_ALL
 
-# 11 services deployable without GPU or custom-built image
+# 12 services deployable without GPU or custom-built image
 SERVICES_DEPLOYED=(
     authentik flowise grafana litellm loki
-    openwebui postgres prometheus promtail qdrant traefik
+    ollama openwebui postgres prometheus promtail qdrant traefik
 )
 export SERVICES_DEPLOYED
 
 # Services deferred pending GPU availability or custom image build
-SERVICES_DEFERRED=(knowledge-index vllm llamacpp)
+SERVICES_DEFERRED=(knowledge-index vllm)
 export SERVICES_DEFERRED
 
 # ---------------------------------------------------------------------------
