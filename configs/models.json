@@ -1,0 +1,20 @@
+{
+  "_comment": "Model routing definitions for LiteLLM. Each entry in default_models is registered via scripts/pull-models.sh. The 'id' field must match the model_name registered in LiteLLM so it appears in /models responses.",
+  "default_models": [
+    {
+      "id": "llamacpp/phi-3-mini-4k-instruct-q4",
+      "description": "Phi-3-Mini-4K GGUF Q4_K_M — small, fast, CPU-capable reasoning model",
+      "litellm_params": {
+        "model": "openai/phi-3-mini-4k-instruct-q4",
+        "api_base": "http://llamacpp:8080/v1",
+        "api_key": "none",
+        "max_tokens": 4096
+      },
+      "model_info": {
+        "mode": "chat",
+        "input_cost_per_token": 0,
+        "output_cost_per_token": 0
+      }
+    }
+  ]
+}

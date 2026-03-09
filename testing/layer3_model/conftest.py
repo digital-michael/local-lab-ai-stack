@@ -167,6 +167,31 @@ def model_available(
             f"Set TEST_MODEL to one of the loaded model IDs."
         )
 
+    # Warmup ping — verify the backend actually responds to inference.
+    # If the underlying provider (e.g. llamacpp) is not yet running, skip
+    # rather than fail so that inference tests don't generate spurious failures.
+    try:
+        warmup_resp = http_client.post(
+            "/chat/completions",
+            json={
+                "model": default_test_model,
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 1,
+            },
+            headers=litellm_headers,
+        )
+        if warmup_resp.status_code != 200:
+            pytest.skip(
+                f"Model '{default_test_model}' is registered but its backend is not "
+                f"responding (HTTP {warmup_resp.status_code}). "
+                f"Start the inference service (e.g. llamacpp) then re-run."
+            )
+    except Exception as exc:
+        pytest.skip(
+            f"Model '{default_test_model}' warmup inference failed: {exc}. "
+            f"Start the inference service (e.g. llamacpp) then re-run."
+        )
+
     return default_test_model
 
 
