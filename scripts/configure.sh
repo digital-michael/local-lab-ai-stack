@@ -197,6 +197,8 @@ EOF
             echo "[Container]"
             echo "Image=${image}:${tag}"
             echo "ContainerName=${container_name}"
+            echo "Label=com.docker.compose.project=ai-stack"
+            echo "Label=ai-stack.service=${svc}"
             local dns_alias
             dns_alias=$(jq -r --arg s "$svc" '.services[$s].dns_alias' "$CONFIG_FILE")
             echo "Network=${net_name}:alias=${dns_alias}"
