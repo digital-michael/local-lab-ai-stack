@@ -32,10 +32,13 @@ Project-specific preferences and opinionated decisions for ollama within this AI
 
 # 3 Model Import
 
-- Pre-existing GGUF files (e.g., from a prior llamacpp deployment) are reused without re-downloading:
+- Pre-existing GGUF files (e.g., from a prior llamacpp deployment) are reused without re-downloading.
+  **Always use the full tool-calling Modelfile** (see below) — the bare `FROM <blob>` template omits
+  `.Tools` handling and causes ollama to reject any request that includes a `tools` array.
+
   ```bash
-  printf 'FROM /gguf/<filename>.gguf\n' > /tmp/Modelfile
-  podman cp /tmp/Modelfile ollama:/tmp/Modelfile
+  # Write Modelfile with llama3.1 tool-calling template (see ai_stack_configuration.md §ollama)
+  podman cp /path/to/Modelfile ollama:/tmp/Modelfile
   podman exec ollama ollama create <name>:<tag> -f /tmp/Modelfile
   ```
 - Default model: `llama3.1:8b` imported from `$AI_STACK_DIR/models/llama3.1-8b.gguf`
