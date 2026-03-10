@@ -92,11 +92,15 @@ TEST_QUERY = "Where is the Eiffel Tower located?"
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module", autouse=True)
-def cleanup_test_collection(qdrant_client, qdrant_headers):
+def cleanup_test_collection(qdrant_headers):
     yield
-    qdrant_client.delete(
-        f"/collections/{TEST_COLLECTION}", headers=qdrant_headers
-    )
+    # Use a fresh client — the module-scoped qdrant_client may have a stale
+    # keep-alive connection by the time teardown runs.
+    try:
+        with httpx.Client(base_url=QDRANT_BASE_URL, timeout=10.0) as client:
+            client.delete(f"/collections/{TEST_COLLECTION}", headers=qdrant_headers)
+    except Exception:
+        pass  # best-effort cleanup; stale collection will not affect re-runs
 
 
 # ---------------------------------------------------------------------------
