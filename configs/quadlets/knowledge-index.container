@@ -1,0 +1,34 @@
+# knowledge-index.container
+# Updated 2026-03-10 to match services/knowledge-index/app.py (Phase 8d)
+[Unit]
+Description=AI Stack knowledge-index
+After=ai-stack-network.service
+Requires=ai-stack-network.service
+After=qdrant.service
+Requires=qdrant.service
+After=ollama.service
+Requires=ollama.service
+
+[Container]
+Image=localhost/knowledge-index:0.1.0
+ContainerName=knowledge-index
+Label=com.docker.compose.project=ai-stack
+Label=ai-stack.service=knowledge-index
+Network=ai-stack-net:alias=knowledge-index.ai-stack
+PublishPort=127.0.0.1:8100:8100
+Secret=qdrant_api_key,type=env,target=QDRANT_API_KEY
+Environment=OLLAMA_URL=http://ollama.ai-stack:11434
+Environment=QDRANT_URL=http://qdrant.ai-stack:6333
+Environment=EMBED_MODEL=llama3.1:8b
+Environment=CHUNK_SIZE=400
+HealthCmd=curl -sf http://localhost:8100/health
+HealthInterval=30s
+HealthRetries=3
+HealthTimeout=5s
+PodmanArgs=--cpus=1 --memory=512m
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target
