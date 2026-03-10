@@ -31,8 +31,8 @@ When proposing, reviewing, or implementing changes that involve a component list
 | `grafana/` | Visualization and dashboarding |
 | `knowledge-index/` | Query-to-library routing microservice (FastAPI) |
 | `litellm/` | LLM API gateway and proxy |
-| `llamacpp/` | CPU-based GGUF model inference |
 | `loki/` | Log aggregation backend |
+| `ollama/` | Local model inference (CPU/metal, OpenAI-compatible) |
 | `openwebui/` | Chat interface for end users |
 | `podman/` | Rootless container runtime and systemd quadlets |
 | `postgresql/` | Relational database for service state |

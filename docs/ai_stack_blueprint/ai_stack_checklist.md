@@ -271,7 +271,7 @@ This section defines the reproducible, sequenced implementation plan across all 
      - Authentik: `["postgres"]`
      - LiteLLM: `["postgres"]`
      - vLLM: `["litellm"]`
-     - llama.cpp: `["litellm"]`
+     - ollama: `["litellm"]`
      - Knowledge Index: `["postgres", "qdrant"]`
      - Flowise: `["litellm", "qdrant", "knowledge-index"]`
      - OpenWebUI: `["litellm"]`
@@ -323,7 +323,7 @@ This section defines the reproducible, sequenced implementation plan across all 
      - `authentik.container`
      - `litellm.container`
      - `vllm.container`
-     - `llamacpp.container`
+     - `ollama.container`
      - `knowledge-index.container`
      - `flowise.container`
      - `openwebui.container`
@@ -434,7 +434,7 @@ These collapse into the configuration system above. Tracked individually for vis
 # 3 Deferrable (address incrementally post-deployment)
 
 - [ ] **Tune resource limits** — CPU/memory/GPU per container after observing baseline (Configuration §3)
-- [x] **Add health checks and readiness probes** — all 11 deployed services now have HealthCmd in config.json; llamacpp, flowise, prometheus, promtail, authentik health checks added 2026-03-08
+- [x] **Add health checks and readiness probes** — all deployed services now have HealthCmd in config.json; ollama, flowise, prometheus, promtail, authentik health checks confirmed 2026-03-09
 - [x] **Configure GPU passthrough / CDI** — procedure documented in Implementation §4; `nvidia-ctk cdi generate` + `AddDevice=` quadlet directive
 - [x] **Authentik OIDC integration** — forward-auth already deployed (middlewares.yaml); per-service OIDC config (Grafana, OpenWebUI) documented in Implementation §5
 - [ ] **Define library manifest YAML schema** — JSON Schema for .ai-library packages (Implementation §6)

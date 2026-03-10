@@ -44,7 +44,7 @@ This AI stack provides a modular platform built on:
 - Traefik reverse proxy and TLS termination
 - LiteLLM gateway
 - vLLM GPU inference
-- llama.cpp fallback inference
+- ollama local inference
 - Qdrant vector database
 - PostgreSQL metadata storage
 - Knowledge Index Service
@@ -76,7 +76,7 @@ Traefik -- forward-auth --> Authentik
 
 WebUI --> LiteLLM
 LiteLLM --> vLLM
-LiteLLM --> LlamaCPP
+LiteLLM --> ollama
 
 WebUI --> Flowise
 Flowise --> LiteLLM
@@ -100,7 +100,7 @@ Prometheus --> Grafana
 | Flowise | Workflow orchestration |
 | LiteLLM | Model routing gateway |
 | vLLM | GPU inference |
-| llama.cpp | CPU / Mac inference |
+| ollama | Local model inference (CPU/metal, OpenAI-compatible) |
 | Qdrant | Vector storage |
 | PostgreSQL | Metadata database |
 | Knowledge Index | Library indexing and retrieval |
@@ -228,7 +228,7 @@ ControllerNode --> GPUNode
 ControllerNode --> MacNode
 
 GPUNode --> vLLM
-MacNode --> llama.cpp
+MacNode --> ollama
 ```
 
 Controller node services:

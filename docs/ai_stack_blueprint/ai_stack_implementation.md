@@ -109,7 +109,7 @@ WantedBy=default.target
 - `qdrant.container`
 - `litellm.container`
 - `vllm.container`
-- `llamacpp.container`
+- `ollama.container`
 - `flowise.container`
 - `openwebui.container`
 - `authentik.container`
@@ -134,7 +134,7 @@ Start services in this order:
 4.  Qdrant
 5.  Authentik
 6.  LiteLLM
-7.  vLLM / llama.cpp
+7.  vLLM / ollama
 8.  Knowledge Index
 9.  Flowise           ← depends on LiteLLM + Qdrant + Knowledge Index
 10. OpenWebUI
@@ -504,7 +504,7 @@ systemctl --user list-units --state=failed
 | Permission denied on volumes | Rootless UID/SELinux | Ensure all volume mounts use `:Z` (done by `configure.sh generate-quadlets`) |
 | Traefik 502 Bad Gateway | Backend container not running | Check backend service: `podman ps`, `systemctl --user start <svc>.service` |
 | Authentik outpost not responding | Outpost not started or embedded outpost misconfigured | `journalctl --user -u authentik.service -n 100`; check outpost config in Authentik admin |
-| LiteLLM returns 500 for all models | No model backend is reachable | Check vllm/llamacpp service status; verify model file exists in `$AI_STACK_DIR/models/` |
+| LiteLLM returns 500 for all models | No model backend is reachable | Check vllm/ollama service status; verify model is imported (`podman exec ollama ollama list`) |
 | Grafana datasource shows error | Prometheus/Loki not reachable from Grafana container | Verify Prometheus/Loki are running; check internal DNS `prometheus.ai-stack:9090` from Grafana network |
 | TLS certificate not trusted | CA cert not installed in browser/OS | Trust `$AI_STACK_DIR/configs/tls/ca.crt`: `sudo update-ca-trust` (see `scripts/generate-tls.sh`) |
 | `pg_isready` fails after restart | PostgreSQL data directory ownership issue | Check `:Z` on volume mount; run `podman unshare ls -la $AI_STACK_DIR/postgres` |
@@ -763,7 +763,7 @@ A `foo.container` file generates `foo.service`. The `depends_on` array values ma
 | `authentik.container` | `ai-stack-network.service postgres.service` | `ai-stack-network.service postgres.service` |
 | `litellm.container` | `ai-stack-network.service postgres.service` | `ai-stack-network.service postgres.service` |
 | `vllm.container` | `ai-stack-network.service litellm.service` | `ai-stack-network.service litellm.service` |
-| `llamacpp.container` | `ai-stack-network.service litellm.service` | `ai-stack-network.service litellm.service` |
+| `ollama.container` | `ai-stack-network.service litellm.service` | `ai-stack-network.service litellm.service` |
 | `knowledge-index.container` | `ai-stack-network.service postgres.service qdrant.service` | `ai-stack-network.service postgres.service qdrant.service` |
 | `flowise.container` | `ai-stack-network.service litellm.service qdrant.service knowledge-index.service` | `ai-stack-network.service litellm.service qdrant.service knowledge-index.service` |
 | `openwebui.container` | `ai-stack-network.service litellm.service` | `ai-stack-network.service litellm.service` |

@@ -32,7 +32,7 @@ Pin all images to specific tags or digests before deployment.
 | OpenWebUI | `ghcr.io/open-webui/open-webui` | `v0.8.9` | |
 | LiteLLM | `ghcr.io/berriai/litellm` | `main-v1.81.14-stable` | |
 | vLLM | `vllm/vllm-openai` | `v0.17.0` | GPU inference |
-| llama.cpp | `ghcr.io/ggerganov/llama.cpp` | `server--b8238` | CPU/Mac inference |
+| ollama | `docker.io/ollama/ollama` | `0.17.7` | Local model inference |
 | Qdrant | `docker.io/qdrant/qdrant` | `v1.17.0` | |
 | PostgreSQL | `docker.io/library/postgres` | `17.9` | |
 | Flowise | `docker.io/flowiseai/flowise` | `3.0.13` | |
@@ -78,11 +78,10 @@ MODEL_NAME=llama3.1-8b
 TENSOR_PARALLEL_SIZE=1
 ```
 
-### llama.cpp
+### ollama
 
 ```env
-MODEL_PATH=/models/llama3.1-8b.gguf
-CONTEXT_SIZE=4096
+OLLAMA_HOST=0.0.0.0
 ```
 
 ### OpenWebUI
@@ -131,7 +130,7 @@ Tune after initial deployment. Set in quadlet files via `PodmanArgs=--cpus=N --m
 | Container | CPU | Memory | GPU |
 |-----------|-----|--------|-----|
 | vLLM | 4 cores | 24 GB | 1 GPU |
-| llama.cpp | 4 cores | 16 GB | — |
+| ollama | 4 cores | 16 GB | — |
 | PostgreSQL | 2 cores | 4 GB | — |
 | Qdrant | 2 cores | 8 GB | — |
 | LiteLLM | 2 cores | 2 GB | — |
@@ -200,7 +199,8 @@ Use the `:Z` volume suffix for SELinux relabeling on Fedora/RHEL hosts.
 | Container | Host Path | Container Path | Mode |
 |-----------|-----------|----------------|------|
 | vLLM | `$AI_STACK_DIR/models` | `/models` | ro |
-| llama.cpp | `$AI_STACK_DIR/models` | `/models` | ro |
+| ollama | `$AI_STACK_DIR/ollama` | `/root/.ollama` | rw |
+| ollama | `$AI_STACK_DIR/models` | `/gguf` | ro |
 | Qdrant | `$AI_STACK_DIR/qdrant` | `/qdrant/storage` | rw |
 | PostgreSQL | `$AI_STACK_DIR/postgres` | `/var/lib/postgresql/data` | rw |
 | Knowledge Index | `$AI_STACK_DIR/libraries` | `/libraries` | rw |
@@ -224,8 +224,8 @@ Use the `:Z` volume suffix for SELinux relabeling on Fedora/RHEL hosts.
 
 | Model | Backend | Use Case | Notes |
 |-------|---------|----------|-------|
-| `llama3.1-8b` | vLLM / llama.cpp | General purpose | Default model |
-| `deepseek-coder` | vLLM / llama.cpp | Code generation | |
+| `llama3.1-8b` | vLLM / ollama | General purpose | Default model |
+| `deepseek-coder` | vLLM / ollama | Code generation | |
 | `llama3.1-70b` | vLLM | Complex reasoning | Optional; requires ≥48 GB VRAM |
 
 ### Embedding model
@@ -249,12 +249,14 @@ MAX_MODEL_LEN=4096
 GPU_MEMORY_UTILIZATION=0.9
 ```
 
-### llama.cpp inference parameters
+### ollama inference parameters
+
+Controlled via LiteLLM `litellm_params` and per-request fields. Key ollama environment variables:
 
 ```env
-CONTEXT_SIZE=4096
-THREADS=4
-BATCH_SIZE=512
+OLLAMA_HOST=0.0.0.0
+OLLAMA_NUM_PARALLEL=1
+OLLAMA_KEEP_ALIVE=5m
 ```
 
 ---
