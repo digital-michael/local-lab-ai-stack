@@ -1,0 +1,227 @@
+# services/knowledge-index/app.py
+#
+# Knowledge Index Service — Phase 8d
+#
+# Minimal FastAPI microservice providing:
+#   POST /documents          — ingest a document (chunk → embed → store in Qdrant)
+#   PUT  /documents/{id}     — replace a document
+#   DELETE /documents/{id}   — remove a document from Qdrant
+#   POST /query              — vector search over a named collection
+#   GET  /health             — readiness probe (used by pytest module-level skip guard)
+#
+# Embedding is performed via the Ollama /api/embeddings endpoint.
+# Vector storage is Qdrant (filter-based delete; UUID point IDs per chunk).
+
+from __future__ import annotations
+
+import os
+import re
+import uuid
+from typing import Any
+
+import httpx
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+# ---------------------------------------------------------------------------
+# Configuration (all overridable via environment variables)
+# ---------------------------------------------------------------------------
+
+OLLAMA_URL  = os.environ.get("OLLAMA_URL",   "http://ollama.ai-stack:11434")
+QDRANT_URL  = os.environ.get("QDRANT_URL",   "http://qdrant.ai-stack:6333")
+EMBED_MODEL = os.environ.get("EMBED_MODEL",  "llama3.1:8b")
+QDRANT_KEY  = os.environ.get("QDRANT_API_KEY", "")
+CHUNK_SIZE  = int(os.environ.get("CHUNK_SIZE", "400"))   # max chars per chunk
+
+# ---------------------------------------------------------------------------
+# HTTP clients (module-level singletons; closed on shutdown if needed)
+# ---------------------------------------------------------------------------
+
+_qdrant_headers: dict[str, str] = {"Content-Type": "application/json"}
+if QDRANT_KEY:
+    _qdrant_headers["api-key"] = QDRANT_KEY
+
+_qdrant = httpx.Client(base_url=QDRANT_URL, timeout=30.0, headers=_qdrant_headers)
+_ollama = httpx.Client(base_url=OLLAMA_URL, timeout=120.0)
+
+# In-memory map: doc_id → collection (survives connection reuse, lost on restart).
+# Sufficient for the test lifecycle (ingest → update → delete in one session).
+_doc_collection: dict[str, str] = {}
+
+# ---------------------------------------------------------------------------
+# FastAPI app
+# ---------------------------------------------------------------------------
+
+app = FastAPI(title="Knowledge Index Service", version="0.1.0")
+
+# ---------------------------------------------------------------------------
+# Request / response models
+# ---------------------------------------------------------------------------
+
+class IngestRequest(BaseModel):
+    id: str
+    content: str
+    metadata: dict[str, Any] = {}
+
+
+class UpdateRequest(BaseModel):
+    content: str
+    metadata: dict[str, Any] = {}
+
+
+class QueryRequest(BaseModel):
+    query: str
+    collection: str
+    top_k: int = 5
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _embed(text: str) -> list[float]:
+    """Return an embedding vector via the Ollama /api/embeddings endpoint."""
+    resp = _ollama.post("/api/embeddings", json={"model": EMBED_MODEL, "prompt": text})
+    resp.raise_for_status()
+    return resp.json()["embedding"]
+
+
+def _chunk_text(text: str) -> list[str]:
+    """
+    Split text into sentence-aware chunks no longer than CHUNK_SIZE characters.
+    Falls back to the full text as a single chunk if it is already short enough.
+    """
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    chunks: list[str] = []
+    current = ""
+    for sent in sentences:
+        candidate = (current + " " + sent).strip() if current else sent
+        if len(candidate) <= CHUNK_SIZE:
+            current = candidate
+        else:
+            if current:
+                chunks.append(current)
+            current = sent
+    if current:
+        chunks.append(current)
+    return chunks if chunks else [text]
+
+
+def _ensure_collection(collection: str, vector_size: int) -> None:
+    """Create a Qdrant collection if it does not already exist."""
+    resp = _qdrant.get(f"/collections/{collection}")
+    if resp.status_code == 404:
+        _qdrant.put(
+            f"/collections/{collection}",
+            json={"vectors": {"size": vector_size, "distance": "Cosine"}},
+        ).raise_for_status()
+
+
+def _delete_doc_points(collection: str, doc_id: str) -> None:
+    """Delete all Qdrant points that belong to a given document."""
+    _qdrant.post(
+        f"/collections/{collection}/points/delete",
+        json={
+            "filter": {
+                "must": [{"key": "doc_id", "match": {"value": doc_id}}]
+            }
+        },
+    )  # non-fatal if collection doesn't exist yet
+
+
+def _ingest_chunks(doc_id: str, content: str, metadata: dict, collection: str) -> int:
+    """Chunk, embed, and upsert into Qdrant. Returns the number of chunks stored."""
+    chunks = _chunk_text(content)
+    points: list[dict] = []
+    vector_size: int | None = None
+
+    for i, chunk in enumerate(chunks):
+        vec = _embed(chunk)
+        if vector_size is None:
+            vector_size = len(vec)
+            _ensure_collection(collection, vector_size)
+        points.append({
+            "id": str(uuid.uuid4()),
+            "vector": vec,
+            "payload": {
+                "doc_id":      doc_id,
+                "chunk_index": i,
+                "text":        chunk,
+                "source":      metadata.get("source", ""),
+                "metadata":    metadata,
+            },
+        })
+
+    # wait=true: flush to storage before returning so T-063 sees the points immediately
+    _qdrant.put(
+        f"/collections/{collection}/points?wait=true",
+        json={"points": points},
+    ).raise_for_status()
+
+    return len(points)
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok"}
+
+
+@app.post("/documents", status_code=201)
+def ingest_document(req: IngestRequest) -> dict:
+    collection = req.metadata.get("collection", "default")
+    _doc_collection[req.id] = collection
+    try:
+        n = _ingest_chunks(req.id, req.content, req.metadata, collection)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"id": req.id, "document_id": req.id, "chunks": n}
+
+
+@app.put("/documents/{doc_id}")
+def update_document(doc_id: str, req: UpdateRequest) -> dict:
+    collection = req.metadata.get("collection", _doc_collection.get(doc_id, "default"))
+    _delete_doc_points(collection, doc_id)
+    _doc_collection[doc_id] = collection
+    try:
+        n = _ingest_chunks(doc_id, req.content, req.metadata, collection)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"id": doc_id, "chunks": n}
+
+
+@app.delete("/documents/{doc_id}")
+def delete_document(doc_id: str) -> dict:
+    collection = _doc_collection.get(doc_id, "default")
+    _delete_doc_points(collection, doc_id)
+    _doc_collection.pop(doc_id, None)
+    return {"id": doc_id, "deleted": True}
+
+
+@app.post("/query")
+def query_documents(req: QueryRequest) -> dict:
+    try:
+        vec = _embed(req.query)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    resp = _qdrant.post(
+        f"/collections/{req.collection}/points/search",
+        json={"vector": vec, "limit": req.top_k, "with_payload": True},
+    )
+    if resp.status_code == 404:
+        return {"results": []}
+    resp.raise_for_status()
+
+    results = []
+    for hit in resp.json().get("result", []):
+        payload = hit.get("payload", {})
+        results.append({
+            "text":        payload.get("text", ""),
+            "score":       hit.get("score", 0.0),
+            "document_id": payload.get("doc_id", ""),
+            "source":      payload.get("source", ""),
+            "metadata":    payload.get("metadata", {}),
+        })
+    return {"results": results}
