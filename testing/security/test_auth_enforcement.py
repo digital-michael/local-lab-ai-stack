@@ -159,7 +159,7 @@ def qdrant_api_key() -> str:
 @pytest.fixture(scope="module")
 def http_client() -> Generator[httpx.Client, None, None]:
     """Plain HTTP client with no auth headers."""
-    with httpx.Client(timeout=15.0, follow_redirects=False) as client:
+    with httpx.Client(timeout=15.0, follow_redirects=False, verify=False) as client:
         yield client
 
 
@@ -179,7 +179,7 @@ class TestForwardAuthEnforcement:
         T-086: Each user-facing Traefik-proxied service returns 3xx to Authentik
         when accessed without an auth session cookie.
         """
-        base_url = "http://localhost"
+        base_url = "https://localhost"
         passed = 0
         skipped = []
         failed = []

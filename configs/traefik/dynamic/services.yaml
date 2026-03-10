@@ -11,7 +11,7 @@
 http:
   routers:
     openwebui:
-      rule: "Host(`webui.localhost`)"
+      rule: "Host(`openwebui.localhost`)"
       entryPoints:
         - websecure
       service: openwebui
@@ -40,6 +40,16 @@ http:
         - secure-headers
       tls: {}
 
+    prometheus:
+      rule: "Host(`prometheus.localhost`)"
+      entryPoints:
+        - websecure
+      service: prometheus
+      middlewares:
+        - authentik
+        - secure-headers
+      tls: {}
+
     authentik:
       rule: "Host(`auth.localhost`)"
       entryPoints:
@@ -54,6 +64,11 @@ http:
       loadBalancer:
         servers:
           - url: "http://webui.ai-stack:8080"
+
+    prometheus:
+      loadBalancer:
+        servers:
+          - url: "http://prometheus.ai-stack:9090"
 
     grafana:
       loadBalancer:
