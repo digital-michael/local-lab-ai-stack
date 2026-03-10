@@ -1,5 +1,5 @@
 # AI Stack — Implementation Checklist
-**Last Updated:** 2026-03-08 UTC
+**Last Updated:** 2026-03-10 UTC
 
 ## Purpose
 Master task tracker for the AI Multivolume RAG Platform. Covers blockers, deferrable work, future features, and open considerations. Updated as items are resolved.
@@ -34,7 +34,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
-## Phase 1 — Record Decisions and Update Architecture
+## Phase 1 — Record Decisions and Update Architecture ✅ COMPLETE (commit `4561edf`)
 
 **Goal:** Formalize the four pending decisions and update the architecture doc to reflect two new components and the discovery profile concept.
 
@@ -100,7 +100,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
-## Phase 2 — Create Component Library Entries
+## Phase 2 — Create Component Library Entries ✅ COMPLETE
 
 **Goal:** Add the two new components to the reference library with the standard three-file structure.
 
@@ -134,7 +134,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
-## Phase 3 — Update Configuration System
+## Phase 3 — Update Configuration System ✅ COMPLETE
 
 **Goal:** Add both new services to config.json and the configuration reference doc. All values needed for deployment are defined (or explicitly TBD for image tags).
 
@@ -236,7 +236,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
-## Phase 4 — Resolve Remaining Blockers
+## Phase 4 — Resolve Remaining Blockers ✅ COMPLETE
 
 **Goal:** Complete all blocker items so the stack is deployable. This phase is mostly research and mechanical execution.
 
@@ -305,7 +305,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
-## Phase 5 — Generate Deployment Artifacts
+## Phase 5 — Generate Deployment Artifacts ✅ COMPLETE
 
 **Goal:** Produce all files needed for first deployment.
 
@@ -357,7 +357,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
-## Phase 6 — Update Checklist and Close Considerations
+## Phase 6 — Update Checklist and Close Considerations ✅ COMPLETE (2026-03-10)
 
 **Goal:** Mark resolved items, close considerations, and ensure the checklist reflects actual state.
 
@@ -445,7 +445,7 @@ These collapse into the configuration system above. Tracked individually for vis
 - [x] **Add config subdirectories to install.sh** — `configs/tls`, `configs/grafana`, `configs/prometheus`, `configs/promtail` all present in install.sh
 - [x] **Define log retention/rotation policy** — Loki configured with `retention_period: 168h` (7 days) and compactor enabled in `configs/loki/local-config.yaml`
 - [x] **Decide Flowise database backend** — **Decision: SQLite (local `DATABASE_PATH`)** for MVP. Rationale: Flowise stores flow definitions and API keys only — low-volume metadata unsuitable for shared PostgreSQL without added complexity. Migrate to PostgreSQL if multi-instance Flowise or shared workflow DB becomes a requirement. (Resolves Consideration #25)
-- [ ] **Build Knowledge Index Service** — implement Python/FastAPI microservice per spec in Implementation §10 (see D-011)
+- [x] **Build Knowledge Index Service** — `services/knowledge-index/` Python/FastAPI microservice; embeddings via ollama llama3.1:8b; Qdrant storage; T-062–T-065, T-067–T-068 passing (commit `fb08f2c`, 2026-03-10)
 - [ ] **Implement localhost discovery profile** — filesystem scan of volumes directory, manifest parsing (see D-013)
 - [ ] **Specify local and WAN discovery profiles** — mDNS/DNS-SD for local, registry/federation for WAN (see D-013)
 - [ ] **Build volume ingestion pipeline** — process raw documents into `.ai-library` manifest structure; handle embedding, vector storage, and checksum generation (see D-013)
@@ -475,3 +475,14 @@ Items requiring a decision before or during implementation.
 | 25 | **Flowise database backend** — config shows local `DATABASE_PATH=/data/flowise` (SQLite); should it share the PostgreSQL instance? | Resolved | SQLite for MVP. Migrate to PostgreSQL if multi-instance Flowise becomes a requirement. |
 | 26 | **Log retention policy** — Loki storage will grow unbounded without a retention/compaction config | Resolved | `retention_period: 168h` (7 days) + compactor enabled in `configs/loki/local-config.yaml` |
 | 27 | **Multi-environment support** — only one set of config values exists; no dev/staging/prod separation | Open | Addressed by configure.sh multi-env support |
+| 28 | **Flowise 3.x API auth** — FLOWISE_USERNAME/PASSWORD env vars are set but API returns 401; user table is empty (Flowise 3.x requires registration flow, not just env vars). Chatflow creation via API blocked. | Open | Manual UI registration required to initialize admin account; then API key can be provisioned |
+
+---
+
+## Session Notes — 2026-03-10
+
+- T-072 (tool-calling): fixed llama3.1:8b Modelfile template (commit `e3fb86b`)
+- T-086 (forward-auth): bootstrapped Authentik, fixed Traefik routes (openwebui hostname, prometheus router), fixed test to hit HTTPS (commit `0e96403`)
+- Phase 8d: knowledge-index service built and deployed; T-062–T-065, T-067–T-068 passing (commits `fb08f2c`, `08874e6`)
+- pytest: **23 passed, 2 skipped, 0 failed** (up from 16 passed, 9 skipped)
+- Remaining skips: T-071 (vLLM hardware-gated), T-066 (Flowise chatflow requires manual UI setup)

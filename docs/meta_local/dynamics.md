@@ -1,5 +1,5 @@
 # Project Dynamics — llm-agent-local-2
-**Last Updated:** 2026-03-08 UTC
+**Last Updated:** 2026-03-10 UTC
 **Target Audience:** LLM Agents
 
 ---
@@ -18,6 +18,8 @@ This file records project-specific collaboration dynamics — improvements, eure
 | I-2 | Codified the `README-agent.md` convention from implicit to explicit | S-2 — human spotted the meta-pattern |
 | I-3 | Established auto-identification directive in meta.md Purpose | W-4 — agent should surface meta-observations proactively |
 | I-4 | Split meta files by concern (meta.md, meta_decisions, meta_dynamics, meta_metrics) | S-6 — human applied separation of concerns to the meta system itself |
+| I-5 | `podman cp` + exec pattern established over heredoc exec — avoids silent hangs when piping stdin to `podman exec python3 -` | W-5 — heredoc approach hung without output; copy-then-exec pattern is reliable and generalises to any language |
+| I-6 | Two-level fresh-client pattern for test teardown — module-scoped httpx clients accumulate stale keep-alive connections by teardown time; cleanup fixtures should open a fresh client in a `with` block | W-6 — `cleanup_test_collection` teardown raised `RemoteProtocolError: Server disconnected` on every clean run |
 
 ---
 
@@ -44,3 +46,5 @@ This file records project-specific collaboration dynamics — improvements, eure
 | L-4 | Component library (D-003) | The three-file pattern (best_practices / security / guidance) could be templated and applied to non-component domains — e.g., `docs/library/processes/deployment/`, `docs/library/processes/backup/`. The pattern isn't component-specific; it's concern-specific. | Noted |
 | L-5 | D-009 (meta file split) | "Applied separation of concerns" recurs as the dominant design principle in this project (D-001, D-003, D-005, D-009). The human applies it instinctively; the agent should learn to recognize the symptoms that trigger it: a file serving multiple access patterns, a document mixing stable and volatile content, an artifact with multiple reasons to change. These are the signals to proactively propose a split. | Noted |
 | L-6 | D-010 (meta extraction) | The framework/instance separation pattern — a portable protocol with local instantiation and upward promotion — could apply beyond meta. Any system of shared conventions (coding standards, deployment patterns, security baselines) could be structured the same way: a framework repo defining the protocol, project repos instantiating it locally, and validated insights promoted back to the framework. | Noted |
+| L-7 | Authentik bootstrap (T-086) | Service bootstrapping is often invisible in documentation: Authentik's embedded outpost runs and looks healthy but returns 404 for all requests until at least one provider is assigned. A "healthy" container healthcheck ≠ a "ready to serve traffic" service. This pattern recurs across services — consider adding a post-deploy smoke test layer that validates functional readiness, not just process liveness. | Noted |
+| L-8 | Flowise 3.x API auth gap | Flowise 3.x added a full user/org system. FLOWISE_USERNAME/PASSWORD env vars no longer bootstrap a usable API account — the user table stays empty until registration completes via the UI. Any automation that calls the Flowise API must account for this: either seed the DB directly or use the UI to complete registration and generate an API key first. | Noted |
