@@ -163,7 +163,7 @@ INTERNAL_PORTS=(5432 6333 6334 9000 9090 9091 3000 3100 3001)
 @test "T-077: Unauthenticated request to proxied service redirects to Authentik login" {
     # Use a service that is protected by forward-auth middleware.
     # Grafana and OpenWebUI are realistic candidates.
-    local target_url="http://localhost"
+    local target_url="https://localhost"
     local host_header="grafana.${DOMAIN:-localhost}"
 
     # Pick a reasonable header to look authenticated external traffic would use

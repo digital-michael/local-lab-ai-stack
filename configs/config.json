@@ -156,7 +156,13 @@
         "postgres",
         "qdrant"
       ],
-      "ports": [],
+      "ports": [
+        {
+          "host": 8100,
+          "container": 8100,
+          "bind": "127.0.0.1"
+        }
+      ],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/libraries",
@@ -169,7 +175,7 @@
         "QDRANT_HOST": "qdrant.ai-stack",
         "QDRANT_PORT": "6333",
         "ROUTE_CACHE_TTL": "60",
-        "LISTEN_PORT": "8900"
+        "LISTEN_PORT": "8100"
       },
       "secrets": [
         {
@@ -182,7 +188,7 @@
         }
       ],
       "health_check": {
-        "command": "curl -sf http://localhost:8900/v1/health",
+        "command": "curl -sf http://localhost:8100/health",
         "interval": "30s",
         "retries": 3,
         "timeout": "5s"
@@ -380,6 +386,10 @@
         {
           "name": "flowise_password",
           "target": "FLOWISE_PASSWORD"
+        },
+        {
+          "name": "flowise_secret_key",
+          "target": "FLOWISE_SECRETKEY_OVERWRITE"
         }
       ],
       "health_check": {
