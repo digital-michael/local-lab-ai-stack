@@ -313,7 +313,7 @@ All Layer 3b+ tests use the `TEST_MODEL` environment variable (defaulting to the
 | T-063 | Chunk storage in Qdrant | After ingest, Qdrant collection count increases by ≥ 1 | Planned |
 | T-064 | Retrieval via knowledge-index API | Query with a question whose answer is in the ingested doc → relevant chunk returned with metadata | Planned |
 | T-065 | RAG metadata plumbing | Retrieval response includes `source` attribute referencing the original document | Planned |
-| T-066 | End-to-end via Flowise chatflow | Flowise chatflow → knowledge-index → Qdrant → LiteLLM → response contains source citation | Planned |
+| T-066 | End-to-end via Flowise chatflow | Flowise chatflow → knowledge-index → Qdrant → LiteLLM → response contains source citation | Pass |
 | T-067 | Document update | Re-ingest modified document; query returns updated chunk, not old chunk | Planned |
 | T-068 | Document delete | Delete document from index; subsequent query no longer returns that chunk | Planned |
 

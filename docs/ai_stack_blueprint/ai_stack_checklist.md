@@ -486,3 +486,16 @@ Items requiring a decision before or during implementation.
 - Phase 8d: knowledge-index service built and deployed; T-062–T-065, T-067–T-068 passing (commits `fb08f2c`, `08874e6`)
 - pytest: **23 passed, 2 skipped, 0 failed** (up from 16 passed, 9 skipped)
 - Remaining skips: T-071 (vLLM hardware-gated), T-066 (Flowise chatflow requires manual UI setup)
+
+## Session Notes — 2026-03-12
+
+- T-066 (Flowise RAG): unblocked via Flowise 3.x API (commit `e3d9a16`)
+  - Root causes: password policy violation (no uppercase), wrong login endpoint, missing permissions, placeholder auth in test
+  - Admin registered: admin@ai-stack.local / FlowAdmin2026!
+  - API key created with chatflows:view/create/update/delete + prediction:create
+  - Qdrant credential `qdrant-local` (qdrantApi) stored in Flowise DB
+  - RAG chatflow `RAG Knowledge Pipeline`: conversationalRetrievalQAChain + chatOllama + qdrant + ollamaEmbedding
+    (Note: retrievalQAChain is BaseLLM-only; conversationalRetrievalQAChain required for ChatOllama/BaseChatModel)
+  - flowData nodes require full inputParams/inputAnchors arrays from node API definitions
+- pytest: **24 passed, 1 skipped, 0 failed**
+- Remaining skip: T-071 (vLLM hardware-gated only)
