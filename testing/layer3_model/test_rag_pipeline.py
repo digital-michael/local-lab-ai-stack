@@ -15,6 +15,7 @@
 #
 # Run: pytest testing/layer3_model/test_rag_pipeline.py -v
 
+import os
 import time
 import uuid
 
@@ -78,6 +79,10 @@ def test_doc_id() -> str:
 
 
 TEST_COLLECTION = "bats_rag_test_collection"
+FLOWISE_API_KEY = os.environ.get(
+    "FLOWISE_API_KEY",
+    "lSixFaYi8pcnfchVftwLX-rO8Bvn6l7Iy-cbc_Xov5o",
+)
 
 # Content used for ingest tests. Short enough to produce 1–2 chunks.
 TEST_DOCUMENT_CONTENT = (
@@ -233,7 +238,7 @@ def test_rag_via_flowise(ki_client):
     try:
         resp = httpx.get(
             f"{flowise_url}/api/v1/chatflows", timeout=5.0,
-            headers={"Authorization": "Basic dXNlcjp0ZXN0"}  # placeholder
+            headers={"Authorization": f"Bearer {FLOWISE_API_KEY}"}
         )
     except Exception:
         pytest.skip("Flowise not reachable — skipping end-to-end RAG via Flowise")
