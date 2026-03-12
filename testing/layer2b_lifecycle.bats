@@ -216,6 +216,21 @@ wait_for_http() {
     { podman secret rm "$secret_name" >/dev/null 2>&1; printf '%s' "$original_pass" | podman secret create "$secret_name" - >/dev/null; }
     systemctl --user restart "${test_svc}.service" >/dev/null
     wait_for_active "$test_svc" 60 || return 1
+
+    # Verify the restored password actually works — catches cascading failure where
+    # "original_pass" was already a stale rotated value from a prior failed restore.
+    wait_for_http "200" "http://localhost:3001/api/v1/ping" 60 || return 1
+    local restore_check
+    restore_check=$(curl -s --max-time 10 \
+        -X POST -H "Content-Type: application/json" \
+        -d "{\"username\":\"admin\",\"password\":\"${original_pass}\"}" \
+        "http://localhost:3001/api/v1/account/basic-auth" | jq -r '.message // empty')
+    [[ "$restore_check" == "Authentication successful" ]] || {
+        echo "WARN: Restored password '${original_pass:0:6}...' was not accepted by Flowise." >&3
+        echo "The secret was likely already stale before this test ran." >&3
+        echo "Manual fix required: update flowise_password secret to the correct value." >&3
+        return 1
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -231,6 +246,7 @@ wait_for_http() {
         loki promtail prometheus grafana
         postgres qdrant litellm
         authentik openwebui flowise
+        ollama
         traefik
     )
 
@@ -256,7 +272,7 @@ wait_for_http() {
     # Stop all deployed services
     local stop_order=(
         traefik flowise openwebui authentik
-        litellm grafana prometheus promtail loki
+        litellm ollama grafana prometheus promtail loki
         qdrant postgres
     )
 
@@ -280,7 +296,7 @@ wait_for_http() {
         postgres qdrant
         loki promtail
         prometheus
-        litellm
+        litellm ollama
         grafana
         authentik
         openwebui flowise
