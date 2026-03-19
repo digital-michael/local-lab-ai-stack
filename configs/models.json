@@ -17,10 +17,10 @@
       }
     },
     {
-      "id": "phi-3.5-mini",
-      "description": "phi-3.5-mini — GPU inference via vLLM (awq)",
+      "id": "qwen2.5-1.5b",
+      "description": "Qwen2.5-1.5B-Instruct FP16 — GPU inference via vLLM (RTX 3070 Ti)",
       "litellm_params": {
-        "model": "openai/phi-3.5-mini",
+        "model": "openai/qwen2.5-1.5b",
         "api_base": "http://vllm.ai-stack:8000",
         "api_key": "none",
         "max_tokens": 4096

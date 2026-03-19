@@ -14,11 +14,11 @@
       "device": "cpu"
     },
     {
-      "name": "phi-3.5-mini",
+      "name": "qwen2.5-1.5b",
       "backend": "vllm",
       "device": "gpu",
-      "repo": "bartowski/Phi-3.5-mini-instruct-AWQ",
-      "quantization": "awq"
+      "repo": "Qwen/Qwen2.5-1.5B-Instruct",
+      "quantization": null
     }
   ],
   "services": {
@@ -296,8 +296,8 @@
       }
     },
     "vllm": {
-      "image": "vllm/vllm-openai",
-      "tag": "v0.17.0",
+      "image": "docker.io/vllm/vllm-openai",
+      "tag": "v0.17.1",
       "container_name": "vllm",
       "dns_alias": "vllm.ai-stack",
       "depends_on": [
@@ -317,10 +317,10 @@
         }
       ],
       "environment": {
-        "MODEL_NAME": "phi-3.5-mini",
+        "MODEL_NAME": "/models/qwen2.5-1.5b",
         "TENSOR_PARALLEL_SIZE": "1",
         "MAX_MODEL_LEN": "4096",
-        "GPU_MEMORY_UTILIZATION": "0.70"
+        "GPU_MEMORY_UTILIZATION": "0.60"
       },
       "secrets": [],
       "health_check": {
