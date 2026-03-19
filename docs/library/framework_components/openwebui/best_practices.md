@@ -69,13 +69,18 @@ The official OpenWebUI image ships with `OLLAMA_BASE_URL=/ollama` — a relative
 
 ## 6.2 webui.db takes precedence over env vars — first-boot ordering
 
-OpenWebUI writes all connection config (Ollama URL, API base, etc.) to a SQLite database (`webui.db`, table `config`, JSON column `data`) **at first container start**, before the application reads env vars at the layer that matters. Values already present in the DB are used at runtime regardless of what the container env says.
+OpenWebUI writes all connection config (Ollama URL, API base, etc.) to a SQLite database (`webui.db`, table `config`, JSON column `data`) **at first container start**. The Docker Compose image default `http://host.docker.internal:11434` is hard-coded into this initialization path and is written to the DB regardless of the `OLLAMA_BASE_URL` env var.
+
+Values already present in the DB are used at runtime; the env var is not authoritative once the DB row exists.
 
 Consequences:
-- If `OLLAMA_BASE_URL` is correct in the quadlet but the container was first started with a stale or defaulting image, the DB records `http://host.docker.internal:11434` and that value wins.
+- **Every fresh deployment** will have `host.docker.internal:11434` in the DB after first start, regardless of how `OLLAMA_BASE_URL` is set in the quadlet.
 - Changing env vars after first boot has no effect on connection config; the DB must be patched.
+- `OLLAMA_BASE_URL` only matters to prevent the image default `/ollama` (Docker Compose nginx path) from appearing in the env — it does not control what the DB is initialized with.
 
-**Detection** (via `diagnose.sh --profile full`):
+**Required on every fresh deployment**: after openwebui first starts, patch the DB and restart. `diagnose.sh --profile full --fix` performs this automatically via `_check_integrations() → openwebui/db-ollama-url`.
+
+**Detection** (manual, via `diagnose.sh --profile full`):
 ```bash
 podman exec openwebui python3 -c "
 import sqlite3, json
