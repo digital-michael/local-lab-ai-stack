@@ -377,7 +377,7 @@ Scripts are in the project root `scripts/` directory. Configuration is in `confi
 | `scripts/install.sh` | Install dependencies and create storage layout |
 | `scripts/validate-system.sh` | Validate prerequisites (Podman, GPU, storage) |
 | `scripts/configure.sh` | CRUD operations on config.json; generates quadlets and secrets |
-| `scripts/deploy-stack.sh` | Validate config, generate quadlets, create network |
+| `scripts/deploy.sh` | Validate config, generate quadlets, create network |
 
 These are bootstrap and configuration scripts. Full deployment procedures are in [ai_stack_implementation.md](ai_stack_implementation.md). Tunable values live in `configs/config.json` and are documented in [ai_stack_configuration.md](ai_stack_configuration.md).
 

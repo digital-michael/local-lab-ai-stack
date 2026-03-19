@@ -28,7 +28,7 @@ Project-specific conventions and patterns for bash scripts in this AI stack.
 # 2 Script Patterns
 
 - `configure.sh`: CRUD on config.json, quadlet generation, secrets provisioning
-- `deploy-stack.sh`: orchestrates the full deployment sequence (validate → generate → deploy)
+- `deploy.sh`: orchestrates the full deployment sequence (validate → generate → deploy)
 - `install.sh`: one-time system prerequisites and directory setup
 - `validate-system.sh`: pre-flight checks for Podman version, tools, permissions
 

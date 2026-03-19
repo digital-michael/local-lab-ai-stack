@@ -41,7 +41,7 @@ setup_file() {
 
     if [[ "${#missing[@]}" -gt 0 ]]; then
         echo "Missing quadlet files for: ${missing[*]}" >&3
-        echo "Run scripts/deploy-stack.sh to generate quadlets." >&3
+        echo "Run scripts/deploy.sh to generate quadlets." >&3
         return 1
     fi
 }

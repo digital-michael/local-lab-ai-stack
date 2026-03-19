@@ -28,7 +28,7 @@ All services run as rootless Podman containers managed by systemd quadlets on a 
 │   └── config.json                    # Single source of truth for all service definitions
 ├── scripts/
 │   ├── configure.sh                   # CRUD on config, quadlet/secret generation
-│   ├── deploy-stack.sh                # Orchestrates full deployment sequence
+│   ├── deploy.sh                      # Orchestrates full deployment sequence
 │   ├── install.sh                     # One-time system prerequisites and directory setup
 │   └── validate-system.sh             # Pre-flight environment checks
 └── docs/
@@ -76,7 +76,7 @@ All services run as rootless Podman containers managed by systemd quadlets on a 
 vi configs/config.json
 
 # Generate quadlets and deploy
-./scripts/deploy-stack.sh
+./scripts/deploy.sh
 ```
 
 Run any script with `--help` for usage details.
