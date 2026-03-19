@@ -25,11 +25,14 @@ Project-specific preferences and opinionated decisions for vLLM within this AI s
 
 # 2 Configuration Choices
 
-- Default model: `llama3.1-8b` — fits in 24 GB VRAM with room for KV cache
+- **Hardware baseline (RTX 3070 Ti, 8 GB VRAM):** ~5.5 GB usable on a desktop — X server + driver overhead consumes ~2–3 GB; a headless server gets ~7 GB
+- **Model selection:** FP16 llama3.1-8b requires ~16 GB VRAM and will immediately OOM on this card; use quantized variants only:
+  - `Mistral-7B-AWQ` (~4.5 GB) — good quality/size balance
+  - `Phi-3.5-mini` (~2.5 GB) — fits comfortably with headroom
+  - `Llama-3.2-3B` (~2 GB) — smallest viable reasoning model
+- `GPU_MEMORY_UTILIZATION=0.70` — lower than the vLLM default (0.90) because the GPU is also serving an active desktop session; use 0.85 on a headless/server node
 - `TENSOR_PARALLEL_SIZE=1` for single-GPU nodes; increase for multi-GPU
-- `MAX_MODEL_LEN=4096` — conservative context window to start; increase as needed
-- `GPU_MEMORY_UTILIZATION=0.9` — reserve 10% for system overhead
-- Embedding model (`BAAI/bge-large-en-v1.5`) also served by this vLLM instance
+- `MAX_MODEL_LEN=4096` — conservative context window to start; reduce if OOM during prefill
 
 # 3 Integration Patterns
 
@@ -41,6 +44,7 @@ Project-specific preferences and opinionated decisions for vLLM within this AI s
 # 4 Operational Notes
 
 - vLLM has the slowest startup time of any service (model loading) — 60-second health check interval accounts for this
-- OOM kills are the most common failure mode; monitor `gpu_memory_used_percent`
+- OOM kills are the most common failure mode; monitor `gpu_memory_used_percent`; lower `GPU_MEMORY_UTILIZATION` or `MAX_MODEL_LEN` before re-attempting
 - When adding a new model, download weights to the models directory first, then update LiteLLM's routing config
-- vLLM container restarts cause a brief inference outage — LiteLLM should fall back to llama.cpp automatically
+- vLLM container restarts cause a brief inference outage — LiteLLM falls back to Ollama (CPU) automatically when the vLLM backend is unhealthy
+- **CPU pinning for Ollama co-deployment:** when Ollama runs on the same machine, add `CUDA_VISIBLE_DEVICES=""` to the Ollama quadlet environment — without this, Ollama claims the GPU at startup and starves vLLM
