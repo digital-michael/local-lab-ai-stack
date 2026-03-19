@@ -4,8 +4,8 @@
 # Profiles:
 #   quick (default) — systemd state, container health, network existence,
 #                     dependency reachability, model availability
-#   full            — quick + secrets, config validation, volume paths,
-#                     resource pressure, API readiness  [TODO]
+#   full            — quick + config validation, secrets, volume paths,
+#                     resource pressure, API readiness probes
 #
 # Exit codes:
 #   0  All checked services pass or are intentionally skipped
@@ -43,13 +43,13 @@ Profiles:
     - Dependency reachability (inter-container TCP to declared depends_on)
     - Model availability (ollama)
 
-  full  [TODO — not yet implemented]
+  full
     - Everything in quick, plus:
-    - Secrets presence and completeness
     - Config validation (configure.sh validate)
-    - Volume / data path existence and permissions
-    - Container resource pressure (memory near limit)
-    - Per-service API readiness probes
+    - Secrets presence (all referenced podman secrets exist)
+    - Volume / data path existence
+    - Container resource pressure (memory near limit, threshold 85%)
+    - Per-service API readiness probes (HTTP/app-layer, not just TCP)
 
 Options:
   --profile quick|full   Diagnostic profile (default: quick)
@@ -70,7 +70,7 @@ Examples:
   diagnose.sh                        # quick check, all services
   diagnose.sh --fix                  # quick check + restart broken services
   diagnose.sh litellm ollama         # quick check, specific services only
-  diagnose.sh --profile full         # full check (once implemented)
+  diagnose.sh --profile full         # full check (all categories)
   diagnose.sh --fix --log-lines 30   # verbose fix run
 EOF
 }
@@ -87,11 +87,7 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-if [[ "$PROFILE" == "full" ]]; then
-    echo "ERROR: --profile full is not yet implemented (TODO)." >&2
-    exit 1
-fi
-if [[ "$PROFILE" != "quick" ]]; then
+if [[ "$PROFILE" != "quick" && "$PROFILE" != "full" ]]; then
     echo "ERROR: Unknown profile '$PROFILE'. Valid: quick, full" >&2
     exit 1
 fi
@@ -349,6 +345,163 @@ _diagnose() {
     _RESULT="FAIL"
 }
 
+# ── Full check: config validation via configure.sh ───────────────────────────
+
+_check_config_validate() {
+    echo ""
+    echo "  Config Validation"
+    local out rc=0
+    out=$("$SCRIPT_DIR/configure.sh" validate 2>&1) || rc=$?
+    if [[ $rc -eq 0 ]]; then
+        printf "  [PASS] %-20s config valid\n" "configure.sh"
+    else
+        printf "  [FAIL] %-20s configure.sh validate reported errors\n" "configure.sh"
+        echo "$out" | sed 's/^/           /'
+    fi
+    return $rc
+}
+
+# ── Full check: secrets presence ─────────────────────────────────────────────
+# Checks that every podman secret referenced across all services exists.
+
+_check_secrets() {
+    echo ""
+    echo "  Secrets"
+    local all_secrets fail=0
+    all_secrets=$(jq -r '[.services[].secrets[]?.name] | unique[]' "$CONFIG_FILE" 2>/dev/null || true)
+
+    if [[ -z "$all_secrets" ]]; then
+        printf "  [SKIP] %-20s no secrets defined\n" "secrets"
+        return 0
+    fi
+
+    while IFS= read -r secret; do
+        [[ -z "$secret" ]] && continue
+        if podman secret inspect "$secret" &>/dev/null; then
+            printf "  [PASS] %-20s present\n" "$secret"
+        else
+            printf "  [FAIL] %-20s MISSING — run: ./scripts/configure.sh generate-secrets\n" "$secret"
+            fail=$((fail + 1))
+        fi
+    done <<< "$all_secrets"
+    return $fail
+}
+
+# ── Full check: volume/data path existence ────────────────────────────────────
+# Expands $AI_STACK_DIR and $HOME in volume host paths and checks existence.
+
+_check_volumes() {
+    echo ""
+    echo "  Volume Paths"
+    local ai_stack_dir fail=0
+    ai_stack_dir=$(jq -r '.ai_stack_dir' "$CONFIG_FILE" 2>/dev/null || echo '$HOME/ai-stack')
+    ai_stack_dir="${ai_stack_dir//\$HOME/$HOME}"
+
+    # Collect unique host paths across all services (scoped to TARGETS if set)
+    local paths
+    if [[ ${#TARGETS[@]} -gt 0 ]]; then
+        local svc_filter
+        svc_filter=$(printf '"%s",' "${TARGETS[@]}")
+        svc_filter="[${svc_filter%,}]"
+        paths=$(jq -r --argjson svcs "$svc_filter" \
+            '[.services | to_entries[] | select([.key] | inside($svcs))
+             | .value.volumes[]?.host] | unique[]' "$CONFIG_FILE" 2>/dev/null || true)
+    else
+        paths=$(jq -r '[.services[].volumes[]?.host] | unique[]' "$CONFIG_FILE" 2>/dev/null || true)
+    fi
+
+    if [[ -z "$paths" ]]; then
+        printf "  [SKIP] %-20s no volumes configured for checked services\n" "volumes"
+        return 0
+    fi
+
+    while IFS= read -r raw_path; do
+        [[ -z "$raw_path" ]] && continue
+        local expanded="${raw_path//\$AI_STACK_DIR/$ai_stack_dir}"
+        expanded="${expanded//\$HOME/$HOME}"
+        local label="${raw_path/$ai_stack_dir/\$AI_STACK_DIR}"
+        if [[ -e "$expanded" ]]; then
+            printf "  [PASS] %-44s exists\n" "$label"
+        else
+            printf "  [WARN] %-44s MISSING — run: ./scripts/install.sh\n" "$label"
+            fail=$((fail + 1))
+        fi
+    done <<< "$paths"
+    return $fail
+}
+
+# ── Full check: container resource pressure ───────────────────────────────────
+# Warns when a container is using >85% of its memory limit.
+
+_check_resource_pressure() {
+    echo ""
+    echo "  Resource Pressure"
+    local threshold=85 warn=0
+
+    # podman stats --no-stream exits non-zero when no containers match; tolerate
+    local stats_out
+    stats_out=$(podman stats --no-stream \
+        --format "{{.Name}} {{.MemPerc}}" 2>/dev/null || true)
+
+    if [[ -z "$stats_out" ]]; then
+        printf "  [SKIP] %-20s no running containers found\n" "resource-pressure"
+        return 0
+    fi
+
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        local name pct
+        name=$(echo "$line" | awk '{print $1}')
+        pct=$(echo "$line" | awk '{gsub(/%/,"",$2); printf "%.0f", $2}')
+
+        # Filter to scoped targets if provided
+        if [[ ${#TARGETS[@]} -gt 0 ]]; then
+            local match=false
+            for t in "${TARGETS[@]}"; do [[ "$name" == "$t" ]] && { match=true; break; }; done
+            $match || continue
+        fi
+
+        local usage_raw
+        usage_raw=$(podman stats --no-stream --format "{{.MemUsage}}" "$name" 2>/dev/null || true)
+        if [[ $pct -ge $threshold ]]; then
+            printf "  [WARN] %-20s memory ${pct}%% of limit  (%s)\n" "$name" "$usage_raw"
+            warn=$((warn + 1))
+        else
+            printf "  [PASS] %-20s memory ${pct}%% of limit  (%s)\n" "$name" "$usage_raw"
+        fi
+    done <<< "$stats_out"
+    return $warn
+}
+
+# ── Full check: per-service API readiness probe ───────────────────────────────
+# Runs the service's health_check.command inside the container to confirm
+# the application layer is responding (not just the port).
+# Only runs for active+healthy services with a real command (not /dev/tcp or null).
+
+_api_probe() {
+    local svc="$1"
+    local cmd
+    cmd=$(jq -r --arg s "$svc" \
+        '.services[$s].health_check.command // empty' "$CONFIG_FILE" 2>/dev/null || true)
+
+    # Skip: no command, null, or a /dev/tcp port-only check
+    [[ -z "$cmd" || "$cmd" == "null" ]] && return 0
+    [[ "$cmd" == bash\ -c* ]] && return 0
+
+    local state
+    state=$(systemctl --user is-active "${svc}.service" 2>/dev/null || true)
+    [[ "$state" != "active" ]] && return 0
+
+    local rc=0
+    podman exec "$svc" sh -c "$cmd" &>/dev/null || rc=$?
+    if [[ $rc -eq 0 ]]; then
+        printf "  [PASS] %-20s API ready\n" "$svc"
+    else
+        printf "  [FAIL] %-20s API probe failed (exit $rc): %s\n" "$svc" "$cmd"
+    fi
+    return $rc
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 echo ""
@@ -395,6 +548,41 @@ done
 model_ok=true
 _check_models || { model_ok=false; warn=$((warn + 1)); }
 
+# ── Full profile additions ────────────────────────────────────────────────────
+
+if [[ "$PROFILE" == "full" ]]; then
+
+    # Config validation
+    _check_config_validate || fail=$((fail + 1))
+
+    # Secrets presence
+    secrets_fail=0
+    _check_secrets || secrets_fail=$?
+    fail=$((fail + secrets_fail))
+
+    # Volume paths
+    vols_fail=0
+    _check_volumes || vols_fail=$?
+    warn=$((warn + vols_fail))
+
+    # Resource pressure
+    pressure_fail=0
+    _check_resource_pressure || pressure_fail=$?
+    warn=$((warn + pressure_fail))
+
+    # API readiness probes
+    echo ""
+    echo "  API Readiness Probes"
+    for svc in "${ordered[@]}"; do
+        local_state=$(systemctl --user is-active "${svc}.service" 2>/dev/null || true)
+        [[ "$local_state" != "active" ]] && continue
+        _is_gpu_gated "$svc" && continue
+        probe_rc=0
+        _api_probe "$svc" || probe_rc=$?
+        [[ $probe_rc -ne 0 ]] && fail=$((fail + 1))
+    done
+fi
+
 echo ""
 echo "════════════════════════════════════════"
 printf "  Pass: %-3d  Warn: %-3d  Fail: %-3d  Skip: %-3d" "$pass" "$warn" "$fail" "$skip"
@@ -403,13 +591,14 @@ echo ""
 echo ""
 
 if [[ $fail -gt 0 ]]; then
-    echo "  ${fail} service(s) need attention."
+    echo "  ${fail} check(s) need attention."
     $FIX || echo "  Run with --fix to attempt automatic restarts."
     exit 1
 elif [[ $warn -gt 0 ]]; then
-    echo "  Health checks still initialising. Re-run in ~60s."
+    echo "  Warning(s) detected. Review items above."
     exit 1
 else
     echo "  All services nominal."
     exit 0
 fi
+
