@@ -285,7 +285,7 @@ This section defines the reproducible, sequenced implementation plan across all 
    - Add `knowledge_index_api_key` to configuration §8 and implementation §1
    - Confirm all secret names are consistent between config.json, configuration doc, and implementation doc
 
-4.6. **Update deploy-stack.sh**
+4.6. **Update deploy.sh**
    - Add calls to `configure.sh validate` and `configure.sh generate-quadlets` before deployment
    - Ensure Traefik config directory is created during deployment
 
@@ -295,7 +295,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 - All volume paths verified
 - Complete dependency graph in config.json
 - Updated secrets inventory
-- deploy-stack.sh calls validation pipeline
+- deploy.sh calls validation pipeline
 
 ### Verification
 - `jq '[.services[].tag] | map(select(. == "TBD")) | length' configs/config.json` returns 0 (except Knowledge Index custom image)
@@ -385,6 +385,66 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
+---
+
+## Phase 7 — MCP Integration (Knowledge Index Service)
+
+**Goal:** Extend the Knowledge Index Service to expose its RAG capabilities as MCP tools, enabling agent clients (Claude Desktop, Cursor, VS Code Copilot, etc.) to call document ingest and vector search directly over the Model Context Protocol.
+
+**Decision:** Use Anthropic's `mcp` Python SDK initially (fastest path to working); HTTP/SSE transport to fit the containerized Traefik-fronted architecture. REST API remains intact alongside MCP — additive, not replacing.
+
+**Inputs:** Deployed Knowledge Index Service (`services/knowledge-index/app.py`), Traefik dynamic config, existing `knowledge_index_api_key` secret.
+
+### Steps
+
+7.1. **Record MCP transport decision** — add D-015 to `meta_local/decisions.md`
+   - Decision: HTTP/SSE transport (not stdio) — fits containerized deployment behind Traefik
+   - Initial implementation: Anthropic `mcp[server]` Python SDK
+   - Rationale: stdio requires subprocess on agent side (poor fit for container); SSE over HTTPS is Traefik-compatible and works with all MCP-supporting clients
+
+7.2. **Add `mcp` dependency to Knowledge Index Service**
+   - Add `mcp[server]` to `services/knowledge-index/requirements.txt`
+   - Rebuild and test image locally
+
+7.3. **Implement MCP tool layer in `app.py`**
+   - Mount MCP SSE endpoint at `/mcp/sse` alongside existing FastAPI routes
+   - Expose tools:
+     - `search_knowledge` — wraps `POST /query`; args: `query: str`, `collection: str`, `top_k: int`
+     - `ingest_document` — wraps `POST /documents`; args: `id: str`, `content: str`, `metadata: dict`
+   - Reuse existing `_embed()` / `_query()` internals — no new backend logic
+   - Auth: validate `API_KEY` env var on every MCP tool call (same secret as REST)
+
+7.4. **Update Traefik dynamic config**
+   - Add `/mcp` path prefix rule in `configs/traefik/dynamic/services.yaml`
+   - Route to `http://knowledge-index.ai-stack:8100` (same backend, new path)
+   - Apply existing auth middleware
+
+7.5. **Update `configs/config.json`**
+   - Note MCP SSE endpoint in knowledge-index service metadata (informational)
+
+7.6. **Add MCP tool tests to test suite**
+   - New test module `testing/layer3_model/test_mcp_tools.py`
+   - Test: connect MCP client to `http://localhost:8100/mcp/sse`, call `search_knowledge`, assert results
+   - Mirror structure of `test_rag_pipeline.py`
+
+7.7. **Update component library**
+   - `docs/library/framework_components/knowledge-index/best_practices.md` — add MCP tool section
+   - `docs/library/framework_components/knowledge-index/guidance.md` — update with SSE endpoint and client config examples
+
+### Outputs
+- MCP SSE endpoint live at `/mcp/sse` on knowledge-index container
+- Two tools registered: `search_knowledge`, `ingest_document`
+- MCP tests passing in pytest suite
+- Traefik routing `/mcp` path
+- Component library updated
+
+### Verification
+- `curl http://localhost:8100/mcp/sse` returns SSE stream headers
+- `pytest testing/layer3_model/test_mcp_tools.py` passes
+- Agent client (e.g., Claude Desktop) can discover and call `search_knowledge` tool
+
+---
+
 ## Execution Notes
 
 - **Phases 1–3 are documentation and configuration.** They can be executed in a single session with no external dependencies.
@@ -392,6 +452,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 - **Phase 5 requires a running system** with Podman installed. Can be preceded by `scripts/install.sh` and `scripts/validate-system.sh`.
 - **Phase 6 is bookkeeping** and should be done immediately after Phase 5.
 - **Knowledge Index Service is custom software** — building it is a separate project tracked under Future Features / Deferrable. The spec (Phase 1) enables the rest of the stack to deploy with a placeholder; the service can be added later without re-architecting.
+- **Phase 7 (MCP)** is additive — the REST API is preserved. Phase 7 can be executed independently once the Knowledge Index Service is deployed and healthy.
 
 ---
 
@@ -411,7 +472,7 @@ The `configure.sh` script and its JSON config file are the primary mechanism for
   - [x] `configure.sh generate-secrets` — prompt for and provision Podman secrets from config inventory
 - [x] **Create default `configs/config.json`** — populated with current documented defaults
 - [ ] **Support multi-environment configs** — `configs/dev.json`, `configs/prod.json`
-- [x] **Update `deploy-stack.sh`** — call `configure.sh validate` and `configure.sh generate-quadlets` before deployment
+- [x] **Update `deploy.sh`** — call `configure.sh validate` and `configure.sh generate-quadlets` before deployment
 - [ ] **Update `ai_stack_configuration.md`** — reframe as schema documentation; values live in config.json
 
 ---
@@ -449,6 +510,7 @@ These collapse into the configuration system above. Tracked individually for vis
 - [ ] **Implement localhost discovery profile** — filesystem scan of volumes directory, manifest parsing (see D-013)
 - [ ] **Specify local and WAN discovery profiles** — mDNS/DNS-SD for local, registry/federation for WAN (see D-013)
 - [ ] **Build volume ingestion pipeline** — process raw documents into `.ai-library` manifest structure; handle embedding, vector storage, and checksum generation (see D-013)
+- [ ] **Integrate MCP server into Knowledge Index Service** — expose `search_knowledge` and `ingest_document` as MCP tools over HTTP/SSE transport; Anthropic `mcp[server]` Python SDK; mount at `/mcp/sse` alongside REST API; add Traefik routing and pytest coverage (see Phase 7)
 
 ---
 
@@ -499,3 +561,16 @@ Items requiring a decision before or during implementation.
   - flowData nodes require full inputParams/inputAnchors arrays from node API definitions
 - pytest: **24 passed, 1 skipped, 0 failed**
 - Remaining skip: T-071 (vLLM hardware-gated only)
+
+## Session Notes — 2026-03-19
+
+- Fixed 6 unhealthy services: bash /dev/tcp health check pattern; distroless loki gets no HealthCmd; systemd strips double-quotes (use single-quotes) — lessons I-7 in dynamics.md
+- Added HEALTH column to `scripts/status.sh`
+- Built `scripts/diagnose.sh` — quick and full profiles; `--fix` auto-restart; topological service walk
+- OpenWebUI connectivity resolved (3 stacked root causes):
+  - (1) `openwebui_api_key` ≠ `litellm_master_key` → 401 on all model calls
+  - (2) `OLLAMA_BASE_URL=/ollama` Docker Compose image default; set to `http://ollama.ai-stack:11434`
+  - (3) `webui.db` first-boot persists Docker default `host.docker.internal:11434`; DB overrides env vars; patched directly
+  - `_check_integrations()` added to diagnose.sh full profile; detects and auto-fixes all three
+- Lessons recorded: I-8 in dynamics.md; Section 6 added to `openwebui/best_practices.md` (commits `3b78b60`)
+- MCP integration scoped and added to implementation plan as Phase 7 (Knowledge Index SSE/HTTP transport, Anthropic mcp SDK)
