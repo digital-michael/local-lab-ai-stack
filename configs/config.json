@@ -427,7 +427,8 @@
         }
       ],
       "environment": {
-        "OPENAI_API_BASE": "http://litellm.ai-stack:4000"
+        "OPENAI_API_BASE": "http://litellm.ai-stack:4000",
+        "OLLAMA_BASE_URL": "http://ollama.ai-stack:11434"
       },
       "secrets": [
         {
