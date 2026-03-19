@@ -445,6 +445,213 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
+## Phase 8 — Local GPU Enablement and Model Routing
+
+**Goal:** Enable vLLM on the local GPU (RTX 3070 Ti, 8 GB VRAM), pin Ollama to CPU, and introduce a `models[]` config section so LiteLLM routes each model to the correct backend and device.
+
+**Decisions:**
+- D-016: Ollama = CPU-only (`CUDA_VISIBLE_DEVICES=""`); vLLM = GPU-only via CDI
+- D-017: `config.json` gains a top-level `models[]` array; each entry has `name`, `backend` (ollama|vllm), `device` (cpu|gpu), and optional `quantization`; `configure.sh` generates the LiteLLM `model_list` from it
+
+**Inputs:** Deployed stack, `nvidia-smi` confirms GPU, existing LiteLLM config.
+
+### Steps
+
+8.1. **CDI setup for rootless Podman GPU passthrough**
+   - Run `nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` (requires sudo once)
+   - Verify: `podman run --rm --device nvidia.com/gpu=all ubuntu nvidia-smi`
+   - Document in `docs/library/framework_components/vllm/guidance.md`
+
+8.2. **Pin Ollama to CPU**
+   - Add `CUDA_VISIBLE_DEVICES=""` to `config.json` → `services.ollama.environment`
+   - Regenerate quadlet and restart Ollama
+
+8.3. **Select GPU-appropriate model for vLLM**
+   - Constraint: ≤5.5 GB VRAM after desktop overhead on 8 GB card
+   - Candidates: Phi-3.5-mini (~2.5 GB), Mistral-7B-AWQ (~4.5 GB), Llama-3.2-3B (~2 GB)
+   - Download chosen model to `$AI_STACK_DIR/models/`
+   - Update `config.json`: `services.vllm.environment.MODEL_NAME`, `GPU_MEMORY_UTILIZATION=0.70`
+
+8.4. **Add `models[]` section to `config.json`**
+   ```json
+   "models": [
+     { "name": "llama3.1:8b",     "backend": "ollama", "device": "cpu" },
+     { "name": "phi-3.5-mini:awq", "backend": "vllm",   "device": "gpu",
+       "quantization": "awq" }
+   ]
+   ```
+
+8.5. **Extend `configure.sh` to generate LiteLLM `model_list`**
+   - New subcommand: `configure.sh generate-litellm-config`
+   - Reads `models[]` + `services` → produces `litellm_config.yaml`
+   - CPU models → `ollama/<model>` at `http://ollama.ai-stack:11434`
+   - GPU models → `openai/<model>` at `http://vllm.ai-stack:8000`
+   - Remote models (Phase 9) → `ollama/<model>` or `openai/<model>` at remote URL
+
+8.6. **Add `configure.sh detect-hardware`**
+   - Detect GPU (nvidia-smi), VRAM, system RAM
+   - Suggest node profile and viable models based on available resources
+   - Output human-readable summary; optionally write to `config.json`
+
+8.7. **Start vLLM, verify end-to-end**
+   - `systemctl --user start vllm.service`
+   - Verify via LiteLLM: `curl /v1/models` lists both CPU and GPU models
+   - OpenWebUI model dropdown shows both
+
+8.8. **Update diagnose.sh**
+   - `_check_models()`: report which models are GPU-backed vs CPU-backed
+   - Full profile: verify CDI is configured when vLLM is in service list
+
+### Outputs
+- vLLM running on GPU, Ollama running on CPU, both visible via LiteLLM
+- `models[]` in config.json as source of truth for model→backend→device mapping
+- `configure.sh detect-hardware` available for new node setup
+- LiteLLM config auto-generated from `models[]`
+
+### Verification
+- `nvidia-smi` shows vLLM process using GPU
+- `podman exec ollama env | grep CUDA` returns `CUDA_VISIBLE_DEVICES=`
+- `curl -H "Authorization: Bearer $KEY" http://litellm.ai-stack:4000/v1/models` lists both models
+- `diagnose.sh --profile full` passes with both models reported
+
+---
+
+## Phase 9 — Remote Inference Nodes
+
+**Goal:** Enable remote machines (starting with a macOS M1) to contribute inference capacity. The controller's LiteLLM routes model requests to remote workers dynamically.
+
+**Decisions:**
+- D-018: Node profiles — `controller` (full stack), `inference-worker` (Ollama/vLLM only), `peer` (full stack + shares inference); stored as `node_profile` in config.json
+- D-019: macOS nodes use Podman Machine for containerized deployment (consistent with Linux pattern); refinement permitted later
+- D-020: Dynamic node registration with static fallback — workers register with the controller's LiteLLM on startup; static config entries serve as backup or for institutional/permanent nodes
+- Inter-node auth: API key + TLS; DNS naming TBD (see Consideration #29)
+
+**Inputs:** Phase 8 complete, remote machine with network access to controller.
+
+### Steps
+
+9.1. **Add `node_profile` to config.json schema**
+   - Top-level field: `"node_profile": "controller"` (default)
+   - Valid values: `controller`, `inference-worker`, `peer`
+   - `configure.sh generate-quadlets` uses this to select which services to deploy:
+     - `controller`: all services
+     - `inference-worker`: ollama and/or vllm only (plus promtail for log forwarding)
+     - `peer`: all services + registers as remote inference provider
+
+9.2. **Add `nodes[]` section to config.json**
+   ```json
+   "nodes": [
+     {
+       "name": "workstation",
+       "profile": "controller",
+       "address": "TBD",
+       "models": ["llama3.1:8b", "phi-3.5-mini:awq"]
+     },
+     {
+       "name": "macbook-m1",
+       "profile": "inference-worker",
+       "address": "TBD",
+       "models": ["llama3.1:8b"]
+     }
+   ]
+   ```
+
+9.3. **Implement dynamic node registration**
+   - Worker nodes: on startup, POST to controller's LiteLLM `/model/new` API with model definitions
+   - Controller: accepts registration; adds models to routing table
+   - Heartbeat: periodic health check from controller to worker; stale models removed from routing
+   - Startup script: `scripts/register-node.sh` — reads local `config.json`, calls controller API
+   - Fallback: static entries in `nodes[]` loaded at LiteLLM startup for nodes that don't self-register
+
+9.4. **Set up macOS M1 node**
+   - Install Podman Machine on macOS: `brew install podman && podman machine init`
+   - Deploy `inference-worker` profile: Ollama container inside Podman Machine VM
+   - Configure TLS for inter-node communication
+   - Run `register-node.sh` to announce to controller
+
+9.5. **Extend `configure.sh detect-hardware` for macOS**
+   - Detect Apple Silicon (sysctl hw.optional.arm64), unified memory size
+   - Suggest viable models for M1/M2/M3 hardware profiles
+   - Output profile recommendation: `inference-worker` for headless, `peer` if full stack desired
+
+9.6. **Extend `models[]` with remote host support**
+   - Add optional `host` field to model entries:
+     ```json
+     { "name": "llama3.1:8b-mac", "backend": "ollama", "device": "gpu",
+       "host": "macbook-m1" }
+     ```
+   - `configure.sh generate-litellm-config` resolves `host` → `nodes[].address` for `api_base`
+
+9.7. **Update diagnose.sh for remote nodes**
+   - Quick profile: show registered remote models and their health
+   - Full profile: TCP reachability to each remote node; API probe
+
+### Outputs
+- M1 node contributing inference capacity to the controller's LiteLLM
+- Dynamic registration protocol operational; static fallback available
+- `configure.sh detect-hardware` works on macOS
+- `nodes[]` and per-model `host` field in config.json
+
+### Verification
+- `curl /v1/models` on controller lists models from both local and M1 nodes
+- Kill M1 Ollama → controller removes stale models within heartbeat interval
+- `diagnose.sh` reports remote node health
+- `configure.sh detect-hardware` on M1 outputs correct hardware profile
+
+---
+
+## Phase 10 — Full Peer Nodes and Shared Knowledge
+
+**Goal:** Multiple nodes each run the complete stack independently. Nodes share inference capacity and knowledge libraries. Chat history and user state remain node-local for MVP; team-shared context is a future extension.
+
+**Decisions:**
+- D-021: Shared state scope — inference routing and knowledge library discovery are shared across peers; chat history, user accounts, and Flowise flows remain node-local. Team-shared chat/context is deferred to a future phase.
+- D-022: Knowledge sharing via D-014 `local` discovery profile — peers discover each other's knowledge libraries via mDNS/DNS-SD on LAN, or static config for WAN
+
+**Inputs:** Phase 9 complete, multiple nodes running the stack.
+
+### Steps
+
+10.1. **Implement `peer` profile in `configure.sh`**
+   - Deploys all services (same as controller)
+   - Additionally runs `register-node.sh` on startup to share inference with other peers
+   - Exposes Knowledge Index API to the network (not just localhost)
+
+10.2. **Implement `local` discovery profile for knowledge sharing (D-014)**
+   - mDNS/DNS-SD service announcement: each node's Knowledge Index advertises via `_ai-library._tcp`
+   - Peers discover each other's Knowledge Index endpoints automatically
+   - Query routing: Knowledge Index forwards queries to peer indexes when local collection lacks coverage
+   - Volume manifest sync: peers exchange `manifest.yaml` metadata; actual vectors remain on the originating node
+
+10.3. **WAN peer connectivity**
+   - Static peer entries in `nodes[]` for WAN-connected nodes (no mDNS across WAN)
+   - Mandatory TLS + mutual API key auth for inter-node calls over public internet
+   - Traefik on each peer exposes Knowledge Index and inference endpoints on HTTPS
+   - DNS naming strategy TBD (see Consideration #29)
+
+10.4. **Cross-peer inference load balancing**
+   - LiteLLM on each peer knows about all models across all nodes
+   - Routing strategy: prefer local → then LAN peers → then WAN peers
+   - Fallback: if all instances of a model are down, return clear error (not silent timeout)
+
+10.5. **Update diagnose.sh for peer topology**
+   - Full profile: show all known peers, their profiles, reachable models, knowledge indexes
+   - Detect split-brain: two controllers claiming the same network
+
+### Outputs
+- Multiple nodes running full stack independently
+- Knowledge library queries federated across peers
+- Inference load-balanced across all available nodes
+- Each node works standalone; together they share capacity
+
+### Verification
+- Ingest a document on Node A → query returns results on Node B
+- Add a model on Node B → Node A's `/v1/models` lists it
+- Disconnect Node B → Node A continues working with reduced model/knowledge set
+- `diagnose.sh --profile full` on any peer shows complete topology
+
+---
+
 ## Execution Notes
 
 - **Phases 1–3 are documentation and configuration.** They can be executed in a single session with no external dependencies.
@@ -453,6 +660,9 @@ This section defines the reproducible, sequenced implementation plan across all 
 - **Phase 6 is bookkeeping** and should be done immediately after Phase 5.
 - **Knowledge Index Service is custom software** — building it is a separate project tracked under Future Features / Deferrable. The spec (Phase 1) enables the rest of the stack to deploy with a placeholder; the service can be added later without re-architecting.
 - **Phase 7 (MCP)** is additive — the REST API is preserved. Phase 7 can be executed independently once the Knowledge Index Service is deployed and healthy.
+- **Phase 8 (GPU)** requires NVIDIA GPU with CDI configured. Can be skipped on CPU-only nodes. Purely local — no network dependencies.
+- **Phase 9 (Remote Nodes)** requires at least two machines with network connectivity. Can proceed with any OS (Linux or macOS with Podman Machine).
+- **Phase 10 (Peer Nodes)** builds on Phase 9 and D-014. Most complex phase — involves distributed state, discovery protocols, and cross-node query routing.
 
 ---
 
@@ -511,6 +721,12 @@ These collapse into the configuration system above. Tracked individually for vis
 - [ ] **Specify local and WAN discovery profiles** — mDNS/DNS-SD for local, registry/federation for WAN (see D-013)
 - [ ] **Build volume ingestion pipeline** — process raw documents into `.ai-library` manifest structure; handle embedding, vector storage, and checksum generation (see D-013)
 - [ ] **Integrate MCP server into Knowledge Index Service** — expose `search_knowledge` and `ingest_document` as MCP tools over HTTP/SSE transport; Anthropic `mcp[server]` Python SDK; mount at `/mcp/sse` alongside REST API; add Traefik routing and pytest coverage (see Phase 7)
+- [ ] **Enable local GPU for vLLM** — CDI setup, pin Ollama to CPU, select quantized model for 8 GB VRAM, add `models[]` config section, auto-generate LiteLLM model_list (see Phase 8)
+- [ ] **Add `configure.sh detect-hardware`** — detect GPU/VRAM/RAM, suggest node profile and viable models (see Phase 8)
+- [ ] **Add node profile support** — `controller`, `inference-worker`, `peer` profiles; `configure.sh` selects services per profile (see Phase 9)
+- [ ] **Implement dynamic node registration** — workers register with controller LiteLLM on startup; heartbeat; static fallback (see Phase 9)
+- [ ] **Set up macOS M1 inference worker** — Podman Machine, Ollama container, `register-node.sh` (see Phase 9)
+- [ ] **Implement `local` discovery profile for knowledge sharing** — mDNS/DNS-SD, cross-peer knowledge query routing (see Phase 10)
 
 ---
 
@@ -523,6 +739,7 @@ These collapse into the configuration system above. Tracked individually for vis
 - [ ] Multi-model A/B testing through LiteLLM
 - [ ] Federated RAG across remote library nodes
 - [ ] Multi-environment config support (dev/staging/prod) via configure.sh
+- [ ] Team-shared chat/context state — shared Postgres or sync protocol so chat history, user accounts, and conversation context are available across peer nodes (extends Phase 10 D-021)
 
 ---
 
@@ -538,6 +755,9 @@ Items requiring a decision before or during implementation.
 | 26 | **Log retention policy** — Loki storage will grow unbounded without a retention/compaction config | Resolved | `retention_period: 168h` (7 days) + compactor enabled in `configs/loki/local-config.yaml` |
 | 27 | **Multi-environment support** — only one set of config values exists; no dev/staging/prod separation | Open | Addressed by configure.sh multi-env support |
 | 28 | **Flowise 3.x API auth** — FLOWISE_USERNAME/PASSWORD env vars are set but API returns 401; user table is empty (Flowise 3.x requires registration flow, not just env vars). Chatflow creation via API blocked. | Open | Manual UI registration required to initialize admin account; then API key can be provisioned |
+| 29 | **Inter-node DNS naming** — LAN and WAN nodes need stable DNS names (not raw IP addresses) for TLS certificate validation, LiteLLM routing, and Knowledge Index discovery. Options: mDNS (.local), split-horizon DNS, Tailscale MagicDNS, manual /etc/hosts. | Open | TBD — deferred until Phase 9 implementation |
+| 30 | **macOS Podman Machine performance** — Podman on macOS runs inside a Linux VM; Apple Silicon GPU (Metal) is not exposed to the VM. Ollama native binary would bypass this but breaks the containerized deployment pattern. May need to revisit D-019 after benchmarking. | Open | Start with Podman Machine (D-019); benchmark and revisit if performance is insufficient |
+| 31 | **Model storage on multi-node** — `$AI_STACK_DIR/models/` is local to each node. Models must be pulled/downloaded independently on each node, or a shared storage mechanism (NFS, rsync, object store) is needed. | Open | Manual per-node download for MVP; shared storage deferred |
 
 ---
 
@@ -574,3 +794,12 @@ Items requiring a decision before or during implementation.
   - `_check_integrations()` added to diagnose.sh full profile; detects and auto-fixes all three
 - Lessons recorded: I-8 in dynamics.md; Section 6 added to `openwebui/best_practices.md` (commits `3b78b60`)
 - MCP integration scoped and added to implementation plan as Phase 7 (Knowledge Index SSE/HTTP transport, Anthropic mcp SDK)
+- Deployment hardening: `configure.sh generate-secrets` auto-derives openwebui_api_key from litellm_master_key; `start.sh` recommends diagnose.sh; `undeploy.sh` backup guard
+- GPU discovered: NVIDIA GeForce RTX 3070 Ti, 8 GB VRAM, CUDA 13.0
+- Added Phases 8–10 to implementation plan:
+  - Phase 8: Local GPU enablement — CDI, Ollama CPU pinning, models[] config, LiteLLM auto-generation, detect-hardware
+  - Phase 9: Remote inference nodes — node profiles (controller/inference-worker/peer), dynamic registration, M1 Mac via Podman Machine
+  - Phase 10: Full peer nodes — shared knowledge via mDNS/DNS-SD, cross-peer inference routing, node-local chat
+- Decisions: D-016 (Ollama=CPU, vLLM=GPU), D-017 (models[] config), D-018 (node profiles), D-019 (Mac Podman Machine), D-020 (dynamic registration + static fallback), D-021 (shared inference+knowledge, local chat), D-022 (D-014 local discovery for knowledge)
+- New considerations: #29 (inter-node DNS naming), #30 (macOS Podman Machine performance), #31 (model storage on multi-node)
+- 6 new deferrable items added for Phases 8–10; 1 future feature (team-shared chat/context)
