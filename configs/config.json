@@ -6,6 +6,21 @@
     "driver": "bridge",
     "internal": false
   },
+  "node_profile": "controller",
+  "models": [
+    {
+      "name": "llama3.1:8b",
+      "backend": "ollama",
+      "device": "cpu"
+    },
+    {
+      "name": "phi-3.5-mini",
+      "backend": "vllm",
+      "device": "gpu",
+      "repo": "bartowski/Phi-3.5-mini-instruct-AWQ",
+      "quantization": "awq"
+    }
+  ],
   "services": {
     "traefik": {
       "image": "docker.io/library/traefik",
@@ -302,10 +317,10 @@
         }
       ],
       "environment": {
-        "MODEL_NAME": "llama3.1-8b",
+        "MODEL_NAME": "phi-3.5-mini",
         "TENSOR_PARALLEL_SIZE": "1",
         "MAX_MODEL_LEN": "4096",
-        "GPU_MEMORY_UTILIZATION": "0.9"
+        "GPU_MEMORY_UTILIZATION": "0.70"
       },
       "secrets": [],
       "health_check": {
@@ -316,7 +331,7 @@
       },
       "resources": {
         "cpus": 4,
-        "memory": "24g",
+        "memory": "8g",
         "gpu": "nvidia.com/gpu=all"
       }
     },
@@ -341,7 +356,9 @@
           "mode": "ro"
         }
       ],
-      "environment": {},
+      "environment": {
+        "CUDA_VISIBLE_DEVICES": ""
+      },
       "secrets": [],
       "health_check": {
         "command": "bash -c 'echo > /dev/tcp/localhost/11434'",
