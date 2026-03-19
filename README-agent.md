@@ -74,7 +74,7 @@ The component guidance in `docs/library/framework_components/` is **normative**.
 │   └── config.json                      # Machine-readable service definitions
 ├── scripts/
 │   ├── configure.sh                     # Config CRUD, quadlet/secret generation
-│   ├── deploy-stack.sh                  # Full deployment orchestration
+│   ├── deploy.sh                        # Full deployment orchestration
 │   ├── install.sh                       # One-time system setup
 │   └── validate-system.sh              # Pre-flight environment checks
 └── docs/

@@ -327,7 +327,7 @@ Full JSON Schema to be defined during implementation. The schema should validate
 
 # 7 Alerting Rules
 
-Alert rules are stored in `configs/prometheus/rules/ai_stack_alerts.yml` (repo) and deployed to `$AI_STACK_DIR/configs/prometheus/rules/` by `deploy-stack.sh`. Prometheus is configured to load them via `rule_files` in `configs/prometheus/prometheus.yml`.
+Alert rules are stored in `configs/prometheus/rules/ai_stack_alerts.yml` (repo) and deployed to `$AI_STACK_DIR/configs/prometheus/rules/` by `deploy.sh`. Prometheus is configured to load them via `rule_files` in `configs/prometheus/prometheus.yml`.
 
 ### Defined Alerts
 
@@ -500,7 +500,7 @@ systemctl --user list-units --state=failed
 | GPU not visible in container | CDI not configured | Run `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` (§4) |
 | vLLM OOM crash | Model too large for VRAM | Lower `GPU_MEMORY_UTILIZATION` or `MAX_MODEL_LEN` in config.json; use a smaller GGUF |
 | Qdrant disk growing unbounded | No vector TTL configured | Set per-collection TTL via Qdrant API; expand `$AI_STACK_DIR/qdrant` volume path |
-| Containers fail to resolve DNS | Network not yet created | `podman network create ai-stack-net`; or `scripts/deploy-stack.sh` creates it |
+| Containers fail to resolve DNS | Network not yet created | `podman network create ai-stack-net`; or `scripts/deploy.sh` creates it |
 | Permission denied on volumes | Rootless UID/SELinux | Ensure all volume mounts use `:Z` (done by `configure.sh generate-quadlets`) |
 | Traefik 502 Bad Gateway | Backend container not running | Check backend service: `podman ps`, `systemctl --user start <svc>.service` |
 | Authentik outpost not responding | Outpost not started or embedded outpost misconfigured | `journalctl --user -u authentik.service -n 100`; check outpost config in Authentik admin |

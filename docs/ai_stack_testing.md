@@ -106,7 +106,7 @@ A `configs/models.json` file (to be created in Phase 8c) declares the models pul
 }
 ```
 
-`scripts/deploy-stack.sh` will call a `pull-models.sh` script to download all listed models before starting GPU-dependent services.
+`scripts/deploy.sh` will call a `pull-models.sh` script to download all listed models before starting GPU-dependent services.
 
 ### 4.2 No-Model Gate (T-055)
 
