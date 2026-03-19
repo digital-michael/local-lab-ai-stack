@@ -1,5 +1,5 @@
 # OpenWebUI — Best Practices
-**Last Updated:** 2026-03-08 UTC
+**Last Updated:** 2026-03-19 UTC
 
 ## Purpose
 Industry-standard best practices for deploying and operating OpenWebUI as the primary user interface for LLM interactions.
@@ -13,6 +13,7 @@ Industry-standard best practices for deploying and operating OpenWebUI as the pr
 3. Performance
 4. Reliability
 5. Upgrades
+6. Known Pitfalls (Podman / non-Docker-Compose deployments)
 
 ## References
 
@@ -57,3 +58,56 @@ Industry-standard best practices for deploying and operating OpenWebUI as the pr
 - Review the changelog for breaking changes in API compatibility or database schema migrations
 - Back up persistent volumes before upgrading
 - Verify OIDC integration still functions after major version bumps
+
+# 6 Known Pitfalls (Podman / non-Docker-Compose deployments)
+
+## 6.1 Docker Compose defaults baked into the OCI image
+
+The official OpenWebUI image ships with `OLLAMA_BASE_URL=/ollama` — a relative path designed for the Docker Compose nginx reverse-proxy setup. In rootless Podman this value is meaningless and causes the UI to report "Ollama: network problem" with no models visible.
+
+**Fix**: Always set `OLLAMA_BASE_URL=http://<svc>.ai-stack:<port>` explicitly in the quadlet `[Service]` environment block before the first container start; do not rely on the image default.
+
+## 6.2 webui.db takes precedence over env vars — first-boot ordering
+
+OpenWebUI writes all connection config (Ollama URL, API base, etc.) to a SQLite database (`webui.db`, table `config`, JSON column `data`) **at first container start**, before the application reads env vars at the layer that matters. Values already present in the DB are used at runtime regardless of what the container env says.
+
+Consequences:
+- If `OLLAMA_BASE_URL` is correct in the quadlet but the container was first started with a stale or defaulting image, the DB records `http://host.docker.internal:11434` and that value wins.
+- Changing env vars after first boot has no effect on connection config; the DB must be patched.
+
+**Detection** (via `diagnose.sh --profile full`):
+```bash
+podman exec openwebui python3 -c "
+import sqlite3, json
+db='<data_path>/webui.db'
+row=sqlite3.connect(db).execute('SELECT data FROM config WHERE id=1').fetchone()
+print(json.loads(row[0])['ollama']['base_urls'])
+"
+```
+
+**Fix**: Patch the DB and restart:
+```python
+import sqlite3, json
+conn = sqlite3.connect('<data_path>/webui.db')
+row = conn.execute('SELECT data FROM config WHERE id=1').fetchone()
+cfg = json.loads(row[0])
+cfg['ollama']['base_urls'] = ['http://ollama.ai-stack:11434']
+conn.execute('UPDATE config SET data=? WHERE id=1', (json.dumps(cfg),))
+conn.commit()
+```
+Then `systemctl --user restart openwebui`.
+
+`diagnose.sh --profile full --fix` performs this automatically via the `openwebui/db-ollama-url` check in `_check_integrations()`.
+
+## 6.3 openwebui_api_key must equal litellm_master_key
+
+OpenWebUI forwards `OPENAI_API_KEY` (sourced from the `openwebui_api_key` Podman secret) as `Authorization: Bearer <key>` on every call to LiteLLM. If this value does not match `LITELLM_MASTER_KEY`, every model listing and inference request returns HTTP 401 — surfacing in the UI as "failed to fetch models" and an empty Bearer key field on the Connections page.
+
+**Fix**: Recreate the secret with the correct value:
+```bash
+podman secret rm openwebui_api_key
+printf '<litellm_master_key_value>' | podman secret create openwebui_api_key -
+systemctl --user restart openwebui
+```
+
+Always generate both keys from the same source of truth (e.g., `config.json`) and provision them together. `diagnose.sh --profile full --fix` detects and corrects this mismatch via the `openwebui→litellm` check in `_check_integrations()`.
