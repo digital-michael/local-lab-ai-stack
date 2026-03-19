@@ -195,32 +195,58 @@ _check_network() {
     fi
 }
 
-# ── Quick check: ollama model availability ────────────────────────────────────
+# ── Quick check: model availability (Ollama CPU + vLLM GPU) ─────────────────
 
 _check_models() {
     echo ""
     echo "  Model Availability"
-    local ollama_state
+    local ollama_state vllm_state
     ollama_state=$(systemctl --user is-active "ollama.service" 2>/dev/null || true)
+    vllm_state=$(systemctl --user is-active "vllm.service" 2>/dev/null || true)
 
+    # Ollama CPU models
     if [[ "$ollama_state" != "active" ]]; then
-        printf "  [SKIP] %-20s ollama not running\n" "ollama/models"
-        return 0
+        printf "  [SKIP] %-28s ollama not running\n" "ollama/models"
+    else
+        local model_list
+        model_list=$(podman exec ollama ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' || true)
+
+        if [[ -z "$model_list" ]]; then
+            printf "  [WARN] %-28s no models loaded — run: ./scripts/pull-models.sh\n" "ollama/models"
+        else
+            local count
+            count=$(echo "$model_list" | wc -l)
+            printf "  [PASS] %-28s %d model(s): %s\n" "ollama/models" "$count" \
+                "$(echo "$model_list" | tr '\n' ' ' | sed 's/ $//')"
+        fi
+
+        # Check CPU pinning
+        local cuda_vis
+        cuda_vis=$(podman exec ollama sh -c 'echo "${CUDA_VISIBLE_DEVICES-unset}"' 2>/dev/null || true)
+        if [[ "$cuda_vis" == "" ]]; then
+            printf "  [PASS] %-28s CUDA_VISIBLE_DEVICES=\"\" (CPU-pinned)\n" "ollama/cpu-pinned"
+        elif [[ "$cuda_vis" == "unset" ]]; then
+            printf "  [WARN] %-28s CUDA_VISIBLE_DEVICES not set — Ollama may claim GPU\n" "ollama/cpu-pinned"
+        else
+            printf "  [WARN] %-28s CUDA_VISIBLE_DEVICES=%s (unexpected value)\n" "ollama/cpu-pinned" "$cuda_vis"
+        fi
     fi
 
-    local model_list
-    model_list=$(podman exec ollama ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' || true)
-
-    if [[ -z "$model_list" ]]; then
-        printf "  [WARN] %-20s no models loaded — run: ./scripts/pull-models.sh\n" "ollama/models"
-        return 1
+    # vLLM GPU model
+    if [[ "$vllm_state" != "active" ]]; then
+        if _is_gpu_gated "vllm"; then
+            printf "  [SKIP] %-28s vllm not running (GPU-gated)\n" "vllm/model"
+        fi
+    else
+        local vllm_models
+        vllm_models=$(curl -sf http://localhost:8000/v1/models 2>/dev/null \
+            | jq -r '.data[].id' 2>/dev/null | tr '\n' ' ' | sed 's/ $//' || true)
+        if [[ -n "$vllm_models" ]]; then
+            printf "  [PASS] %-28s %s (GPU)\n" "vllm/model" "$vllm_models"
+        else
+            printf "  [WARN] %-28s vllm running but no models served\n" "vllm/model"
+        fi
     fi
-
-    local count
-    count=$(echo "$model_list" | wc -l)
-    printf "  [PASS] %-20s %d model(s): %s\n" "ollama/models" "$count" \
-        "$(echo "$model_list" | tr '\n' ' ' | sed 's/ $//')"
-    return 0
 }
 
 # ── Per-service diagnostic ────────────────────────────────────────────────────
@@ -489,6 +515,51 @@ conn.commit()
     return $fail
 }
 
+# ── Full check: GPU state and CDI configuration ──────────────────────────────
+
+_check_gpu() {
+    echo ""
+    echo "  GPU / CDI"
+
+    # CDI config
+    if ls /etc/cdi/nvidia.yaml &>/dev/null || ls /run/cdi/nvidia.yaml &>/dev/null; then
+        printf "  [PASS] %-28s nvidia.yaml present\n" "cdi/config"
+    else
+        printf "  [FAIL] %-28s CDI not configured\n" "cdi/config"
+        echo "         ! Fix: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml"
+        return 1
+    fi
+
+    if ! command -v nvidia-smi &>/dev/null; then
+        printf "  [SKIP] %-28s nvidia-smi not found on host\n" "gpu/vram"
+        return 0
+    fi
+
+    # GPU VRAM utilisation
+    local total free used pct
+    total=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 || echo 0)
+    free=$(nvidia-smi  --query-gpu=memory.free  --format=csv,noheader,nounits 2>/dev/null | head -1 || echo 0)
+    used=$(nvidia-smi  --query-gpu=memory.used  --format=csv,noheader,nounits 2>/dev/null | head -1 || echo 0)
+    pct=$(awk "BEGIN{printf \"%d\", ($used/$total)*100}" 2>/dev/null || echo "?")
+    printf "  [PASS] %-28s %d MiB used / %d MiB total (%d%%)\n" "gpu/vram" "$used" "$total" "$pct"
+
+    # vLLM process on GPU
+    local vllm_state
+    vllm_state=$(systemctl --user is-active "vllm.service" 2>/dev/null || true)
+    if [[ "$vllm_state" == "active" ]]; then
+        local vllm_gpu_proc
+        vllm_gpu_proc=$(nvidia-smi --query-compute-apps=pid,process_name,used_memory \
+            --format=csv,noheader 2>/dev/null | grep -i vllm || true)
+        if [[ -n "$vllm_gpu_proc" ]]; then
+            printf "  [PASS] %-28s vLLM process using GPU\n" "gpu/vllm-process"
+        else
+            printf "  [WARN] %-28s vLLM running but no GPU process found\n" "gpu/vllm-process"
+        fi
+    else
+        printf "  [SKIP] %-28s vLLM not active\n" "gpu/vllm-process"
+    fi
+}
+
 # ── Full check: config validation via configure.sh ───────────────────────────
 
 _check_config_validate() {
@@ -700,6 +771,11 @@ if [[ "$PROFILE" == "full" ]]; then
     integ_fail=0
     _check_integrations || integ_fail=$?
     fail=$((fail + integ_fail))
+
+    # GPU / CDI state
+    gpu_fail=0
+    _check_gpu || gpu_fail=$?
+    fail=$((fail + gpu_fail))
 
     # Config validation
     _check_config_validate || fail=$((fail + 1))
