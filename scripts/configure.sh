@@ -124,7 +124,7 @@ cmd_validate() {
     local net_name
     net_name=$(jq -r '.network.name' "$CONFIG_FILE")
     if ! podman network exists "$net_name" 2>/dev/null; then
-        echo "WARN: Network '$net_name' does not exist (deploy-stack.sh will create it)"
+        echo "WARN: Network '$net_name' does not exist (deploy.sh will create it)"
     fi
 
     # Check AI_STACK_DIR
@@ -278,6 +278,7 @@ cmd_generate_secrets() {
     fi
 
     local captured_postgres_pw=""
+    local captured_litellm_master_key=""
 
     for secret in $secrets; do
         if podman secret inspect "$secret" &>/dev/null; then
@@ -285,9 +286,32 @@ cmd_generate_secrets() {
             continue
         fi
 
-        local value
-        read -rsp "Enter value for secret '$secret': " value
-        echo ""
+        local value=""
+
+        # openwebui_api_key MUST equal litellm_master_key — auto-derive rather than prompt
+        if [[ "$secret" == "openwebui_api_key" ]]; then
+            if [[ -n "$captured_litellm_master_key" ]]; then
+                value="$captured_litellm_master_key"
+                echo "NOTE: 'openwebui_api_key' must match 'litellm_master_key' — auto-deriving value"
+            else
+                # litellm_master_key was already present in secret store; read it
+                local existing_master
+                existing_master=$(podman secret inspect litellm_master_key --showsecret \
+                    2>/dev/null | jq -r '.[].SecretData' || true)
+                if [[ -n "$existing_master" ]]; then
+                    value="$existing_master"
+                    echo "NOTE: 'openwebui_api_key' auto-derived from existing 'litellm_master_key'"
+                else
+                    echo "WARN: Cannot determine litellm_master_key — prompting for openwebui_api_key manually"
+                    echo "      Ensure it matches litellm_master_key or OpenWebUI will get 401 from LiteLLM."
+                    read -rsp "Enter value for secret '$secret': " value
+                    echo ""
+                fi
+            fi
+        else
+            read -rsp "Enter value for secret '$secret': " value
+            echo ""
+        fi
 
         if [[ -z "$value" ]]; then
             echo "WARN: Empty value for '$secret' — skipping"
@@ -299,6 +323,9 @@ cmd_generate_secrets() {
 
         if [[ "$secret" == "postgres_password" ]]; then
             captured_postgres_pw="$value"
+        fi
+        if [[ "$secret" == "litellm_master_key" ]]; then
+            captured_litellm_master_key="$value"
         fi
     done
 
