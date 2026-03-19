@@ -59,6 +59,16 @@ http:
         - secure-headers
       tls: {}
 
+    knowledge-index:
+      rule: "PathPrefix(`/mcp`) || PathPrefix(`/v1/knowledge`)"
+      entryPoints:
+        - websecure
+      service: knowledge-index
+      middlewares:
+        - authentik
+        - secure-headers
+      tls: {}
+
   services:
     openwebui:
       loadBalancer:
@@ -84,3 +94,8 @@ http:
       loadBalancer:
         servers:
           - url: "http://authentik.ai-stack:9000"
+
+    knowledge-index:
+      loadBalancer:
+        servers:
+          - url: "http://knowledge-index.ai-stack:8100"

@@ -208,6 +208,12 @@
         "retries": 3,
         "timeout": "5s"
       },
+      "mcp": {
+        "sse_endpoint": "/mcp/sse",
+        "message_endpoint": "/mcp/messages",
+        "tools": ["search_knowledge", "ingest_document"],
+        "transport": "http-sse"
+      },
       "resources": {
         "cpus": 1,
         "memory": "512m",

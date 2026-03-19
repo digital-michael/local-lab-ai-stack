@@ -1,19 +1,27 @@
 # services/knowledge-index/app.py
 #
-# Knowledge Index Service — Phase 8d
+# Knowledge Index Service — Phase 7 (MCP Integration)
 #
-# Minimal FastAPI microservice providing:
+# REST API:
 #   POST /documents          — ingest a document (chunk → embed → store in Qdrant)
 #   PUT  /documents/{id}     — replace a document
 #   DELETE /documents/{id}   — remove a document from Qdrant
 #   POST /query              — vector search over a named collection
 #   GET  /health             — readiness probe (used by pytest module-level skip guard)
 #
+# MCP (Model Context Protocol) — HTTP/SSE transport (D-015):
+#   GET  /mcp/sse            — establish SSE stream (MCP clients connect here)
+#   POST /mcp/messages       — MCP message channel
+#   Tools: search_knowledge, ingest_document
+#
 # Embedding is performed via the Ollama /api/embeddings endpoint.
 # Vector storage is Qdrant (filter-based delete; UUID point IDs per chunk).
+# Auth: API_KEY env var guards both REST and MCP endpoints when set.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import re
 import uuid
@@ -21,7 +29,11 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException
+from mcp.server import Server as McpServer
+from mcp.server.sse import SseServerTransport
+from mcp.types import TextContent, Tool
 from pydantic import BaseModel
+from starlette.requests import Request
 
 # ---------------------------------------------------------------------------
 # Configuration (all overridable via environment variables)
@@ -32,6 +44,7 @@ QDRANT_URL  = os.environ.get("QDRANT_URL",   "http://qdrant.ai-stack:6333")
 EMBED_MODEL = os.environ.get("EMBED_MODEL",  "llama3.1:8b")
 QDRANT_KEY  = os.environ.get("QDRANT_API_KEY", "")
 CHUNK_SIZE  = int(os.environ.get("CHUNK_SIZE", "400"))   # max chars per chunk
+API_KEY     = os.environ.get("API_KEY", "")              # guards /mcp/* and /query when set
 
 # ---------------------------------------------------------------------------
 # HTTP clients (module-level singletons; closed on shutdown if needed)
@@ -225,3 +238,131 @@ def query_documents(req: QueryRequest) -> dict:
             "metadata":    payload.get("metadata", {}),
         })
     return {"results": results}
+
+
+# ---------------------------------------------------------------------------
+# MCP — HTTP/SSE transport (D-015)
+# Two tools: search_knowledge, ingest_document
+# Auth: Bearer token checked against API_KEY env var (when set)
+# ---------------------------------------------------------------------------
+
+_mcp_server = McpServer("knowledge-index")
+_sse_transport = SseServerTransport("/mcp/messages")
+
+
+@_mcp_server.list_tools()
+async def _list_tools() -> list[Tool]:
+    return [
+        Tool(
+            name="search_knowledge",
+            description=(
+                "Search the knowledge index using vector similarity. "
+                "Returns ranked text chunks with scores and metadata."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query":      {"type": "string",  "description": "Natural-language search query"},
+                    "collection": {"type": "string",  "description": "Qdrant collection to search"},
+                    "top_k":      {"type": "integer", "description": "Max results to return", "default": 5},
+                },
+                "required": ["query", "collection"],
+            },
+        ),
+        Tool(
+            name="ingest_document",
+            description=(
+                "Ingest a document into the knowledge index. "
+                "The document is chunked, embedded, and stored in Qdrant."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "id":       {"type": "string", "description": "Unique document ID"},
+                    "content":  {"type": "string", "description": "Full document text"},
+                    "metadata": {
+                        "type": "object",
+                        "description": "Optional metadata; 'collection' key sets the target Qdrant collection",
+                    },
+                },
+                "required": ["id", "content"],
+            },
+        ),
+    ]
+
+
+@_mcp_server.call_tool()
+async def _call_tool(name: str, arguments: dict) -> list[TextContent]:
+    if name == "search_knowledge":
+        query      = str(arguments["query"])
+        collection = str(arguments["collection"])
+        top_k      = int(arguments.get("top_k", 5))
+
+        def _do_search() -> dict:
+            vec = _embed(query)
+            resp = _qdrant.post(
+                f"/collections/{collection}/points/search",
+                json={"vector": vec, "limit": top_k, "with_payload": True},
+            )
+            if resp.status_code == 404:
+                return {"results": []}
+            resp.raise_for_status()
+            results = []
+            for hit in resp.json().get("result", []):
+                payload = hit.get("payload", {})
+                results.append({
+                    "text":        payload.get("text", ""),
+                    "score":       hit.get("score", 0.0),
+                    "document_id": payload.get("doc_id", ""),
+                    "source":      payload.get("source", ""),
+                })
+            return {"results": results}
+
+        result = await asyncio.to_thread(_do_search)
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    elif name == "ingest_document":
+        doc_id   = str(arguments["id"])
+        content  = str(arguments["content"])
+        metadata = arguments.get("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        collection = metadata.get("collection", "default")
+
+        def _do_ingest() -> int:
+            _doc_collection[doc_id] = collection
+            return _ingest_chunks(doc_id, content, metadata, collection)
+
+        n = await asyncio.to_thread(_do_ingest)
+        return [TextContent(type="text", text=json.dumps({"id": doc_id, "chunks": n}))]
+
+    else:
+        raise ValueError(f"Unknown MCP tool: {name!r}")
+
+
+def _check_api_key(request: Request) -> None:
+    """Raise HTTP 401 if API_KEY is configured and the request does not supply it."""
+    if not API_KEY:
+        return
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer ") or auth[7:] != API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+@app.get("/mcp/sse")
+async def mcp_sse(request: Request) -> None:
+    _check_api_key(request)
+    async with _sse_transport.connect_sse(
+        request.scope, request.receive, request._send
+    ) as streams:
+        await _mcp_server.run(
+            streams[0], streams[1], _mcp_server.create_initialization_options()
+        )
+
+
+@app.post("/mcp/messages")
+async def mcp_messages(request: Request) -> None:
+    _check_api_key(request)
+    await _sse_transport.handle_post_message(
+        request.scope, request.receive, request._send
+    )
