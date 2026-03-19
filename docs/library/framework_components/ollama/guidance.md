@@ -26,6 +26,7 @@ Project-specific preferences and opinionated decisions for ollama within this AI
 # 2 Configuration Choices
 
 - `OLLAMA_HOST=0.0.0.0` — required for the server to accept connections from other containers
+- **CPU pinning when co-deployed with vLLM:** add `CUDA_VISIBLE_DEVICES=""` to the Ollama quadlet environment; without this, Ollama claims the GPU at startup and prevents vLLM from loading its model; Ollama runs efficiently on CPU for most 8B GGUF models
 - Two volume mounts:
   - `$AI_STACK_DIR/ollama:/root/.ollama:rw,Z` — ollama's model blob storage (persists across restarts)
   - `$AI_STACK_DIR/models:/gguf:ro,Z` — shared GGUF source directory for import

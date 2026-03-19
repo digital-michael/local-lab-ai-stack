@@ -50,3 +50,11 @@ This file records project-specific collaboration dynamics — improvements, eure
 | L-6 | D-010 (meta extraction) | The framework/instance separation pattern — a portable protocol with local instantiation and upward promotion — could apply beyond meta. Any system of shared conventions (coding standards, deployment patterns, security baselines) could be structured the same way: a framework repo defining the protocol, project repos instantiating it locally, and validated insights promoted back to the framework. | Noted |
 | L-7 | Authentik bootstrap (T-086) | Service bootstrapping is often invisible in documentation: Authentik's embedded outpost runs and looks healthy but returns 404 for all requests until at least one provider is assigned. A "healthy" container healthcheck ≠ a "ready to serve traffic" service. This pattern recurs across services — consider adding a post-deploy smoke test layer that validates functional readiness, not just process liveness. | Noted |
 | L-8 | Flowise 3.x API auth gap | Flowise 3.x added a full user/org system. FLOWISE_USERNAME/PASSWORD env vars no longer bootstrap a usable API account — the user table stays empty until registration completes via the UI. Any automation that calls the Flowise API must account for this: either seed the DB directly or use the UI to complete registration and generate an API key first. | Noted |
+
+---
+
+## Improvements Made (continued)
+
+| # | Improvement | Triggered By |
+|---|---|---|
+| I-9 | **Hardware-first: always run `nvidia-smi` before writing GPU config** — vLLM guidance was authored assuming a 24 GB GPU node; `nvidia-smi` run late in the project revealed RTX 3070 Ti (8 GB VRAM) instead. Four specific sub-lessons: (1) FP16 model sizing: an 8B-parameter model at FP16 requires ~16 GB VRAM — only quantized variants (AWQ, GPTQ, Q4) fit in 8 GB; (2) desktop GPU overhead: ~2–3 GB of VRAM is consumed by X server and driver reservation on a live desktop; set `GPU_MEMORY_UTILIZATION=0.70` not 0.90; (3) multi-service GPU conflict: Ollama will claim the GPU at container startup unless explicitly pinned to CPU via `CUDA_VISIBLE_DEVICES=""`; (4) detect before configure: `configure.sh detect-hardware` must precede any GPU service configuration on a new node | W-9 — vLLM config written for imaginary hardware; discovered late via `nvidia-smi` |
