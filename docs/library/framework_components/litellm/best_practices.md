@@ -47,7 +47,7 @@ Best practices for deploying and operating LiteLLM as the centralized model rout
 
 # 4 Reliability
 
-- Health check the `/health` endpoint at 30-second intervals
+- Health check the `/health/liveliness` endpoint at 30-second intervals — `/health` requires the master key (returns 401 without it)
 - Configure `Restart=always` in the systemd quadlet
 - LiteLLM depends on PostgreSQL — enforce startup ordering in the quadlet
 - Use model fallbacks to maintain service even when a specific backend is down

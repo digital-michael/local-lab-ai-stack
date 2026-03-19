@@ -1,5 +1,5 @@
 # Project Dynamics — llm-agent-local-2
-**Last Updated:** 2026-03-10 UTC
+**Last Updated:** 2026-03-19 UTC
 **Target Audience:** LLM Agents
 
 ---
@@ -20,6 +20,7 @@ This file records project-specific collaboration dynamics — improvements, eure
 | I-4 | Split meta files by concern (meta.md, meta_decisions, meta_dynamics, meta_metrics) | S-6 — human applied separation of concerns to the meta system itself |
 | I-5 | `podman cp` + exec pattern established over heredoc exec — avoids silent hangs when piping stdin to `podman exec python3 -` | W-5 — heredoc approach hung without output; copy-then-exec pattern is reliable and generalises to any language |
 | I-6 | Two-level fresh-client pattern for test teardown — module-scoped httpx clients accumulate stale keep-alive connections by teardown time; cleanup fixtures should open a fresh client in a `with` block | W-6 — `cleanup_test_collection` teardown raised `RemoteProtocolError: Server disconnected` on every clean run |
+| I-7 | `bash -c 'echo > /dev/tcp/localhost/PORT'` as universal container health check — three lessons: (1) never assume `curl`/`wget` in minimal or distroless images; verify inside the actual container first; (2) distroless images (e.g., Grafana Loki 3.x) have no shell at all — remove `HealthCmd` entirely and rely on systemd; (3) systemd unit file parser strips double-quote delimiters from field values, so `HealthCmd=cmd "arg"` reaches Podman without quotes, causing `sh: Unterminated quoted string` — use single-quotes or avoid string literals in the command when possible | W-7 — 6 services reported unhealthy after deployment; all root-caused to missing tools or systemd quote-stripping |
 
 ---
 

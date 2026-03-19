@@ -60,4 +60,4 @@ Best practices for deploying and operating Loki as the log aggregation backend.
 - Set `Restart=always` in the systemd quadlet
 - Monitor Loki's ingestion rate and query latency via its `/metrics` endpoint
 - Back up the `/loki` data directory for disaster recovery
-- Health check: HTTP 200 on `/ready`
+- Health check: HTTP 200 on `/ready` — testable from outside the container; the Grafana Loki image is **distroless** (no shell, no curl, no wget). Do NOT configure a container-internal `HealthCmd` — it will always fail. Remove `HealthCmd` and rely on systemd process supervision via the quadlet's `Restart=always`.
