@@ -4,8 +4,8 @@
 # Profiles:
 #   quick (default) — systemd state, container health, network existence,
 #                     dependency reachability, model availability
-#   full            — quick + config validation, secrets, volume paths,
-#                     resource pressure, API readiness probes
+#   full            — quick + integration probes, config validation, secrets,
+#                     volume paths, resource pressure, API readiness probes
 #
 # Exit codes:
 #   0  All checked services pass or are intentionally skipped
@@ -45,6 +45,7 @@ Profiles:
 
   full
     - Everything in quick, plus:
+    - Integration probes (cross-service auth & config correctness)
     - Config validation (configure.sh validate)
     - Secrets presence (all referenced podman secrets exist)
     - Volume / data path existence
@@ -345,6 +346,105 @@ _diagnose() {
     _RESULT="FAIL"
 }
 
+# ── Full check: cross-service integration probes ─────────────────────────────
+# Checks functional relationships between services that go beyond TCP
+# reachability: authentication, API key alignment, URL correctness.
+
+_check_integrations() {
+    echo ""
+    echo "  Integrations"
+    local fail=0
+
+    # ── openwebui → litellm: API key auth ────────────────────────────────────
+    local ow_state litellm_state
+    ow_state=$(systemctl --user is-active "openwebui.service" 2>/dev/null || true)
+    litellm_state=$(systemctl --user is-active "litellm.service" 2>/dev/null || true)
+
+    if [[ "$ow_state" == "active" && "$litellm_state" == "active" ]]; then
+        local ow_key litellm_url
+        ow_key=$(podman exec openwebui env 2>/dev/null | grep '^OPENAI_API_KEY=' | cut -d= -f2- || true)
+        litellm_url=$(podman exec openwebui env 2>/dev/null | grep '^OPENAI_API_BASE=' | cut -d= -f2- || true)
+
+        if [[ -z "$ow_key" ]]; then
+            printf "  [WARN] %-28s OPENAI_API_KEY not set in openwebui\n" "openwebui→litellm"
+            warn=$((warn + 1))
+        else
+            local auth_rc=0
+            podman exec openwebui curl -sf \
+                -H "Authorization: Bearer ${ow_key}" \
+                "${litellm_url}/v1/models" &>/dev/null || auth_rc=$?
+
+            if [[ $auth_rc -eq 0 ]]; then
+                printf "  [PASS] %-28s API key authenticates to LiteLLM\n" "openwebui→litellm"
+            else
+                printf "  [FAIL] %-28s OPENAI_API_KEY rejected by LiteLLM (401)\n" "openwebui→litellm"
+                echo "         ! openwebui OPENAI_API_KEY does not match litellm_master_key"
+                if $FIX; then
+                    local master_key
+                    master_key=$(podman secret inspect litellm_master_key --showsecret \
+                        2>/dev/null | jq -r '.[].SecretData' || true)
+                    if [[ -n "$master_key" ]]; then
+                        podman secret rm openwebui_api_key &>/dev/null || true
+                        printf '%s' "$master_key" | podman secret create openwebui_api_key - &>/dev/null
+                        systemctl --user restart openwebui.service 2>/dev/null || true
+                        sleep 12
+                        printf "  [FIXD] %-28s openwebui_api_key aligned to litellm_master_key; restarted\n" "openwebui→litellm"
+                    else
+                        echo "         ! --fix: could not read litellm_master_key secret"
+                        fail=$((fail + 1))
+                    fi
+                else
+                    echo "         ! Fix: align openwebui_api_key to litellm_master_key"
+                    echo "         !   podman secret rm openwebui_api_key"
+                    echo "         !   printf '<master-key>' | podman secret create openwebui_api_key -"
+                    echo "         !   systemctl --user restart openwebui.service"
+                    fail=$((fail + 1))
+                fi
+            fi
+        fi
+    else
+        printf "  [SKIP] %-28s openwebui or litellm not active\n" "openwebui→litellm"
+    fi
+
+    # ── openwebui: OLLAMA_BASE_URL must be a proper http:// URL ─────────────
+    if [[ "$ow_state" == "active" ]]; then
+        local ollama_url
+        ollama_url=$(podman exec openwebui env 2>/dev/null | grep '^OLLAMA_BASE_URL=' | cut -d= -f2- || true)
+
+        if [[ -z "$ollama_url" ]]; then
+            printf "  [WARN] %-28s OLLAMA_BASE_URL not set (will use image default)\n" "openwebui/OLLAMA_BASE_URL"
+            warn=$((warn + 1))
+        elif [[ "$ollama_url" != http://* && "$ollama_url" != https://* ]]; then
+            printf "  [FAIL] %-28s OLLAMA_BASE_URL='%s' is not a valid URL\n" "openwebui/OLLAMA_BASE_URL" "$ollama_url"
+            echo "         ! Image default '/ollama' is a Docker Compose nginx-proxy path"
+            echo "         ! Expected: http://ollama.ai-stack:11434"
+            if $FIX; then
+                # Update config.json and regenerate quadlet
+                local tmp
+                tmp=$(mktemp)
+                jq '.services.openwebui.environment.OLLAMA_BASE_URL = "http://ollama.ai-stack:11434"' \
+                    "$CONFIG_FILE" > "$tmp" && mv "$tmp" "$CONFIG_FILE"
+                "$SCRIPT_DIR/configure.sh" generate-quadlets &>/dev/null
+                systemctl --user daemon-reload
+                systemctl --user restart openwebui.service 2>/dev/null || true
+                sleep 12
+                printf "  [FIXD] %-28s OLLAMA_BASE_URL set in config.json; quadlet regenerated; restarted\n" "openwebui/OLLAMA_BASE_URL"
+            else
+                echo "         ! Fix: add to configs/config.json openwebui.environment:"
+                echo "         !   \"OLLAMA_BASE_URL\": \"http://ollama.ai-stack:11434\""
+                echo "         !   Then: configure.sh generate-quadlets && systemctl --user restart openwebui"
+                fail=$((fail + 1))
+            fi
+        else
+            printf "  [PASS] %-28s OLLAMA_BASE_URL=%s\n" "openwebui/OLLAMA_BASE_URL" "$ollama_url"
+        fi
+    else
+        printf "  [SKIP] %-28s openwebui not active\n" "openwebui/OLLAMA_BASE_URL"
+    fi
+
+    return $fail
+}
+
 # ── Full check: config validation via configure.sh ───────────────────────────
 
 _check_config_validate() {
@@ -551,6 +651,11 @@ _check_models || { model_ok=false; warn=$((warn + 1)); }
 # ── Full profile additions ────────────────────────────────────────────────────
 
 if [[ "$PROFILE" == "full" ]]; then
+
+    # Integration probes (cross-service auth/config)
+    integ_fail=0
+    _check_integrations || integ_fail=$?
+    fail=$((fail + integ_fail))
 
     # Config validation
     _check_config_validate || fail=$((fail + 1))
