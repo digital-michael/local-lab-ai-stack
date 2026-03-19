@@ -4,11 +4,15 @@
 # Register model routes from configs/models.json into LiteLLM.
 #
 # Each entry in default_models is registered via POST /model/new.
+# Existing entries with the same model_name are deleted first so
+# that re-runs with changed api_base or other params take effect
+# (LiteLLM's /model/new adds a new entry rather than updating).
+#
 # The model route persists in the LiteLLM database so that it
 # survives restarts and appears in GET /models.
 #
-# This script is idempotent: attempting to register a model that
-# already exists is silently accepted.
+# This script is idempotent: running it multiple times produces
+# exactly one entry per model in the LiteLLM DB.
 #
 # Usage:
 #   bash scripts/pull-models.sh
@@ -75,13 +79,29 @@ fi
 echo "Registering $model_count model(s) from $MODELS_FILE into LiteLLM at $LITELLM_URL ..."
 
 # ---------------------------------------------------------------------------
-# Register each model
+# Register each model (delete existing entry first to ensure idempotency)
 # ---------------------------------------------------------------------------
 failures=0
 for i in $(seq 0 $((model_count - 1))); do
     model_id="$(jq -r ".default_models[$i].id" "$MODELS_FILE")"
     litellm_params="$(jq -c ".default_models[$i].litellm_params" "$MODELS_FILE")"
     model_info="$(jq -c ".default_models[$i].model_info // {}" "$MODELS_FILE")"
+
+    # Delete any existing entries with this model_name (enables idempotent re-run).
+    # LiteLLM may normalize ':' to '-' in stored model names, so match both forms.
+    model_id_normalized="${model_id//:/-}"
+    existing_ids="$(curl -s -H "Authorization: Bearer $MASTER_KEY" \
+        "$LITELLM_URL/model/info" 2>/dev/null \
+        | jq -r --arg name "$model_id" --arg norm "$model_id_normalized" \
+            '.data[]? | select(.model_name == $name or .model_name == $norm) | .model_info.id' \
+            2>/dev/null || true)"
+    for existing_id in $existing_ids; do
+        curl -s -X POST \
+            -H "Authorization: Bearer $MASTER_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"id\": \"$existing_id\"}" \
+            "$LITELLM_URL/model/delete" >/dev/null 2>&1 || true
+    done
 
     payload="$(jq -nc \
         --arg name "$model_id" \

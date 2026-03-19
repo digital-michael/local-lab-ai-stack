@@ -457,48 +457,48 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ### Steps
 
-8.1. **CDI setup for rootless Podman GPU passthrough**
+8.1. **CDI setup for rootless Podman GPU passthrough** ✅
    - Run `nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` (requires sudo once)
    - Verify: `podman run --rm --device nvidia.com/gpu=all ubuntu nvidia-smi`
    - Document in `docs/library/framework_components/vllm/guidance.md`
 
-8.2. **Pin Ollama to CPU**
+8.2. **Pin Ollama to CPU** ✅
    - Add `CUDA_VISIBLE_DEVICES=""` to `config.json` → `services.ollama.environment`
    - Regenerate quadlet and restart Ollama
 
-8.3. **Select GPU-appropriate model for vLLM**
-   - Constraint: ≤5.5 GB VRAM after desktop overhead on 8 GB card
-   - Candidates: Phi-3.5-mini (~2.5 GB), Mistral-7B-AWQ (~4.5 GB), Llama-3.2-3B (~2 GB)
-   - Download chosen model to `$AI_STACK_DIR/models/`
-   - Update `config.json`: `services.vllm.environment.MODEL_NAME`, `GPU_MEMORY_UTILIZATION=0.70`
+8.3. **Select GPU-appropriate model for vLLM** ✅
+   - Constraint: ≤5 GB VRAM after desktop overhead on 8 GB card
+   - Selected: `Qwen/Qwen2.5-1.5B-Instruct` (FP16, 2.89 GB) — fits comfortably
+   - Download chosen model to `$AI_STACK_DIR/models/qwen2.5-1.5b/`
+   - Update `config.json`: `command` with `--model /models/qwen2.5-1.5b --served-model-name qwen2.5-1.5b --gpu-memory-utilization 0.55 --max-model-len 2048 --enforce-eager`
 
-8.4. **Add `models[]` section to `config.json`**
+8.4. **Add `models[]` section to `config.json`** ✅
    ```json
    "models": [
-     { "name": "llama3.1:8b",     "backend": "ollama", "device": "cpu" },
-     { "name": "phi-3.5-mini:awq", "backend": "vllm",   "device": "gpu",
-       "quantization": "awq" }
+     { "name": "llama3.1:8b",   "backend": "ollama", "device": "cpu" },
+     { "name": "qwen2.5-1.5b",  "backend": "vllm",   "device": "gpu",
+       "repo": "Qwen/Qwen2.5-1.5B-Instruct", "quantization": null }
    ]
    ```
 
-8.5. **Extend `configure.sh` to generate LiteLLM `model_list`**
+8.5. **Extend `configure.sh` to generate LiteLLM `model_list`** ✅
    - New subcommand: `configure.sh generate-litellm-config`
-   - Reads `models[]` + `services` → produces `litellm_config.yaml`
-   - CPU models → `ollama/<model>` at `http://ollama.ai-stack:11434`
-   - GPU models → `openai/<model>` at `http://vllm.ai-stack:8000`
-   - Remote models (Phase 9) → `ollama/<model>` or `openai/<model>` at remote URL
+   - Reads `models[]` + `services` → produces `configs/models.json`
+   - CPU models → `ollama_chat/<model>` at `http://ollama.ai-stack:11434`
+   - GPU models → `openai/<model>` at `http://vllm.ai-stack:8000/v1` (note: /v1 required)
 
-8.6. **Add `configure.sh detect-hardware`**
+8.6. **Add `configure.sh detect-hardware`** ✅
    - Detect GPU (nvidia-smi), VRAM, system RAM
    - Suggest node profile and viable models based on available resources
    - Output human-readable summary; optionally write to `config.json`
 
-8.7. **Start vLLM, verify end-to-end**
+8.7. **Start vLLM, verify end-to-end** ✅
    - `systemctl --user start vllm.service`
    - Verify via LiteLLM: `curl /v1/models` lists both CPU and GPU models
-   - OpenWebUI model dropdown shows both
+   - GPU confirmed via `nvidia-smi --query-compute-apps` (4528 MiB, VLLM::EngineCore)
+   - Chat completions via LiteLLM → vLLM confirmed working
 
-8.8. **Update diagnose.sh**
+8.8. **Update diagnose.sh** ✅
    - `_check_models()`: report which models are GPU-backed vs CPU-backed
    - Full profile: verify CDI is configured when vLLM is in service list
 

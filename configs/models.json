@@ -21,7 +21,7 @@
       "description": "Qwen2.5-1.5B-Instruct FP16 — GPU inference via vLLM (RTX 3070 Ti)",
       "litellm_params": {
         "model": "openai/qwen2.5-1.5b",
-        "api_base": "http://vllm.ai-stack:8000",
+        "api_base": "http://vllm.ai-stack:8000/v1",
         "api_key": "none",
         "max_tokens": 4096
       },

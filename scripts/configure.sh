@@ -364,7 +364,7 @@ cmd_generate_litellm_config() {
 
     local ollama_url vllm_url
     ollama_url="http://$(jq -r '.services.ollama.dns_alias // "ollama.ai-stack"' "$CONFIG_FILE"):11434"
-    vllm_url="http://$(jq -r '.services.vllm.dns_alias // "vllm.ai-stack"' "$CONFIG_FILE"):8000"
+    vllm_url="http://$(jq -r '.services.vllm.dns_alias // "vllm.ai-stack"' "$CONFIG_FILE"):8000/v1"
 
     local model_count
     model_count=$(jq '.models | length' "$CONFIG_FILE" 2>/dev/null || echo 0)

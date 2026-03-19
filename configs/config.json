@@ -298,6 +298,7 @@
     "vllm": {
       "image": "docker.io/vllm/vllm-openai",
       "tag": "v0.17.1",
+      "command": "--model /models/qwen2.5-1.5b --served-model-name qwen2.5-1.5b --tensor-parallel-size 1 --max-model-len 2048 --gpu-memory-utilization 0.55 --host 0.0.0.0 --port 8000 --enforce-eager",
       "container_name": "vllm",
       "dns_alias": "vllm.ai-stack",
       "depends_on": [
@@ -319,8 +320,9 @@
       "environment": {
         "MODEL_NAME": "/models/qwen2.5-1.5b",
         "TENSOR_PARALLEL_SIZE": "1",
-        "MAX_MODEL_LEN": "4096",
-        "GPU_MEMORY_UTILIZATION": "0.60"
+        "MAX_MODEL_LEN": "2048",
+        "GPU_MEMORY_UTILIZATION": "0.55",
+        "PYTORCH_ALLOC_CONF": "expandable_segments:True"
       },
       "secrets": [],
       "health_check": {
