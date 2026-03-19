@@ -61,3 +61,15 @@ Best practices for building and operating the Knowledge Index Service — the st
 - If PostgreSQL or Qdrant is unreachable, return 503 from `/v1/health`; do not crash the service
 - Set connection pool limits for both PostgreSQL and Qdrant clients; tune based on concurrency needs
 - Container restart policy: `always`
+
+# 6 MCP Tools (Phase 7)
+
+- MCP and REST endpoints are **additive** — implementing MCP does not remove or alter any REST routes
+- MCP tools must reuse existing internal helpers (`_embed`, `_ingest_chunks`, `_qdrant` client) — no duplicate logic
+- Both MCP tools must be idempotent with respect to external resources (same guarantees as the REST equivalents)
+- The SSE transport (`GET /mcp/sse`) holds a long-lived connection per client; keep the handler lean — no blocking I/O in the async path
+- Offload all synchronous I/O (httpx calls to Qdrant/Ollama) to a thread pool via `asyncio.to_thread()` — never block the event loop
+- Validate input arguments in MCP tool handlers defensively: wrong types from LLM-generated calls are common
+- Return structured JSON as `TextContent` so MCP clients can parse results reliably
+- When `API_KEY` is configured, enforce it at the HTTP layer (not inside tool handlers) — reject unauthenticated SSE connections before the MCP handshake
+- Do not expose raw exception tracebacks through MCP tool errors; return a structured error message

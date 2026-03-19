@@ -201,3 +201,17 @@ This file records decisions made during work on this project. For the decision r
 | **Driver** | Joint |
 | **Trigger** | Design dependency — distributed node architecture (§7) and volume manifest (D-013) both reference discovery and trust without specifying the model. |
 | **Commit** | *(this commit)* |
+
+---
+
+### D-015 — MCP Transport: HTTP/SSE (not stdio)
+
+| Field | Value |
+|---|---|
+| **Decision** | Use HTTP/SSE transport for MCP via the Anthropic `mcp[server]` Python SDK. MCP SSE endpoint mounted at `/mcp/sse` on the Knowledge Index Service; message channel at `/mcp/messages`. |
+| **Context** | Phase 7 adds MCP capability to the Knowledge Index Service so agent clients (Claude Desktop, Cursor, VS Code Copilot) can call `search_knowledge` and `ingest_document` directly. Two transport options exist in the `mcp` SDK: stdio (subprocess) and HTTP/SSE. |
+| **Options Considered** | (1) **stdio** — simplest setup, zero HTTP overhead, but requires an agent-side subprocess. Incompatible with containerized services behind a reverse proxy. (2) **HTTP/SSE** — client connects via HTTP GET to establish SSE stream; messages POSTed back. Traefik-compatible, network-accessible, works with any MCP client that supports SSE transport. |
+| **Rationale** | stdio is fundamentally incompatible with the containerized deployment model — an agent cannot spawn the knowledge-index container as a subprocess. HTTP/SSE fits the existing Traefik-fronted architecture: a new `/mcp` PathPrefix rule routes MCP traffic to the same backend container at port 8100. All MCP-supporting clients (Claude Desktop, Cursor, VS Code Copilot) support SSE transport. REST API remains intact alongside MCP — additive, not replacing. |
+| **Driver** | Agent-proposed, architecture-constrained |
+| **Trigger** | Phase 7 implementation dependency — transport choice required before implementing the MCP layer. |
+| **Commit** | *(this commit)* |
