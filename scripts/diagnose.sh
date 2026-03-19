@@ -406,7 +406,7 @@ _check_integrations() {
         printf "  [SKIP] %-28s openwebui or litellm not active\n" "openwebui→litellm"
     fi
 
-    # ── openwebui: OLLAMA_BASE_URL must be a proper http:// URL ─────────────
+    # ── openwebui: OLLAMA_BASE_URL env must be a proper http:// URL ─────────
     if [[ "$ow_state" == "active" ]]; then
         local ollama_url
         ollama_url=$(podman exec openwebui env 2>/dev/null | grep '^OLLAMA_BASE_URL=' | cut -d= -f2- || true)
@@ -437,6 +437,50 @@ _check_integrations() {
             fi
         else
             printf "  [PASS] %-28s OLLAMA_BASE_URL=%s\n" "openwebui/OLLAMA_BASE_URL" "$ollama_url"
+        fi
+
+        # ── openwebui: DB-persisted Ollama base_url must not be Docker default ──
+        # Open WebUI stores connection URLs in its SQLite config table.
+        # The image ships with host.docker.internal:11434 as the default; it takes
+        # precedence over OLLAMA_BASE_URL when it has been written to the DB.
+        local db_ollama_url
+        db_ollama_url=$(podman exec openwebui python3 -c "
+import sqlite3, json, sys
+try:
+    conn = sqlite3.connect('/app/backend/data/webui.db')
+    row = conn.execute('SELECT data FROM config WHERE id=1').fetchone()
+    if row:
+        cfg = json.loads(row[0])
+        urls = cfg.get('ollama', {}).get('base_urls', [])
+        print(urls[0] if urls else '')
+except Exception as e:
+    print('', file=sys.stderr)
+" 2>/dev/null || true)
+
+        if [[ -n "$db_ollama_url" && "$db_ollama_url" == *"docker.internal"* ]]; then
+            printf "  [FAIL] %-28s DB Ollama URL='%s' (Docker default)\n" "openwebui/db-ollama-url" "$db_ollama_url"
+            echo "         ! webui.db config.ollama.base_urls still points to host.docker.internal"
+            echo "         ! This overrides OLLAMA_BASE_URL env and blocks all Ollama API calls"
+            if $FIX; then
+                podman exec openwebui python3 -c "
+import sqlite3, json
+conn = sqlite3.connect('/app/backend/data/webui.db')
+row = conn.execute('SELECT data FROM config WHERE id=1').fetchone()
+cfg = json.loads(row[0])
+cfg['ollama']['base_urls'] = ['http://ollama.ai-stack:11434']
+conn.execute('UPDATE config SET data=? WHERE id=1', (json.dumps(cfg),))
+conn.commit()
+" 2>/dev/null
+                systemctl --user restart openwebui.service 2>/dev/null || true
+                sleep 12
+                printf "  [FIXD] %-28s DB Ollama URL updated to http://ollama.ai-stack:11434; restarted\n" "openwebui/db-ollama-url"
+            else
+                echo "         ! Fix: update webui.db or use Admin Panel > Connections > Ollama API"
+                echo "         !   Set URL to: http://ollama.ai-stack:11434"
+                fail=$((fail + 1))
+            fi
+        elif [[ -n "$db_ollama_url" ]]; then
+            printf "  [PASS] %-28s DB Ollama URL=%s\n" "openwebui/db-ollama-url" "$db_ollama_url"
         fi
     else
         printf "  [SKIP] %-28s openwebui not active\n" "openwebui/OLLAMA_BASE_URL"
