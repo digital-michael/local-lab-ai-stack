@@ -23,3 +23,8 @@ __pycache__/
 *.log
 *.pid
 tmp/
+
+# Meta framework (collaboration protocol — separate repo, symlinked locally)
+docs/meta
+docs/meta_local/dynamics.md
+docs/meta_local/review_log.md

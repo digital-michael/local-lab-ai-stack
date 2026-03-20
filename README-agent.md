@@ -21,10 +21,7 @@ Every fact has exactly one canonical location. Do not duplicate information acro
 | Machine-readable service definitions | [configs/config.json](configs/config.json) |
 | Task status: blockers, deferrables, future work | [docs/ai_stack_blueprint/ai_stack_checklist.md](docs/ai_stack_blueprint/ai_stack_checklist.md) |
 | Per-component practices, security, and project guidance | [docs/library/framework_components/](docs/library/framework_components/) |
-| Collaboration framework (directives, levels, workflow, principles) | [docs/meta/](docs/meta/) (symlinked framework repo) |
-| Project decision log | [docs/meta_local/decisions.md](docs/meta_local/decisions.md) |
-| Project dynamics (eureka moments, lateral ideas, improvements) | [docs/meta_local/dynamics.md](docs/meta_local/dynamics.md) |
-| Project review log (reinforcement workflow data) | [docs/meta_local/review_log.md](docs/meta_local/review_log.md) |
+| Architecture decision records (ADRs) | [docs/decisions.md](docs/decisions.md) |
 
 When adding or changing a value, put it in the canonical source and reference it from elsewhere. Never introduce a second copy.
 
@@ -60,7 +57,7 @@ Before modifying any file in this repo, read the relevant documents in this orde
 
 The component guidance in `docs/library/framework_components/` is **normative**. See the [framework_components/README-agent.md](docs/library/framework_components/README-agent.md) for the full compliance policy.
 
-6. **Meta framework** — if your work involves a decision, process observation, or lateral insight worth recording: [docs/meta/meta.md](docs/meta/meta.md) (portable framework), [docs/meta_local/decisions.md](docs/meta_local/decisions.md) (project decisions)
+6. **Decision records** — if your change makes or supersedes an architecture decision: [docs/decisions.md](docs/decisions.md)
 
 ---
 
@@ -78,8 +75,7 @@ The component guidance in `docs/library/framework_components/` is **normative**.
 │   ├── install.sh                       # One-time system setup
 │   └── validate-system.sh              # Pre-flight environment checks
 └── docs/
-    ├── meta -> ../../meta-framework/    # Symlink to collaboration framework repo
-    ├── meta_local/                      # Project-specific meta (decisions, dynamics, review log)
+    ├── decisions.md                     # Architecture Decision Records (D-001 … D-015)
     ├── ai_stack_blueprint/              # Architecture, implementation, config, checklist
     └── library/
         └── framework_components/        # Per-component reference (14 components)
