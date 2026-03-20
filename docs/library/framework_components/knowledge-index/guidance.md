@@ -116,3 +116,107 @@ The `/mcp` PathPrefix rule in `configs/traefik/dynamic/services.yaml` routes
 MCP traffic through Traefik → Authentik middleware → knowledge-index container.
 This means agent clients accessing the service via Traefik must pass Authentik
 forward-auth in addition to the `API_KEY` bearer token (if set).
+
+---
+
+# 6 How to Add a New MCP Tool
+
+Follow these steps every time a new tool is added to the knowledge-index MCP layer.
+
+## Step 1 — Define the tool in `_list_tools()`
+
+Add a `Tool` entry to the list returned by `_list_tools()` in `app.py`.
+Every field is mandatory:
+
+```python
+Tool(
+    name="my_tool",
+    description="One sentence the LLM client sees when deciding whether to call this tool.",
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "param_a": {"type": "string", "description": "What this param does"},
+            "param_b": {"type": "integer", "description": "...", "default": 10},
+        },
+        "required": ["param_a"],   # omit optional params
+    },
+),
+```
+
+Rules:
+- `name` must be a valid Python identifier; use `snake_case`
+- `description` is shown to the LLM — be precise about what the tool does and returns
+- Every `required` param must also have a `description`; optional params should have a `default`
+
+## Step 2 — Handle the tool in `_call_tool()`
+
+Add an `elif name == "my_tool":` branch. Pattern to follow:
+
+```python
+elif name == "my_tool":
+    param_a = str(arguments["param_a"])           # always cast — LLM calls may send wrong types
+    param_b = int(arguments.get("param_b", 10))
+
+    def _do_work() -> dict:
+        # All blocking I/O goes here (httpx, file ops, etc.)
+        # Reuse existing helpers: _embed(), _qdrant, _ollama, _ingest_chunks()
+        return {"result": "..."}
+
+    result = await asyncio.to_thread(_do_work)
+    return [TextContent(type="text", text=json.dumps(result))]
+```
+
+Rules:
+- **Never block the event loop** — wrap all synchronous I/O in `asyncio.to_thread()`
+- **Reuse existing helpers** — do not duplicate `_embed()`, `_qdrant`, or `_ollama` logic
+- **Always return `list[TextContent]`** with `json.dumps(result)` as the text
+- **Cast all arguments explicitly** — MCP clients (especially LLM-driven ones) may send strings where ints are expected
+- Raise `ValueError` for unknown tool names (already handled by the final `else` branch)
+
+## Step 3 — Update `config.json`
+
+Add the new tool name to the `mcp.tools` array in the `knowledge-index` service block:
+
+```json
+"mcp": {
+  "tools": ["search_knowledge", "ingest_document", "my_tool"]
+}
+```
+
+This field is informational metadata only — it does not affect runtime behaviour.
+
+## Step 4 — Write a test
+
+Add a test to `testing/layer3_model/test_mcp_tools.py`. Reuse the shared
+`mcp_session_data` fixture if the tool can share the same session; otherwise
+add a new `scope="module"` fixture that opens a fresh session.
+
+Minimum test:
+```python
+def test_my_tool(mcp_session_data):
+    import json as _json
+    # or open a new session if needed
+    raw = mcp_session_data["my_tool_result"]
+    data = _json.loads(raw)
+    assert "result" in data
+```
+
+## Step 5 — Update this guidance doc
+
+Add a row to the Tools table in the **MCP Integration** section above:
+
+```
+| `my_tool` | `param_a: str`, `param_b: int` | JSON: `{result: ...}` |
+```
+
+## Checklist
+
+- [ ] `Tool(name=..., description=..., inputSchema=...)` added to `_list_tools()`
+- [ ] `elif name == "my_tool":` branch added to `_call_tool()`
+- [ ] Blocking I/O wrapped in `asyncio.to_thread()`
+- [ ] Arguments cast to expected types
+- [ ] Returns `list[TextContent]` with JSON string
+- [ ] `config.json` `mcp.tools` array updated
+- [ ] Test added to `test_mcp_tools.py`
+- [ ] Tools table in this doc updated
+- [ ] Container image rebuilt (`podman build`) and service restarted
