@@ -6,7 +6,7 @@
 
 ## Purpose
 
-This file records decisions made during work on this project. For the decision record framework (field definitions and template), see [../meta/meta_decisions.md](../meta/meta_decisions.md).
+This file records architecture decisions made during work on this project. Each entry follows the ADR (Architecture Decision Record) format: Decision, Context, Options Considered, Rationale, Driver, Trigger, Commit.
 
 ---
 
