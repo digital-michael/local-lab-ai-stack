@@ -387,7 +387,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
-## Phase 7 — MCP Integration (Knowledge Index Service)
+## Phase 7 — MCP Integration (Knowledge Index Service) ✅ COMPLETE
 
 **Goal:** Extend the Knowledge Index Service to expose its RAG capabilities as MCP tools, enabling agent clients (Claude Desktop, Cursor, VS Code Copilot, etc.) to call document ingest and vector search directly over the Model Context Protocol.
 

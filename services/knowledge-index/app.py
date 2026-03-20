@@ -34,6 +34,7 @@ from mcp.server.sse import SseServerTransport
 from mcp.types import TextContent, Tool
 from pydantic import BaseModel
 from starlette.requests import Request
+from starlette.responses import Response
 
 # ---------------------------------------------------------------------------
 # Configuration (all overridable via environment variables)
@@ -350,7 +351,7 @@ def _check_api_key(request: Request) -> None:
 
 
 @app.get("/mcp/sse")
-async def mcp_sse(request: Request) -> None:
+async def mcp_sse(request: Request) -> Response:
     _check_api_key(request)
     async with _sse_transport.connect_sse(
         request.scope, request.receive, request._send
@@ -358,11 +359,23 @@ async def mcp_sse(request: Request) -> None:
         await _mcp_server.run(
             streams[0], streams[1], _mcp_server.create_initialization_options()
         )
+    # Return an empty Response so FastAPI does not attempt to send a second
+    # "http.response.start" after the SSE stream has already completed.
+    return Response()
 
 
-@app.post("/mcp/messages")
-async def mcp_messages(request: Request) -> None:
-    _check_api_key(request)
-    await _sse_transport.handle_post_message(
-        request.scope, request.receive, request._send
-    )
+# Mount handle_post_message as a raw ASGI endpoint so that FastAPI's response
+# wrapper does not add a second HTTP response after handle_post_message has
+# already written "202 Accepted" directly to the ASGI send channel.
+async def _mcp_messages_asgi(scope, receive, send) -> None:  # type: ignore[type-arg]
+    """ASGI handler for POST /mcp/messages — bypasses FastAPI response wrapping."""
+    if API_KEY:
+        req = Request(scope, receive)
+        auth = req.headers.get("Authorization", "")
+        if not auth.startswith("Bearer ") or auth[7:] != API_KEY:
+            await Response("Unauthorized", status_code=401)(scope, receive, send)
+            return
+    await _sse_transport.handle_post_message(scope, receive, send)
+
+
+app.mount("/mcp/messages", app=_mcp_messages_asgi)
