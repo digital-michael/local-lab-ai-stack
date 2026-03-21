@@ -518,85 +518,148 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ## Phase 9 — Remote Inference Nodes
 
-**Goal:** Enable remote machines (starting with a macOS M1) to contribute inference capacity. The controller's LiteLLM routes model requests to remote workers dynamically.
+**Goal:** Enable remote machines to contribute inference capacity to the controller's LiteLLM. Phase 9 is subdivided into four tracked sub-phases: 9a (controller-side config, no hardware access required), 9b (M1 bare-metal setup), 9c (Alienware Podman worker), 9d (tests). Each sub-phase is committed separately once all steps within it are completed, compiled, tested, and verified.
 
-**Decisions:**
-- D-018: Node profiles — `controller` (full stack), `inference-worker` (Ollama/vLLM only), `peer` (full stack + shares inference); stored as `node_profile` in config.json
-- D-019: macOS nodes use Podman Machine for containerized deployment (consistent with Linux pattern); refinement permitted later
-- D-020: Dynamic node registration with static fallback — workers register with the controller's LiteLLM on startup; static config entries serve as backup or for institutional/permanent nodes
-- Inter-node auth: API key + TLS; DNS naming TBD (see Consideration #29)
+**Three-Node Architecture:**
+- **Controller** — workstation (Linux, RTX 3070 Ti 8 GB VRAM) — full stack, all services
+- **M1** — TC25 (macOS ARM64, 16 GB unified RAM) — bare-metal Ollama with Metal GPU acceleration
+- **Alienware** — (Linux, GTX ~3 GB VRAM, address TBD) — Podman inference-worker profile
 
-**Inputs:** Phase 8 complete, remote machine with network access to controller.
+**Decisions (to be formally recorded in `docs/decisions.md` as step 9a.1):**
+- D-016/D-017: Phase 8 decisions (Ollama CPU-only; `models[]` in config.json) — write formally
+- D-018: Node profiles — `controller` (full stack), `inference-worker` (Ollama + promtail only), `peer` (full stack + remote provider); stored as `node_profile` in `config.json`
+- D-019 (revised): M1 uses **bare-metal Ollama** for Metal GPU access; Podman Machine deferred as TODO
+- D-020 (revised): **Static `nodes[]` config** for Phase 9; dynamic registration/heartbeat deferred as TODO
+- D-0xx: **Quantized models preferred (Q4_K_M)**; `detect-hardware` autoselects by VRAM/RAM headroom
 
-### Steps
+**Inputs:** Phase 8 complete. M1 reachable at `TC25.mynetworksettings.com` / `10.19.208.118`. Alienware address TBD.
 
-9.1. **Add `node_profile` to config.json schema**
-   - Top-level field: `"node_profile": "controller"` (default)
-   - Valid values: `controller`, `inference-worker`, `peer`
-   - `configure.sh generate-quadlets` uses this to select which services to deploy:
-     - `controller`: all services
-     - `inference-worker`: ollama and/or vllm only (plus promtail for log forwarding)
-     - `peer`: all services + registers as remote inference provider
+---
 
-9.2. **Add `nodes[]` section to config.json**
-   ```json
-   "nodes": [
-     {
-       "name": "workstation",
-       "profile": "controller",
-       "address": "TBD",
-       "models": ["llama3.1:8b", "phi-3.5-mini:awq"]
-     },
-     {
-       "name": "macbook-m1",
-       "profile": "inference-worker",
-       "address": "TBD",
-       "models": ["llama3.1:8b"]
-     }
-   ]
-   ```
+### Phase 9a — Controller-Side Configuration *(no hardware access needed)*
 
-9.3. **Implement dynamic node registration**
-   - Worker nodes: on startup, POST to controller's LiteLLM `/model/new` API with model definitions
-   - Controller: accepts registration; adds models to routing table
-   - Heartbeat: periodic health check from controller to worker; stale models removed from routing
-   - Startup script: `scripts/register-node.sh` — reads local `config.json`, calls controller API
-   - Fallback: static entries in `nodes[]` loaded at LiteLLM startup for nodes that don't self-register
+- [ ] **9a.1** Record decisions D-016 through D-0xx in `docs/decisions.md`
+  - D-016 (Phase 8): Ollama = CPU-only (`CUDA_VISIBLE_DEVICES=""`)
+  - D-017 (Phase 8): `config.json` gains `models[]` array; `configure.sh generate-litellm-config` derives LiteLLM model list
+  - D-018: Node profiles (`controller`, `inference-worker`, `peer`)
+  - D-019 (revised): M1 = bare-metal Ollama; Podman Machine deferred (see TODOs)
+  - D-020 (revised): Static `nodes[]` config; dynamic registration/heartbeat deferred (see TODOs)
+  - D-0xx: Quantized models preferred; `detect-hardware` autoselects Q4_K_M tier
 
-9.4. **Set up macOS M1 node**
-   - Install Podman Machine on macOS: `brew install podman && podman machine init`
-   - Deploy `inference-worker` profile: Ollama container inside Podman Machine VM
-   - Configure TLS for inter-node communication
-   - Run `register-node.sh` to announce to controller
+- [ ] **9a.2** Add `nodes[]` to `config.json`
+  - Schema per node: `name`, `profile`, `address` (DNS preferred), `address_fallback` (IPv4/IPv6), `os`, `deployment` (`bare_metal` | `podman`), `models[]`
+  - Controller entry, M1 entry (`TC25.mynetworksettings.com` / `10.19.208.118`, `bare_metal`, `darwin`), Alienware placeholder (address TBD, `podman`, `linux`)
+  - Add remote model entries to top-level `models[]` with `host` field referencing node name
 
-9.5. **Extend `configure.sh detect-hardware` for macOS**
-   - Detect Apple Silicon (sysctl hw.optional.arm64), unified memory size
-   - Suggest viable models for M1/M2/M3 hardware profiles
-   - Output profile recommendation: `inference-worker` for headless, `peer` if full stack desired
+- [ ] **9a.3** Extend `configure.sh generate-litellm-config`
+  - Resolve `host` → `nodes[].address` (DNS); fall back to `nodes[].address_fallback` if DNS unresolvable
+  - Set `api_base` to `http://<resolved>:11434` for remote Ollama nodes
+  - Regenerate `configs/models.json`
 
-9.6. **Extend `models[]` with remote host support**
-   - Add optional `host` field to model entries:
-     ```json
-     { "name": "llama3.1:8b-mac", "backend": "ollama", "device": "gpu",
-       "host": "macbook-m1" }
-     ```
-   - `configure.sh generate-litellm-config` resolves `host` → `nodes[].address` for `api_base`
+- [ ] **9a.4** Extend `configure.sh generate-quadlets`
+  - Filter service list by `node_profile`:
+    - `controller` → all services (current behavior, unchanged)
+    - `inference-worker` → ollama + promtail only
+    - `peer` → all services
 
-9.7. **Update diagnose.sh for remote nodes**
-   - Quick profile: show registered remote models and their health
-   - Full profile: TCP reachability to each remote node; API probe
+- [ ] **9a.5** Extend `configure.sh detect-hardware`
+  - Add macOS/Apple Silicon branch: `uname -s` = Darwin; detect via `sysctl hw.optional.arm64` and `hw.memsize`
+  - Quantized model autoselect tiers (all platforms):
+    - `≥ 8 GB VRAM / ≥ 20 GB RAM` → 8B Q4_K_M (e.g., `llama3.1:8b-instruct:q4_K_M`)
+    - `4–8 GB VRAM / 12–20 GB RAM` → 7B Q4_K_M
+    - `3–4 GB VRAM / 8–12 GB RAM` → 3B Q4_K_M (e.g., `llama3.2:3b:q4_K_M`)
+    - `< 3 GB VRAM  / < 8 GB RAM`  → 1.5B Q8_0 (e.g., `qwen2.5:1.5b:q8_0`)
+  - macOS path: use ~40% of unified RAM as soft model-fit target (Ollama manages paging)
+
+- [ ] **9a.6** Verify and commit Phase 9a
+  - `configure.sh validate` passes with `nodes[]` present
+  - `configure.sh generate-litellm-config` produces remote `api_base` entries
+  - `configure.sh generate-quadlets inference-worker` produces ollama + promtail only
+  - `configure.sh detect-hardware` correct on Linux (regression) and correct macOS branch output
+
+---
+
+### Phase 9b — M1 Bare-Metal Setup *(requires SSH to TC25.mynetworksettings.com)*
+
+- [ ] **9b.1** Create `scripts/bare_metal/setup-macos.sh`
+  - Check Homebrew; install/upgrade Ollama if not present
+  - Run embedded hardware detection (reuse `detect-hardware` logic); print recommended quantized model
+  - Pull recommended model
+  - Configure Ollama to listen on `0.0.0.0:11434` via `OLLAMA_HOST` in LaunchAgent plist
+  - Write `~/Library/LaunchAgents/com.ollama.server.plist` for autostart on login
+
+- [ ] **9b.2** Create `scripts/register-node.sh`
+  - TCP probe: controller address reachable on LiteLLM port
+  - Local probe: `curl localhost:11434/api/tags` returns expected model
+  - Print static config block for operator to paste into controller's `config.json` `nodes[]`
+  - No automatic write to controller (static config model — dynamic deferred)
+
+- [ ] **9b.3** Run on TC25 *(SSH session)*
+  - Copy and execute `scripts/bare_metal/setup-macos.sh`
+  - Confirm model pulled; run `scripts/register-node.sh` and verify output
+
+- [ ] **9b.4** Update controller and restart LiteLLM
+  - Fill verified M1 details into `config.json` if needed
+  - `configure.sh generate-litellm-config`; restart LiteLLM service
+
+- [ ] **9b.5** Verify and commit Phase 9b
+  - `curl http://TC25.mynetworksettings.com:11434/api/tags` lists model (from controller)
+  - Controller LiteLLM `/v1/models` lists M1-hosted model
+  - Completion request routed to M1 model succeeds
+
+---
+
+### Phase 9c — Alienware Podman Worker *(requires access + address)*
+
+- [ ] **9c.1** Create `scripts/podman/setup-worker.sh`
+  - Verify Podman installed; run `detect-hardware` for model autoselect
+  - Call `configure.sh generate-quadlets inference-worker` → ollama + promtail quadlets
+  - Pull Ollama quantized model; `systemctl --user start ollama.service`
+
+- [ ] **9c.2** Fill Alienware `address` / `address_fallback` in `config.json` once known
+
+- [ ] **9c.3** Run `setup-worker.sh` on Alienware; regenerate + restart LiteLLM on controller
+
+- [ ] **9c.4** Verify and commit Phase 9c
+  - Controller LiteLLM `/v1/models` lists Alienware-hosted model
+  - Completion request routed to Alienware model succeeds
+
+---
+
+### Phase 9d — Remote Node Tests
+
+- [ ] **9d.1** Create `testing/layer2_remote_nodes.bats`
+  - T-090: TCP reachability to M1 Ollama port (11434) from controller
+  - T-091: LiteLLM `/v1/models` lists M1-hosted model
+  - T-092: Completion request to M1-hosted model name succeeds and returns content
+  - T-093: TCP reachability to Alienware *(skip until 9c complete)*
+  - T-094: Completion request to Alienware model *(skip until 9c complete)*
+
+- [ ] **9d.2** Add `probe_node()` helper to `testing/helpers.bash`
+  - Args: `<host> <port>` — returns 0 if TCP open, 1 otherwise; used in T-090/T-093
+
+- [ ] **9d.3** Run full test suite; verify no regressions; commit Phase 9d
+
+---
+
+### Phase 9 TODOs *(deferred, not this phase)*
+
+- **Dynamic node registration** — workers auto-POST to LiteLLM `POST /model/new` on startup; controller heartbeat removes stale entries on missed checks
+- **Podman Machine on macOS** — containerized macOS workers (no Metal GPU; consistent with Linux Podman pattern)
+- **Hosted API providers** — OpenAI / Anthropic / Groq as LiteLLM `models[]` entries (mostly free config additions)
+- **Internet-facing self-hosted workers** — public IP/DNS workers; Tailscale or WireGuard mesh; TLS mutual auth between nodes
 
 ### Outputs
-- M1 node contributing inference capacity to the controller's LiteLLM
-- Dynamic registration protocol operational; static fallback available
-- `configure.sh detect-hardware` works on macOS
-- `nodes[]` and per-model `host` field in config.json
+- M1 and Alienware contributing inference via controller LiteLLM (static routing)
+- `nodes[]` schema in `config.json` with `address`/`address_fallback` DNS+IP fallback
+- `detect-hardware` quantized model autoselect on Linux and macOS
+- `scripts/bare_metal/setup-macos.sh`, `scripts/podman/setup-worker.sh`, `scripts/register-node.sh`
+- `testing/layer2_remote_nodes.bats` with T-090 through T-094
 
 ### Verification
-- `curl /v1/models` on controller lists models from both local and M1 nodes
-- Kill M1 Ollama → controller removes stale models within heartbeat interval
-- `diagnose.sh` reports remote node health
-- `configure.sh detect-hardware` on M1 outputs correct hardware profile
+- `curl /v1/models` on controller lists models from all three nodes
+- `testing/layer2_remote_nodes.bats` T-090 through T-092 pass (M1 online); T-093/094 skip
+- `configure.sh detect-hardware` correct output on Darwin and Linux
 
 ---
 
