@@ -44,7 +44,8 @@ Best practices for deploying and managing containers with Podman in rootless mod
 - Quadlets are the preferred way to manage Podman containers as systemd services
 - Place quadlet files in `$HOME/.config/containers/systemd/` for rootless
 - File types: `.container` (containers), `.network` (networks), `.volume` (volumes)
-- Use `[Install] WantedBy=default.target` for automatic startup
+- Use `[Install] WantedBy=default.target` for automatic startup — this is processed by the quadlet generator, not by `systemctl enable`
+- **Never use `systemctl --user enable` on quadlet-generated units** — they live in the transient generator directory and cannot be symlinked. Use `systemctl --user start <service>` after `daemon-reload`
 - Reload after changes: `systemctl --user daemon-reload`
 - Check generated unit files: `systemctl --user cat <service>`
 - Use `After=` and `Requires=` directives for service dependency ordering
