@@ -140,7 +140,7 @@ cfg['node_profile'] = 'inference-worker'
 with open('$TMPCONFIG', 'w') as f:
     json.dump(cfg, f, indent=2)
 "
-    run bash "$CONFIGURE" generate-quadlets
+    run env CONFIG_FILE="$TMPCONFIG" bash "$CONFIGURE" generate-quadlets
     rm -f "$TMPCONFIG"
 else
     run bash "$CONFIGURE" generate-quadlets
@@ -152,7 +152,7 @@ info "Quadlets generated: ollama + promtail only"
 # ---------------------------------------------------------------------------
 step "Enabling Ollama service"
 run systemctl --user daemon-reload
-run systemctl --user enable --now ollama.service
+run systemctl --user start ollama.service
 info "Waiting for Ollama to be ready..."
 for i in $(seq 1 30); do
     if curl -sf http://localhost:11434/ &>/dev/null; then

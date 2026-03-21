@@ -1,5 +1,5 @@
 # Podman — Lessons Learned
-**Last Updated:** 2026-03-08 UTC
+**Last Updated:** 2026-03-21 UTC
 
 ## Purpose
 Empirical findings from operating Podman in rootless mode with systemd quadlets. Records behaviour that diverged from documentation, assumptions, or prior expectations. See `guidance.md` for prescriptive decisions and `best_practices.md` for vendor recommendations.
@@ -10,6 +10,8 @@ Empirical findings from operating Podman in rootless mode with systemd quadlets.
 
 1. [Rootless Port Binding Below 1024 Requires Sysctl](#1-rootless-port-binding-below-1024-requires-sysctl)
 2. [Non-Root Container UIDs Require `podman unshare chown` on Bind-Mount Directories](#2-non-root-container-uids-require-podman-unshare-chown-on-bind-mount-directories)
+3. [Quadlet-Generated Units Cannot Be `enable`d — Use `start`](#3-quadlet-generated-units-cannot-be-enabled--use-start)
+4. [Env Var Overrides Must Be Exported to Subprocess — Not Just Written to a Temp File](#4-env-var-overrides-must-be-exported-to-subprocess--not-just-written-to-a-temp-file)
 
 ---
 
@@ -92,3 +94,69 @@ After these commands, a `ls -ln ~/ai-stack/logs/loki` on the host will show a la
 > podman image inspect --format '{{.Config.User}}' <image>
 > ```
 > Add all required `podman unshare` calls to the deployment script's setup phase so they run automatically on install.
+
+---
+
+# 3 Quadlet-Generated Units Cannot Be `enable`d — Use `start`
+
+**Version:** Podman 5.8.1, systemd 256  
+**Discovered:** 2026-03-21, Phase 9c setup-worker.sh execution
+
+## What Happened
+`systemctl --user enable --now ollama.service` failed with:
+
+```
+Failed to enable unit: Unit /run/user/1000/systemd/generator/ollama.service is transient or generated
+```
+
+The `.container` quadlet file was valid and present in `~/.config/containers/systemd/`. The service appeared correctly after `daemon-reload`.
+
+## Root Cause
+Systemd generates unit files from `.container` quadlets at runtime and places them in the transient generator directory `/run/user/<uid>/systemd/generator/`. This path is read-only and ephemeral — `systemctl enable` works by writing a symlink under `~/.config/systemd/user/`, which it cannot do for units originating from the generator.
+
+Quadlets written with `[Install] WantedBy=default.target` in the `.container` file are **automatically enabled** at `daemon-reload` time via the generator mechanism — no explicit `enable` call is needed or possible.
+
+## Fix
+Replace `systemctl --user enable --now <service>` with plain `systemctl --user start <service>`. The generator already handles auto-start on login via the `WantedBy` directive.
+
+```bash
+# Wrong — fails on quadlet-generated units
+systemctl --user enable --now ollama.service
+
+# Correct
+systemctl --user daemon-reload
+systemctl --user start ollama.service
+```
+
+## Rule
+> Never use `systemctl --user enable` on a quadlet-generated service. After `daemon-reload`, use `start` to bring it up immediately. Auto-start on login is already handled by `WantedBy=default.target` in the `.container` file.
+
+---
+
+# 4 Env Var Overrides Must Be Exported to Subprocess — Not Just Written to a Temp File
+
+**Version:** bash, configure.sh pattern  
+**Discovered:** 2026-03-21, Phase 9c setup-worker.sh execution
+
+## What Happened
+`setup-worker.sh` wrote a modified `config.json` to a temp path (`$TMPCONFIG`) with `node_profile` set to `inference-worker`, then called `bash configure.sh generate-quadlets` — which ignored the temp file and read the original `CONFIG_FILE` path, generating all controller-profile containers instead of just `ollama + promtail`.
+
+## Root Cause
+`configure.sh` resolves its config path via:
+```bash
+CONFIG_FILE="${CONFIG_FILE:-$PROJECT_ROOT/configs/config.json}"
+```
+The temp file was created but `CONFIG_FILE` in the calling script was never updated or exported to the subprocess environment. The child process read its own default.
+
+## Fix
+Pass the override inline on the subprocess invocation:
+```bash
+# Wrong — temp file created, but child sees original CONFIG_FILE
+bash "$CONFIGURE" generate-quadlets
+
+# Correct — env var propagated to child process
+CONFIG_FILE="$TMPCONFIG" bash "$CONFIGURE" generate-quadlets
+```
+
+## Rule
+> When a helper script reads a variable with `${VAR:-default}`, the only reliable way to override it from a calling script is to set it in the subprocess environment: `KEY=value bash script.sh`. Writing to a local variable or a file is not sufficient.
