@@ -581,31 +581,31 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ### Phase 9b — M1 Bare-Metal Setup *(requires SSH to TC25.mynetworksettings.com)*
 
-- [ ] **9b.1** Create `scripts/bare_metal/setup-macos.sh`
+- [x] **9b.1** Create `scripts/bare_metal/setup-macos.sh`
   - Check Homebrew; install/upgrade Ollama if not present
   - Run embedded hardware detection (reuse `detect-hardware` logic); print recommended quantized model
   - Pull recommended model
   - Configure Ollama to listen on `0.0.0.0:11434` via `OLLAMA_HOST` in LaunchAgent plist
   - Write `~/Library/LaunchAgents/com.ollama.server.plist` for autostart on login
 
-- [ ] **9b.2** Create `scripts/register-node.sh`
+- [x] **9b.2** Create `scripts/register-node.sh`
   - TCP probe: controller address reachable on LiteLLM port
   - Local probe: `curl localhost:11434/api/tags` returns expected model
   - Print static config block for operator to paste into controller's `config.json` `nodes[]`
   - No automatic write to controller (static config model — dynamic deferred)
 
-- [ ] **9b.3** Run on TC25 *(SSH session)*
+- [x] **9b.3** Run on TC25 *(SSH session)*
   - Copy and execute `scripts/bare_metal/setup-macos.sh`
   - Confirm model pulled; run `scripts/register-node.sh` and verify output
 
-- [ ] **9b.4** Update controller and restart LiteLLM
+- [x] **9b.4** Update controller and restart LiteLLM
   - Fill verified M1 details into `config.json` if needed
   - `configure.sh generate-litellm-config`; restart LiteLLM service
 
-- [ ] **9b.5** Verify and commit Phase 9b
+- [x] **9b.5** Verify and commit Phase 9b
   - `curl http://TC25.mynetworksettings.com:11434/api/tags` lists model (from controller)
   - Controller LiteLLM `/v1/models` lists M1-hosted model
-  - Completion request routed to M1 model succeeds
+  - Completion request routed to M1 model succeeds — **confirmed: `TC25 OK`**
 
 ---
 
