@@ -7,6 +7,35 @@
     "internal": false
   },
   "node_profile": "controller",
+  "nodes": [
+    {
+      "name": "workstation",
+      "profile": "controller",
+      "address": null,
+      "address_fallback": null,
+      "os": "linux",
+      "deployment": "podman",
+      "models": ["llama3.1:8b", "qwen2.5-1.5b"]
+    },
+    {
+      "name": "macbook-m1",
+      "profile": "inference-worker",
+      "address": "TC25.mynetworksettings.com",
+      "address_fallback": "10.19.208.118",
+      "os": "darwin",
+      "deployment": "bare_metal",
+      "models": ["llama3.1:8b-instruct-q4_K_M"]
+    },
+    {
+      "name": "alienware",
+      "profile": "inference-worker",
+      "address": "SOL.mynetworksettings.com",
+      "address_fallback": "10.19.208.113",
+      "os": "linux",
+      "deployment": "podman",
+      "models": ["llama3.2:3b-q4_K_M"]
+    }
+  ],
   "models": [
     {
       "name": "llama3.1:8b",
@@ -19,6 +48,18 @@
       "device": "gpu",
       "repo": "Qwen/Qwen2.5-1.5B-Instruct",
       "quantization": null
+    },
+    {
+      "name": "llama3.1:8b-instruct-q4_K_M",
+      "backend": "ollama",
+      "device": "gpu",
+      "host": "macbook-m1"
+    },
+    {
+      "name": "llama3.2:3b-q4_K_M",
+      "backend": "ollama",
+      "device": "gpu",
+      "host": "alienware"
     }
   ],
   "services": {
