@@ -523,7 +523,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 **Three-Node Architecture:**
 - **Controller** — workstation (Linux, RTX 3070 Ti 8 GB VRAM) — full stack, all services
 - **M1** — TC25 (macOS ARM64, 16 GB unified RAM) — bare-metal Ollama with Metal GPU acceleration
-- **Alienware** — (Linux, GTX ~3 GB VRAM, address TBD) — Podman inference-worker profile
+- **Alienware** — `SOL.mynetworksettings.com` / `10.19.208.113` (Linux, GTX ~3 GB VRAM) — Podman inference-worker profile
 
 **Decisions (to be formally recorded in `docs/decisions.md` as step 9a.1):**
 - D-016/D-017: Phase 8 decisions (Ollama CPU-only; `models[]` in config.json) — write formally
@@ -532,50 +532,50 @@ This section defines the reproducible, sequenced implementation plan across all 
 - D-020 (revised): **Static `nodes[]` config** for Phase 9; dynamic registration/heartbeat deferred as TODO
 - D-0xx: **Quantized models preferred (Q4_K_M)**; `detect-hardware` autoselects by VRAM/RAM headroom
 
-**Inputs:** Phase 8 complete. M1 reachable at `TC25.mynetworksettings.com` / `10.19.208.118`. Alienware address TBD.
+**Inputs:** Phase 8 complete. M1 reachable at `TC25.mynetworksettings.com` / `10.19.208.118`. Alienware at `SOL.mynetworksettings.com` / `10.19.208.113`.
 
 ---
 
 ### Phase 9a — Controller-Side Configuration *(no hardware access needed)*
 
-- [ ] **9a.1** Record decisions D-016 through D-0xx in `docs/decisions.md`
+- [x] **9a.1** Record decisions D-016 through D-0xx in `docs/decisions.md`
   - D-016 (Phase 8): Ollama = CPU-only (`CUDA_VISIBLE_DEVICES=""`)
   - D-017 (Phase 8): `config.json` gains `models[]` array; `configure.sh generate-litellm-config` derives LiteLLM model list
   - D-018: Node profiles (`controller`, `inference-worker`, `peer`)
   - D-019 (revised): M1 = bare-metal Ollama; Podman Machine deferred (see TODOs)
   - D-020 (revised): Static `nodes[]` config; dynamic registration/heartbeat deferred (see TODOs)
-  - D-0xx: Quantized models preferred; `detect-hardware` autoselects Q4_K_M tier
+  - D-021: Quantized models preferred; `detect-hardware` autoselects Q4_K_M tier
 
-- [ ] **9a.2** Add `nodes[]` to `config.json`
+- [x] **9a.2** Add `nodes[]` to `config.json`
   - Schema per node: `name`, `profile`, `address` (DNS preferred), `address_fallback` (IPv4/IPv6), `os`, `deployment` (`bare_metal` | `podman`), `models[]`
-  - Controller entry, M1 entry (`TC25.mynetworksettings.com` / `10.19.208.118`, `bare_metal`, `darwin`), Alienware placeholder (address TBD, `podman`, `linux`)
+  - Controller entry, M1 entry (`TC25.mynetworksettings.com` / `10.19.208.118`, `bare_metal`, `darwin`), Alienware entry (`SOL.mynetworksettings.com` / `10.19.208.113`, `podman`, `linux`)
   - Add remote model entries to top-level `models[]` with `host` field referencing node name
 
-- [ ] **9a.3** Extend `configure.sh generate-litellm-config`
+- [x] **9a.3** Extend `configure.sh generate-litellm-config`
   - Resolve `host` → `nodes[].address` (DNS); fall back to `nodes[].address_fallback` if DNS unresolvable
   - Set `api_base` to `http://<resolved>:11434` for remote Ollama nodes
   - Regenerate `configs/models.json`
 
-- [ ] **9a.4** Extend `configure.sh generate-quadlets`
+- [x] **9a.4** Extend `configure.sh generate-quadlets`
   - Filter service list by `node_profile`:
     - `controller` → all services (current behavior, unchanged)
     - `inference-worker` → ollama + promtail only
     - `peer` → all services
 
-- [ ] **9a.5** Extend `configure.sh detect-hardware`
+- [x] **9a.5** Extend `configure.sh detect-hardware`
   - Add macOS/Apple Silicon branch: `uname -s` = Darwin; detect via `sysctl hw.optional.arm64` and `hw.memsize`
   - Quantized model autoselect tiers (all platforms):
-    - `≥ 8 GB VRAM / ≥ 20 GB RAM` → 8B Q4_K_M (e.g., `llama3.1:8b-instruct:q4_K_M`)
+    - `≥ 8 GB VRAM / ≥ 20 GB RAM` → 8B Q4_K_M (e.g., `llama3.1:8b-instruct-q4_K_M`)
     - `4–8 GB VRAM / 12–20 GB RAM` → 7B Q4_K_M
-    - `3–4 GB VRAM / 8–12 GB RAM` → 3B Q4_K_M (e.g., `llama3.2:3b:q4_K_M`)
-    - `< 3 GB VRAM  / < 8 GB RAM`  → 1.5B Q8_0 (e.g., `qwen2.5:1.5b:q8_0`)
+    - `3–4 GB VRAM / 8–12 GB RAM` → 3B Q4_K_M (e.g., `llama3.2:3b-q4_K_M`)
+    - `< 3 GB VRAM  / < 8 GB RAM`  → 1.5B Q8_0 (e.g., `qwen2.5:1.5b-q8_0`)
   - macOS path: use ~40% of unified RAM as soft model-fit target (Ollama manages paging)
 
-- [ ] **9a.6** Verify and commit Phase 9a
-  - `configure.sh validate` passes with `nodes[]` present
-  - `configure.sh generate-litellm-config` produces remote `api_base` entries
-  - `configure.sh generate-quadlets inference-worker` produces ollama + promtail only
-  - `configure.sh detect-hardware` correct on Linux (regression) and correct macOS branch output
+- [x] **9a.6** Verify and commit Phase 9a
+  - `configure.sh validate` passes with `nodes[]` present ✅
+  - `configure.sh generate-litellm-config` produces remote `api_base` entries ✅
+  - `configure.sh generate-quadlets` (inference-worker) produces ollama + promtail only ✅
+  - `configure.sh detect-hardware` correct on Linux (regression) ✅; macOS branch verified by code review ✅
 
 ---
 
@@ -668,8 +668,8 @@ This section defines the reproducible, sequenced implementation plan across all 
 **Goal:** Multiple nodes each run the complete stack independently. Nodes share inference capacity and knowledge libraries. Chat history and user state remain node-local for MVP; team-shared context is a future extension.
 
 **Decisions:**
-- D-021: Shared state scope — inference routing and knowledge library discovery are shared across peers; chat history, user accounts, and Flowise flows remain node-local. Team-shared chat/context is deferred to a future phase.
-- D-022: Knowledge sharing via D-014 `local` discovery profile — peers discover each other's knowledge libraries via mDNS/DNS-SD on LAN, or static config for WAN
+- D-022: Shared state scope — inference routing and knowledge library discovery are shared across peers; chat history, user accounts, and Flowise flows remain node-local. Team-shared chat/context is deferred to a future phase.
+- D-023: Knowledge sharing via D-014 `local` discovery profile — peers discover each other's knowledge libraries via mDNS/DNS-SD on LAN, or static config for WAN
 
 **Inputs:** Phase 9 complete, multiple nodes running the stack.
 
@@ -802,7 +802,14 @@ These collapse into the configuration system above. Tracked individually for vis
 - [ ] Multi-model A/B testing through LiteLLM
 - [ ] Federated RAG across remote library nodes
 - [ ] Multi-environment config support (dev/staging/prod) via configure.sh
-- [ ] Team-shared chat/context state — shared Postgres or sync protocol so chat history, user accounts, and conversation context are available across peer nodes (extends Phase 10 D-021)
+- [ ] Team-shared chat/context state — shared Postgres or sync protocol so chat history, user accounts, and conversation context are available across peer nodes (extends Phase 10 D-022)
+- [ ] Knowledge library governance — content classification, safety, and ethics review controls for managed knowledge bases:
+  - Data classification: PII/confidential detection — agent may query metadata/schema but not raw content
+  - Content advisory: grounding and alignment checks (factual accuracy before ingestion)
+  - Content safety: CSAM and harmful content evaluation (safe content filter on all ingestion paths)
+  - Ethics alignment: positive/neutral/negative behavior classification with operator-defined context
+  - Private/restricted content: opt-in isolated collection storage; excluded from default discovery
+  - Prohibited topics list: operator-defined deny-list enforced at query and ingestion boundaries
 
 ---
 
@@ -863,6 +870,20 @@ Items requiring a decision before or during implementation.
   - Phase 8: Local GPU enablement — CDI, Ollama CPU pinning, models[] config, LiteLLM auto-generation, detect-hardware
   - Phase 9: Remote inference nodes — node profiles (controller/inference-worker/peer), dynamic registration, M1 Mac via Podman Machine
   - Phase 10: Full peer nodes — shared knowledge via mDNS/DNS-SD, cross-peer inference routing, node-local chat
-- Decisions: D-016 (Ollama=CPU, vLLM=GPU), D-017 (models[] config), D-018 (node profiles), D-019 (Mac Podman Machine), D-020 (dynamic registration + static fallback), D-021 (shared inference+knowledge, local chat), D-022 (D-014 local discovery for knowledge)
+- Decisions (informal, formalized in Phase 9a): D-016 (Ollama=CPU, vLLM=GPU), D-017 (models[] config), D-018 (node profiles), D-019 revised (bare-metal Ollama on M1), D-020 revised (static nodes[]), D-021 (Q4_K_M autoselect)
+- Phase 10 decisions renumbered: D-022 (shared state scope), D-023 (knowledge sharing via D-014 local profile)
 - New considerations: #29 (inter-node DNS naming), #30 (macOS Podman Machine performance), #31 (model storage on multi-node)
 - 6 new deferrable items added for Phases 8–10; 1 future feature (team-shared chat/context)
+
+## Session Notes — Phase 9a
+
+- Alienware address confirmed: `SOL.mynetworksettings.com` / `10.19.208.113`
+- **Phase 9a complete** — all 5 controller-side changes implemented and verified
+- D-016 through D-021 formally written to `docs/decisions.md`
+- `nodes[]` added to `configs/config.json`: workstation, macbook-m1 (TC25), alienware (SOL)
+- Remote models added to `models[]`: `llama3.1:8b-instruct-q4_K_M` (macbook-m1), `llama3.2:3b-q4_K_M` (alienware)
+- `configure.sh generate-litellm-config`: host models excluded from local jq block; Python heredoc appends remote entries with DNS/IP fallback resolution
+- `configure.sh generate-quadlets`: `inference-worker` profile generates ollama + promtail only; controller/peer generate all services
+- `configure.sh detect-hardware`: macOS/Darwin branch (sysctl hw.memsize, hw.optional.arm64); Q4_K_M model naming on all platforms
+- Knowledge library governance items added to `# 4 Future Features`
+- Verification: validate ✅, generate-litellm-config (remote api_base entries) ✅, generate-quadlets inference-worker ✅, detect-hardware Linux regression ✅

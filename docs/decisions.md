@@ -215,3 +215,87 @@ This file records architecture decisions made during work on this project. Each 
 | **Driver** | Agent-proposed, architecture-constrained |
 | **Trigger** | Phase 7 implementation dependency — transport choice required before implementing the MCP layer. |
 | **Commit** | *(this commit)* |
+
+---
+
+### D-016 — Ollama Runs CPU-Only; vLLM Holds GPU Exclusively
+
+| Field | Value |
+|---|---|
+| **Decision** | Run Ollama with `CUDA_VISIBLE_DEVICES=""` so it uses CPU-only inference. Dedicate the NVIDIA GPU exclusively to vLLM for high-quality, quantized GPU inference. |
+| **Context** | Phase 8 revealed that both Ollama and vLLM will claim the NVIDIA GPU if both are running. Ollama's CUDA path is opportunistic — it grabs whatever device is available. Running both on GPU causes VRAM contention and unpredictable failures. |
+| **Options Considered** | (1) Let both share the GPU via CUDA MPS. (2) Run vLLM CPU-only and Ollama on GPU. (3) Ollama CPU-only, vLLM GPU-exclusive. |
+| **Rationale** | Option 3 matches workload characteristics: Ollama serves lightweight CPU-bound models that don't require GPU acceleration; vLLM serves quantized models where GPU parallelism is essential. CPU isolation is enforced by environment variable, not resource limits — simpler and more reliable than CUDA MPS. |
+| **Driver** | Agent-proposed, Phase 8 implementation |
+| **Trigger** | VRAM contention observed when both services started simultaneously. |
+| **Commit** | Phase 8 |
+
+---
+
+### D-017 — `models[]` in config.json Is the LiteLLM Model Source of Truth
+
+| Field | Value |
+|---|---|
+| **Decision** | Define a top-level `models[]` array in `config.json` as the authoritative list of available inference models. `configure.sh generate-litellm-config` derives `configs/models.json` (the LiteLLM router config) entirely from this array. |
+| **Context** | Before Phase 8, model routes were manually edited in `configs/models.json`. This broke the SSOT principle established in D-002 — the same fact (which models exist, with which backends) lived in two places. |
+| **Options Considered** | (1) Keep models.json as a manually maintained file. (2) Generate models.json from an environment variable list. (3) Extend config.json with a `models[]` array and generate models.json from it. |
+| **Rationale** | Option 3 extends the existing SSOT architecture (D-002) consistently. `models[]` co-locates model definitions with service definitions in one file, making the full stack reviewable in one place. The generator (`configure.sh generate-litellm-config`) is deterministic — the same config always produces the same models.json. |
+| **Driver** | Agent-proposed, Phase 8 implementation |
+| **Trigger** | Discovery that models.json was manually maintained and could diverge from config.json. |
+| **Commit** | Phase 8 |
+
+---
+
+### D-018 — Node Profiles: `controller`, `inference-worker`, `peer`
+
+| Field | Value |
+|---|---|
+| **Decision** | Define three node profiles stored as `node_profile` in `config.json`: `controller` (full stack, all services), `inference-worker` (Ollama + Promtail only), `peer` (full stack, acts as both controller and remote provider). |
+| **Context** | Phase 9 requires multiple machines to contribute inference capacity. Each machine has different hardware and different roles. A single deployment model (full stack) wastes resources on lightweight worker nodes and doesn't fit the macOS bare-metal scenario. |
+| **Options Considered** | (1) One profile (deploy everything everywhere). (2) Two profiles (full stack vs. minimal). (3) Three profiles separating the coordination role (controller) from full peer participation. |
+| **Rationale** | Three profiles map to real deployment scenarios: a developer workstation (controller), a secondary Mac or GPU box running only Ollama (inference-worker), and a future fully-participatory node (peer). The `inference-worker` profile deploys only Ollama and Promtail — sufficient to contribute models and ship logs to the controller's Loki. `generate-quadlets` enforces the profile at quadlet-generation time, ensuring the right services are deployed. |
+| **Driver** | Agent-proposed, Phase 9 design |
+| **Trigger** | Architecture need — distributing inference across heterogeneous machines requires role-differentiated deployments. |
+| **Commit** | Phase 9a |
+
+---
+
+### D-019 — M1 MacBook Uses Bare-Metal Ollama (Podman Machine Deferred)
+
+| Field | Value |
+|---|---|
+| **Decision** | Deploy Ollama as a bare-metal macOS process on the M1 MacBook (TC25) using the native Ollama binary. Podman Machine on macOS is explicitly deferred. |
+| **Context** | The M1's Metal GPU provides significant inference acceleration. Podman Machine on macOS runs Ollama inside a Linux VM, which cannot access Apple Silicon Metal. The original Phase 9 design assumed Podman Machine for consistency with the Linux containers pattern. |
+| **Options Considered** | (1) Podman Machine on macOS (consistent containerization, no Metal GPU). (2) Bare-metal Ollama binary (native Metal GPU, breaks containerization consistency). (3) Docker Desktop with Metal passthrough (proprietary, licensing concerns). |
+| **Rationale** | The M1's primary value as an inference worker is its Metal GPU, which delivers meaningful inference speedup on quantized models. Sacrificing Metal for container consistency defeats the purpose of using this hardware. Bare-metal Ollama is the officially supported path for Apple Silicon and is mature. Podman Machine benchmark deferred to a later phase when Metal passthrough support improves. |
+| **Driver** | Hardware constraint — Metal GPU inaccessible inside Podman Machine VM |
+| **Trigger** | Design review during Phase 9 planning — original D-019 assumed Podman Machine without evaluating GPU access. |
+| **Commit** | Phase 9a |
+
+---
+
+### D-020 — Static `nodes[]` Config for Phase 9 (Dynamic Registration Deferred)
+
+| Field | Value |
+|---|---|
+| **Decision** | Add a static `nodes[]` array to `config.json` with one entry per remote node. Addresses are declared explicitly (`address` for DNS, `address_fallback` for IPv4/IPv6). Dynamic registration (workers auto-registering with the controller) is deferred as a Phase 9 TODO. |
+| **Context** | Phase 9 introduces remote inference nodes. Two models for node discovery were considered: static config (operator declares each node manually) vs. dynamic registration (nodes announce themselves to the controller). |
+| **Options Considered** | (1) Dynamic registration — nodes `POST /model/new` to LiteLLM on startup; controller removes stale entries on heartbeat failures. (2) Static config — `nodes[]` array in config.json; operator edits manually. (3) Hybrid — static fallback with optional dynamic override. |
+| **Rationale** | Static config is appropriate for Phase 9: the node topology is small (3 nodes), known in advance, and stable. Dynamic registration adds complexity (heartbeat protocol, stale-entry cleanup, race conditions on startup ordering) that is not justified by a 3-node static topology. The `nodes[]` schema is designed so dynamic registration can be layered on later without breaking the static config format. |
+| **Driver** | Agent-proposed, complexity vs. benefit tradeoff |
+| **Trigger** | Phase 9 planning — dynamic registration was the original design; revised after reviewing the actual topology size. |
+| **Commit** | Phase 9a |
+
+---
+
+### D-021 — Quantized Models (Q4_K_M) Preferred; `detect-hardware` Autoselects Tier
+
+| Field | Value |
+|---|---|
+| **Decision** | Prefer Q4_K_M quantized models on all inference worker nodes. `configure.sh detect-hardware` autoselects the appropriate model tier based on available VRAM (Linux/NVIDIA) or unified RAM soft-target (~40%, macOS Apple Silicon). |
+| **Context** | Phase 8 used AWQ quantization labels from HuggingFace models run via vLLM. Phase 9 adds Ollama-based inference workers where the dominant Ollama model format uses GGUF with Q4_K_M quantization. The recommend model sizes needed updating and cross-platform consistency. |
+| **Options Considered** | (1) FP16 models — highest quality, requires 14–16 GB VRAM for 7B models. (2) AWQ models — GPU-optimized, HuggingFace ecosystem. (3) Q4_K_M GGUF — Ollama native, works CPU and GPU, broad model availability. |
+| **Rationale** | Q4_K_M offers a good quality/size tradeoff for both CPU and GPU inference and is the most widely available quantization format in the Ollama model library. GGUF/Q4_K_M runs on both Linux GPU workers (Ollama CPU path) and macOS Metal (Ollama native). This unifies the model recommendation logic across platforms. Tier thresholds: ≥8 GB VRAM/≥20 GB RAM → 8B Q4_K_M; 4–8 GB → 7B Q4_K_M; 3–4 GB → 3B Q4_K_M; <3 GB → 1.5B Q8_0. |
+| **Driver** | Agent-proposed, Phase 9 cross-platform consistency |
+| **Trigger** | Adding macOS inference workers exposed the gap between AWQ (HuggingFace/vLLM path) and GGUF/Q4_K_M (Ollama path). |
+| **Commit** | Phase 9a |
