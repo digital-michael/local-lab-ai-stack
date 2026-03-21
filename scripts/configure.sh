@@ -196,14 +196,16 @@ EOF
             echo "[Unit]"
             echo "Description=AI Stack $container_name"
 
-            # Dependencies
+            # Dependencies — only emit for services that are also being generated
             local deps
             deps=$(jq -r --arg s "$svc" '.services[$s].depends_on[]?' "$CONFIG_FILE")
             echo "After=ai-stack-network.service"
             echo "Requires=ai-stack-network.service"
             for dep in $deps; do
-                echo "After=${dep}.service"
-                echo "Requires=${dep}.service"
+                if echo "$services" | grep -qx "$dep"; then
+                    echo "After=${dep}.service"
+                    echo "Requires=${dep}.service"
+                fi
             done
 
             echo ""
