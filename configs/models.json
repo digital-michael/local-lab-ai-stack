@@ -47,10 +47,10 @@
       }
     },
     {
-      "id": "llama3.2:3b-q4_K_M",
-      "description": "llama3.2:3b-q4_K_M \u2014 remote Ollama on alienware",
+      "id": "llama3.2:3b-instruct-q4_K_M",
+      "description": "llama3.2:3b-instruct-q4_K_M — remote Ollama on alienware",
       "litellm_params": {
-        "model": "ollama_chat/llama3.2:3b-q4_K_M",
+        "model": "ollama_chat/llama3.2:3b-instruct-q4_K_M",
         "api_base": "http://SOL.mynetworksettings.com:11434",
         "api_key": "none",
         "max_tokens": 4096
