@@ -795,6 +795,14 @@ These collapse into the configuration system above. Tracked individually for vis
 
 # 4 Future Features (architecture roadmap)
 
+- [ ] **Security audit tool** — automated scan of all ports, API keys, TLS configs, and auth enforcement across controller and all registered nodes; exposed as a script, a `configure.sh` subcommand, and surfaced in the Admin tab of the operator dashboard:
+  - Port exposure: verify only expected ports are open on each node (e.g. 11434 not open to LAN without auth)
+  - API key enforcement: confirm all service endpoints reject unauthenticated requests
+  - TLS: check certificate validity, expiry, and chain on all HTTPS endpoints
+  - Secret hygiene: verify no secrets in env vars, quadlet files, or config.json plaintext
+  - Worker node hardening: detect unauthenticated Ollama endpoints on inference-worker nodes
+  - Output: machine-readable JSON + human-readable summary; exit 1 on any critical finding
+
 - [ ] **Operator dashboard** — web UI with tab-based navigation across User, Team, System, and Admin contexts:
   - **User tab**
     - Personal contexts (private, user-scoped)
