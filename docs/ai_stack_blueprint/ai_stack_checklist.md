@@ -814,6 +814,7 @@ These collapse into the configuration system above. Tracked individually for vis
     - Register / suspend / unregister inference nodes
     - Restart, stop, backup, diagnose, and status operations per node
     - Full library entries (private, sensitive — admin-only view)
+    - Podman secrets inventory — list secret names, types, and creation/update timestamps (no values exposed); indicate which config-defined secrets are missing from the store
   - **System tab**
     - Per-component health panel with links to: direct web interface, log stream, configuration, and metrics (performance, memory, API call counts)
     - Registered nodes list with online/offline status, supported models, and hardware profile
