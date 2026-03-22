@@ -224,30 +224,47 @@ Embeddings stored in Qdrant. Image versions and model parameters are in [ai_stac
 ```mermaid
 flowchart LR
 
-ControllerNode --> GPUNode
-ControllerNode --> MacNode
+ControllerNode["Controller (Centauri)"]
+SOL["knowledge-worker (SOL)"]
+TC25["knowledge-worker (TC25/M1)"]
 
-GPUNode --> vLLM
-MacNode --> ollama
+ControllerNode -->|inference routing| SOL
+ControllerNode -->|inference routing| TC25
+
+SOL -->|".ai-library sync"| ControllerNode
+TC25 -->|".ai-library sync"| ControllerNode
+
+SOL -->|logs| ControllerNode
+TC25 -->|logs| ControllerNode
 ```
 
 Controller node services:
 
-- Traefik
-- LiteLLM
-- Flowise
-- OpenWebUI
-- Qdrant
-- PostgreSQL
-- Knowledge Index
+- Traefik (network edge, TLS termination)
+- LiteLLM (model gateway, inference routing)
+- OpenWebUI (chat UI)
+- Flowise (workflow orchestration)
+- Qdrant (vector DB — custody knowledge store)
+- PostgreSQL (Authentik, LiteLLM, Knowledge Index)
+- Knowledge Index (library registry + provenance)
+- Authentik (SSO IdP)
+- Prometheus / Grafana / Loki (observability)
 
-Minimum hardware requirements:
+`knowledge-worker` node services:
 
-| Node Type | CPU | RAM | Storage | GPU |
-|-----------|-----|-----|---------|-----|
-| Controller | 8 cores | 32 GB | 500 GB SSD | None required |
-| GPU Node | 8 cores | 32 GB | 200 GB SSD | 24 GB VRAM (e.g. RTX 3090/4090) |
-| Mac Node | Apple M1+ | 16 GB unified | 200 GB SSD | Integrated (Metal) |
+- Ollama (local inference)
+- Promtail (log shipper → controller Loki)
+- Knowledge Index (local KI, SQLite metadata store)
+- Qdrant (local vector DB for worker-authored libraries)
+
+Node profiles and hardware requirements:
+
+| Profile | CPU | RAM | Storage | GPU | Services |
+|---|---|---|---|---|---|
+| `controller` | 8+ cores | 32+ GB | 500 GB SSD | Not required | Full stack: Traefik, LiteLLM, OpenWebUI, Flowise, Qdrant (custody), PostgreSQL, KI, Grafana, Prometheus, Loki |
+| `inference-worker` | 4+ cores | 8+ GB | 50 GB SSD | Optional | Ollama, Promtail |
+| `knowledge-worker` | 4+ cores | 10+ GB | 50+ GB SSD | Optional | Ollama, Promtail, Knowledge Index (SQLite), Qdrant (local) |
+| `peer` | 8+ cores | 32+ GB | 200+ GB SSD | Optional | Full stack (future: disconnected/field deployment) |
 
 ---
 
