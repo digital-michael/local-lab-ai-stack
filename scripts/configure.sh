@@ -323,6 +323,10 @@ cmd_generate_secrets() {
                     echo ""
                 fi
             fi
+        # Cloud API keys are optional — press Enter to skip
+        elif [[ "$secret" == "openai_api_key" || "$secret" == "groq_api_key" || "$secret" == "anthropic_api_key" ]]; then
+            read -rsp "Enter value for secret '$secret' (press Enter to skip — cloud model will be unavailable): " value
+            echo ""
         else
             read -rsp "Enter value for secret '$secret': " value
             echo ""
@@ -408,6 +412,36 @@ cmd_generate_litellm_config() {
           model: ("openai/" + .name),
           api_base: "VLLM_URL",
           api_key: "none",
+          max_tokens: 4096
+        },
+        model_info: { mode: "chat", input_cost_per_token: 0, output_cost_per_token: 0 }
+      }
+      elif .backend == "openai" then {
+        id: .name,
+        description: (.name + " — hosted via OpenAI"),
+        litellm_params: {
+          model: .name,
+          api_key: ("os.environ/" + ((.api_key_secret // "openai_api_key") | ascii_upcase)),
+          max_tokens: 4096
+        },
+        model_info: { mode: "chat", input_cost_per_token: 0, output_cost_per_token: 0 }
+      }
+      elif .backend == "groq" then {
+        id: .name,
+        description: (.name + " — hosted via Groq"),
+        litellm_params: {
+          model: ("groq/" + .name),
+          api_key: ("os.environ/" + ((.api_key_secret // "groq_api_key") | ascii_upcase)),
+          max_tokens: 4096
+        },
+        model_info: { mode: "chat", input_cost_per_token: 0, output_cost_per_token: 0 }
+      }
+      elif .backend == "anthropic" then {
+        id: .name,
+        description: (.name + " — hosted via Anthropic"),
+        litellm_params: {
+          model: ("anthropic/" + .name),
+          api_key: ("os.environ/" + ((.api_key_secret // "anthropic_api_key") | ascii_upcase)),
           max_tokens: 4096
         },
         model_info: { mode: "chat", input_cost_per_token: 0, output_cost_per_token: 0 }
