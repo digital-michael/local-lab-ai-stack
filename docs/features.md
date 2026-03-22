@@ -4,6 +4,44 @@
 
 A human-readable summary of what this stack provides, ordered from most to least foundational. Intended for communicating capabilities to a non-technical audience and tracking progress toward a complete platform.
 
+---
+
+## Table of Contents
+
+**Core Features** *(fully available)*
+- [AI Chat Interface](#x-ai-chat-interface)
+- [Multi-Model Inference Routing](#x-multi-model-inference-routing)
+- [Retrieval-Augmented Generation (RAG)](#x-retrieval-augmented-generation-rag)
+- [AI Workflow Builder](#x-ai-workflow-builder)
+- [Distributed GPU Inference](#x-distributed-gpu-inference)
+- [Authentication and Access Control](#x-authentication-and-access-control)
+- [Observability — Metrics and Dashboards](#x-observability--metrics-and-dashboards)
+- [Centralized Log Aggregation](#x-centralized-log-aggregation)
+- [Secure Reverse Proxy with TLS](#x-secure-reverse-proxy-with-tls)
+- [Automated Backup](#x-automated-backup)
+
+**Partially Available**
+- [MCP Tool Integration](#--mcp-tool-integration)
+- [Local GPU Acceleration](#--local-gpu-acceleration-controller)
+- [Inference Node Security](#--inference-node-security)
+
+**Pending**
+- [Security Audit Tool](#-security-audit-tool)
+- [vLLM GPU Inference](#-vllm-gpu-inference)
+- [Inference Node Hardening](#-inference-node-hardening)
+
+**Deferred**
+- [Peer Node Topology](#d-peer-node-topology)
+- [Operator Dashboard](#d-operator-dashboard)
+- [Dynamic Node Registration](#d-dynamic-node-registration)
+- [Federated Knowledge Search](#d-federated-knowledge-search)
+- [Team-Shared Chat and Context](#d-team-shared-chat-and-context)
+- [Knowledge Library Governance](#d-knowledge-library-governance)
+- [Model A/B Testing](#d-model-ab-testing)
+- [Federated MCP Tool Registry](#d-federated-mcp-tool-registry)
+
+---
+
 ## Status Key
 
 | Symbol | Meaning |
@@ -22,69 +60,70 @@ Users can have conversations with any available AI model through a browser — n
 - Web UI accessible at the stack's HTTPS address
 - Supports multiple models selectable per conversation
 - Conversation history preserved across sessions
-- _Powered by: OpenWebUI_
+- _Powered by: [OpenWebUI](library/framework_components/openwebui/best_practices.md)_
 
 ### `[X]` Multi-Model Inference Routing
-The stack runs multiple AI models simultaneously and routes requests to the right one automatically. Models can live on different machines.
-- Models on the controller workstation (local), M1 MacBook (remote), and Alienware GPU (remote)
+The stack runs multiple AI models simultaneously and routes requests to the right one automatically. Models can live on different machines across the network.
 - A single API endpoint handles all models — callers choose by model name
-- Transparent failover routing when a node is offline
-- _Powered by: LiteLLM_
+- Models can run on the controller or on any registered inference node
+- Transparent routing; callers are unaware of which machine handles the request
+- _Powered by: [LiteLLM](library/framework_components/litellm/best_practices.md)_ · _Defined in: [configs/config.json](../configs/config.json) `models[]`_
 
 ### `[X]` Retrieval-Augmented Generation (RAG)
 AI responses can be grounded in a private knowledge base rather than relying solely on the model's training data.
 - Ingest documents into the knowledge library
 - Questions automatically retrieve relevant context before answering
 - Vector similarity search across all indexed content
-- _Powered by: Knowledge Index Service + Qdrant_
+- _Powered by: [Knowledge Index Service](../services/knowledge-index/app.py) + [Qdrant](library/framework_components/qdrant/best_practices.md)_
 
 ### `[X]` AI Workflow Builder
 Non-developers can build multi-step AI pipelines visually — chain models, tools, and knowledge sources together without writing code.
 - Drag-and-drop flow authoring
 - Supports RAG pipelines, tool-calling chains, and agent workflows
 - REST API for programmatic flow execution
-- _Powered by: Flowise_
+- _Powered by: [Flowise](library/framework_components/flowise/best_practices.md)_
 
 ### `[X]` Distributed GPU Inference
-AI inference workload is distributed across multiple machines with dedicated GPUs, increasing throughput and enabling larger models to run simultaneously.
-- Alienware (GTX 970M, 3GB VRAM) running `llama3.2:3b-instruct-q4_K_M`
-- MacBook M1 (Apple Silicon, unified memory) running `llama3.1:8b-instruct-q4_K_M`
-- Controller workstation running local CPU-based models
-- New nodes added via a single setup script
+AI inference workload is distributed across multiple machines, increasing throughput and enabling several models to run simultaneously on dedicated hardware.
+- Each registered inference node runs a model matched to its hardware capabilities (GPU VRAM, CPU cores, or unified memory)
+- The controller always retains at least one local model as a baseline
+- Additional nodes joined via a single setup script; model assignment auto-detected from available resources
+- _Defined in: [configs/config.json](../configs/config.json) `nodes[]`_ · _Setup: [scripts/podman/setup-worker.sh](../scripts/podman/setup-worker.sh)_ · _Phase: [9c/9d](ai_stack_blueprint/ai_stack_checklist.md#phase-9c--alienware-podman-worker)_
 
 ### `[X]` Authentication and Access Control
 All services require login. External identity providers can be connected via SSO.
 - Single sign-on across all web interfaces
 - OAuth2/OIDC support (Google Workspace, GitHub, LDAP, etc.)
 - Forward-auth at the reverse proxy — no per-service login configuration
-- _Powered by: Authentik + Traefik_
+- _Powered by: [Authentik](library/framework_components/authentik/best_practices.md) + [Traefik](library/framework_components/traefik/best_practices.md)_
 
 ### `[X]` Observability — Metrics and Dashboards
 Operators can see the health, performance, and resource usage of every service in real time.
 - Per-service CPU, memory, and request rate metrics
 - Pre-built dashboards out of the box
 - Alerting rules for degraded or failed services
-- _Powered by: Prometheus + Grafana_
+- _Powered by: [Prometheus](library/framework_components/prometheus/best_practices.md) + [Grafana](library/framework_components/grafana/best_practices.md)_
 
 ### `[X]` Centralized Log Aggregation
 All service logs from all nodes are collected in one place, searchable by service, level, time range, and content.
-- Logs from controller and all remote inference nodes
-- Structured log queries
+- Log shipping from the controller and from all registered inference nodes
+- Structured log queries across the full fleet
 - 7-day retention by default (configurable)
-- _Powered by: Loki + Promtail_
+- _Powered by: [Loki](library/framework_components/loki/best_practices.md) + [Promtail](library/framework_components/promtail/best_practices.md)_
 
 ### `[X]` Secure Reverse Proxy with TLS
 All external traffic is encrypted. Services are not directly exposed; all requests pass through a single entry point.
 - Automatic HTTPS with local CA certificate
 - Path and hostname-based routing to all services
 - Authentication middleware applied globally
-- _Powered by: Traefik_
+- _Powered by: [Traefik](library/framework_components/traefik/best_practices.md)_ · _Config: [configs/traefik/](../configs/traefik/)_
 
 ### `[X]` Automated Backup
 The full stack state — databases, vector store, model files, configs — can be backed up with a single command and restored from backup.
 - Covers: PostgreSQL, Qdrant, Flowise, Grafana, Ollama model cache
 - Timestamped archives
 - Restore procedure documented
+- _Script: [scripts/backup.sh](../scripts/backup.sh)_
 
 ---
 
@@ -93,20 +132,22 @@ The full stack state — databases, vector store, model files, configs — can b
 ### `[-]` MCP Tool Integration
 AI agents can call external tools (web search, file read, API calls) during a conversation by following the Model Context Protocol standard.
 - REST API for knowledge search and document ingestion: **available**
-- MCP SSE/HTTP transport for agent tool-calling: **pending** (Phase 7)
-- _Powered by: Knowledge Index Service_
+- MCP SSE/HTTP transport for agent tool-calling: **pending**
+- _Powered by: [Knowledge Index Service](../services/knowledge-index/app.py)_ · _Planned: [Phase 7](ai_stack_blueprint/ai_stack_checklist.md#phase-7--knowledge-index-mcp-integration)_
 
 ### `[-]` Local GPU Acceleration (Controller)
-The controller's own NVIDIA GPU (RTX 3070 Ti, 8GB VRAM) can be used for high-speed inference.
-- GPU configured and CDI passthrough enabled: **done**
-- Ollama running on the GPU: **done**
-- vLLM for larger GPU-optimized models: **pending** (Phase 8)
+The controller node's GPU can be used for high-speed inference, enabling larger or faster models to run locally.
+- GPU configured with CDI device passthrough: **done**
+- Ollama running with GPU acceleration: **done**
+- vLLM for GPU-optimized large model serving: **pending**
+- _Planned: [Phase 8](ai_stack_blueprint/ai_stack_checklist.md#phase-8--local-gpu-enablement-and-model-routing)_
 
-### `[-]` Worker Node Security
-Remote inference nodes (M1, Alienware) are functional but not hardened.
-- Ollama port (11434) reachable on LAN — no authentication enforced on nodes directly
-- Controller access is protected; node-to-node channel is not
-- Firewall rules and Ollama API key enforcement: **pending**
+### `[-]` Inference Node Security
+Registered inference nodes are functional but not independently hardened — they rely on network-level trust rather than per-node authentication.
+- The controller's API is fully protected; inference node endpoints are not
+- The inference port on each node is reachable by any host on the same network segment
+- Per-node API key enforcement and firewall rules: **pending**
+- _Tracked: [Inference Node Hardening](#-inference-node-hardening)_ · _Future: [Security Audit Tool](#-security-audit-tool)_
 
 ---
 
@@ -114,37 +155,48 @@ Remote inference nodes (M1, Alienware) are functional but not hardened.
 
 ### `[ ]` Security Audit Tool
 A script (and future admin dashboard tool) that checks all ports, API keys, TLS configurations, and auth enforcement across the controller and all registered nodes, and reports any gaps.
+- _Tracked: [checklist Future Features](ai_stack_blueprint/ai_stack_checklist.md#4-future-features-architecture-roadmap)_
 
 ### `[ ]` vLLM GPU Inference
-Running GPU-optimized large language models on the controller's RTX 3070 Ti for maximum local performance on demanding tasks.
+Running GPU-optimized large language models on the controller's dedicated GPU for maximum local performance on demanding tasks.
+- _Planned: [Phase 8](ai_stack_blueprint/ai_stack_checklist.md#phase-8--local-gpu-enablement-and-model-routing)_
 
 ### `[ ]` Inference Node Hardening
-Lock down remote Ollama endpoints with API keys or firewall rules so only the controller can reach them on port 11434.
+Restrict inference node endpoints so that only the controller can reach them — preventing unauthenticated access from other hosts on the network.
+- _Tracked: [checklist Future Features](ai_stack_blueprint/ai_stack_checklist.md#4-future-features-architecture-roadmap)_
 
 ---
 
 ## Deferred Features
 
 ### `[D]` Peer Node Topology
-Each node runs the complete stack independently. Nodes share inference capacity, discover each other's knowledge libraries, and continue working if any peer goes offline. (Phase 10)
+Each node runs the complete stack independently. Nodes share inference capacity, discover each other's knowledge libraries, and continue working in a reduced capacity if any peer goes offline.
+- _Planned: [Phase 10](ai_stack_blueprint/ai_stack_checklist.md#phase-10--full-peer-nodes-and-shared-knowledge)_
 
 ### `[D]` Operator Dashboard
-A unified web UI for users, teams, and administrators with tabs for user contexts, system health, node management, and admin operations. (Future Features)
+A unified web UI for users, teams, and administrators with tabs for personal contexts, team-shared contexts, system health, node management, and admin operations.
+- _Tracked: [checklist Future Features](ai_stack_blueprint/ai_stack_checklist.md#4-future-features-architecture-roadmap)_
 
 ### `[D]` Dynamic Node Registration
-Inference workers automatically announce themselves to the controller when they start, and are removed when they go offline — no manual config.json updates required. (Phase 9 deferred)
+Inference nodes automatically announce themselves to the controller when they start, and are removed when they go offline — no manual configuration required.
+- _Planned: [Phase 9 deferred](ai_stack_blueprint/ai_stack_checklist.md#phase-9-todos-deferred-not-this-phase)_
 
 ### `[D]` Federated Knowledge Search
-A query sent to one node's knowledge base automatically fans out to all peer nodes' libraries and returns a merged result set. (Phase 10)
+A query sent to any node's knowledge base automatically fans out to all peer nodes' libraries and returns a merged result set — the user sees one unified answer regardless of where the relevant content lives.
+- _Planned: [Phase 10](ai_stack_blueprint/ai_stack_checklist.md#phase-10--full-peer-nodes-and-shared-knowledge)_
 
 ### `[D]` Team-Shared Chat and Context
-Conversation history, user accounts, and conversation context synchronized across all peer nodes so any team member can continue a conversation on any device. (Phase 10+)
+Conversation history and user context synchronized across all nodes so any team member can continue a conversation from any device connected to any node in the stack.
+- _Tracked: [checklist Future Features](ai_stack_blueprint/ai_stack_checklist.md#4-future-features-architecture-roadmap)_
 
 ### `[D]` Knowledge Library Governance
-Automated content classification, safety filtering, PII detection, and ethics alignment checks applied at ingestion time across all knowledge bases. (Future Features)
+Automated content classification, safety filtering, PII detection, and ethics alignment checks applied at ingestion time — ensuring the knowledge base remains accurate, safe, and compliant with operator-defined policies.
+- _Tracked: [checklist Future Features](ai_stack_blueprint/ai_stack_checklist.md#4-future-features-architecture-roadmap)_
 
 ### `[D]` Model A/B Testing
-Route a fraction of requests to a candidate model and compare quality against the default — built into the LiteLLM routing layer. (Future Features)
+Route a configurable fraction of requests to a candidate model and compare quality metrics against the current default — without requiring any changes to callers.
+- _Tracked: [checklist Future Features](ai_stack_blueprint/ai_stack_checklist.md#4-future-features-architecture-roadmap)_
 
 ### `[D]` Federated MCP Tool Registry
-MCP tools (web search, knowledge search, file access, API calls) defined once on any node are automatically discoverable and callable by AI agents running on any other node — no code duplication, no per-node tool configuration. Tool definitions live in a single registry and are shared across the mesh. (Future Features)
+Tools (web search, knowledge search, file access, API calls) defined once on any node are automatically discoverable and callable by AI agents running on any other node — a single registry, shared across the mesh, with no per-node duplication.
+- _Tracked: [checklist Future Features](ai_stack_blueprint/ai_stack_checklist.md#4-future-features-architecture-roadmap)_
