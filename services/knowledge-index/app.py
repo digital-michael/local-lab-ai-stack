@@ -1,6 +1,6 @@
 # services/knowledge-index/app.py
 #
-# Knowledge Index Service — Phase 7 (MCP Integration)
+# Knowledge Index Service — Phase 10 (Knowledge-Worker Nodes)
 #
 # REST API:
 #   POST /documents          — ingest a document (chunk → embed → store in Qdrant)
@@ -8,6 +8,8 @@
 #   DELETE /documents/{id}   — remove a document from Qdrant
 #   POST /query              — vector search over a named collection
 #   GET  /health             — readiness probe (used by pytest module-level skip guard)
+#   POST /v1/libraries       — custody ingest: receive .ai-library package from a worker
+#   GET  /v1/catalog         — list all libraries with provenance metadata
 #
 # MCP (Model Context Protocol) — HTTP/SSE transport (D-015):
 #   GET  /mcp/sse            — establish SSE stream (MCP clients connect here)
@@ -16,16 +18,21 @@
 #
 # Embedding is performed via the Ollama /api/embeddings endpoint.
 # Vector storage is Qdrant (filter-based delete; UUID point IDs per chunk).
+# Persistence: SQLite on knowledge-worker nodes; PostgreSQL on controller (DATABASE_URL).
 # Auth: API_KEY env var guards both REST and MCP endpoints when set.
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
 import uuid
 from typing import Any
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
 
 import httpx
 from fastapi import FastAPI, HTTPException
@@ -40,12 +47,13 @@ from starlette.responses import Response
 # Configuration (all overridable via environment variables)
 # ---------------------------------------------------------------------------
 
-OLLAMA_URL  = os.environ.get("OLLAMA_URL",   "http://ollama.ai-stack:11434")
-QDRANT_URL  = os.environ.get("QDRANT_URL",   "http://qdrant.ai-stack:6333")
-EMBED_MODEL = os.environ.get("EMBED_MODEL",  "llama3.1:8b")
-QDRANT_KEY  = os.environ.get("QDRANT_API_KEY", "")
-CHUNK_SIZE  = int(os.environ.get("CHUNK_SIZE", "400"))   # max chars per chunk
-API_KEY     = os.environ.get("API_KEY", "")              # guards /mcp/* and /query when set
+OLLAMA_URL    = os.environ.get("OLLAMA_URL",    "http://ollama.ai-stack:11434")
+QDRANT_URL    = os.environ.get("QDRANT_URL",    "http://qdrant.ai-stack:6333")
+EMBED_MODEL   = os.environ.get("EMBED_MODEL",   "llama3.1:8b")
+QDRANT_KEY    = os.environ.get("QDRANT_API_KEY", "")
+CHUNK_SIZE    = int(os.environ.get("CHUNK_SIZE", "400"))   # max chars per chunk
+API_KEY       = os.environ.get("API_KEY", "")              # guards /mcp/* and /query when set
+DATABASE_URL  = os.environ.get("DATABASE_URL", "sqlite:///ki.db")  # sqlite (workers) or postgresql (controller)
 
 # ---------------------------------------------------------------------------
 # HTTP clients (module-level singletons; closed on shutdown if needed)
@@ -58,9 +66,74 @@ if QDRANT_KEY:
 _qdrant = httpx.Client(base_url=QDRANT_URL, timeout=30.0, headers=_qdrant_headers)
 _ollama = httpx.Client(base_url=OLLAMA_URL, timeout=120.0)
 
-# In-memory map: doc_id → collection (survives connection reuse, lost on restart).
-# Sufficient for the test lifecycle (ingest → update → delete in one session).
-_doc_collection: dict[str, str] = {}
+# ---------------------------------------------------------------------------
+# Database (SQLite on workers, PostgreSQL on controller — DATABASE_URL selects)
+# ---------------------------------------------------------------------------
+
+_db: Engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+
+
+def _init_db() -> None:
+    """Create tables if they do not already exist."""
+    with _db.connect() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS documents (
+                id         TEXT PRIMARY KEY,
+                collection TEXT NOT NULL DEFAULT 'default',
+                metadata   TEXT NOT NULL DEFAULT '{}',
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS libraries (
+                name           TEXT NOT NULL,
+                version        TEXT NOT NULL DEFAULT '0.1.0',
+                path           TEXT,
+                author         TEXT,
+                origin_node    TEXT,
+                visibility     TEXT NOT NULL DEFAULT 'public',
+                checksum_hash  TEXT,
+                signature_hash TEXT,
+                synced_at      TIMESTAMP,
+                PRIMARY KEY (name, version)
+            )
+        """))
+        conn.commit()
+
+
+_init_db()
+
+
+def _db_set_doc(doc_id: str, collection: str, metadata: dict | None = None) -> None:
+    """Upsert a document record (id → collection + metadata)."""
+    meta_json = json.dumps(metadata or {})
+    with _db.connect() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO documents (id, collection, metadata) VALUES (:id, :col, :meta)"
+                " ON CONFLICT(id) DO UPDATE SET collection = excluded.collection,"
+                " metadata = excluded.metadata"
+            ),
+            {"id": doc_id, "col": collection, "meta": meta_json},
+        )
+        conn.commit()
+
+
+def _db_get_doc_collection(doc_id: str, default: str = "default") -> str:
+    """Return the collection name for a document, or *default* if not found."""
+    with _db.connect() as conn:
+        row = conn.execute(
+            text("SELECT collection FROM documents WHERE id = :id"),
+            {"id": doc_id},
+        ).fetchone()
+    return row[0] if row else default
+
+
+def _db_del_doc(doc_id: str) -> None:
+    """Delete a document record from the database."""
+    with _db.connect() as conn:
+        conn.execute(text("DELETE FROM documents WHERE id = :id"), {"id": doc_id})
+        conn.commit()
 
 # ---------------------------------------------------------------------------
 # FastAPI app
@@ -87,6 +160,18 @@ class QueryRequest(BaseModel):
     query: str
     collection: str
     top_k: int = 5
+
+
+class LibraryIngestRequest(BaseModel):
+    name: str
+    version: str = "0.1.0"
+    author: str = ""
+    origin_node: str = ""
+    visibility: str = "public"
+    content: str                   # full text to chunk, embed, and store
+    metadata: dict[str, Any] = {}
+    checksum: str = ""             # sha256 of content; verified if non-empty
+    signature: str = ""            # GPG signature from signature.asc (stored, not verified here)
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -185,7 +270,7 @@ def health() -> dict:
 @app.post("/documents", status_code=201)
 def ingest_document(req: IngestRequest) -> dict:
     collection = req.metadata.get("collection", "default")
-    _doc_collection[req.id] = collection
+    _db_set_doc(req.id, collection, req.metadata)
     try:
         n = _ingest_chunks(req.id, req.content, req.metadata, collection)
     except httpx.HTTPStatusError as exc:
@@ -195,9 +280,9 @@ def ingest_document(req: IngestRequest) -> dict:
 
 @app.put("/documents/{doc_id}")
 def update_document(doc_id: str, req: UpdateRequest) -> dict:
-    collection = req.metadata.get("collection", _doc_collection.get(doc_id, "default"))
+    collection = req.metadata.get("collection", _db_get_doc_collection(doc_id))
     _delete_doc_points(collection, doc_id)
-    _doc_collection[doc_id] = collection
+    _db_set_doc(doc_id, collection, req.metadata)
     try:
         n = _ingest_chunks(doc_id, req.content, req.metadata, collection)
     except httpx.HTTPStatusError as exc:
@@ -207,9 +292,9 @@ def update_document(doc_id: str, req: UpdateRequest) -> dict:
 
 @app.delete("/documents/{doc_id}")
 def delete_document(doc_id: str) -> dict:
-    collection = _doc_collection.get(doc_id, "default")
+    collection = _db_get_doc_collection(doc_id)
     _delete_doc_points(collection, doc_id)
-    _doc_collection.pop(doc_id, None)
+    _db_del_doc(doc_id)
     return {"id": doc_id, "deleted": True}
 
 
@@ -239,6 +324,78 @@ def query_documents(req: QueryRequest) -> dict:
             "metadata":    payload.get("metadata", {}),
         })
     return {"results": results}
+
+
+# ---------------------------------------------------------------------------
+# Library custody endpoints (D-025)
+# ---------------------------------------------------------------------------
+
+@app.post("/v1/libraries", status_code=201)
+def ingest_library(req: LibraryIngestRequest, request: Request) -> dict:
+    """Receive a .ai-library package from a worker and store it in custody."""
+    _check_api_key(request)
+
+    if req.checksum:
+        computed = hashlib.sha256(req.content.encode()).hexdigest()
+        if computed != req.checksum:
+            raise HTTPException(status_code=422, detail="Checksum mismatch")
+
+    checksum_hash = req.checksum or hashlib.sha256(req.content.encode()).hexdigest()
+    signature_hash = hashlib.sha256(req.signature.encode()).hexdigest() if req.signature else None
+
+    with _db.connect() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO libraries"
+                " (name, version, author, origin_node, visibility, checksum_hash, signature_hash, synced_at)"
+                " VALUES (:name, :ver, :author, :origin, :vis, :cksum, :sig, CURRENT_TIMESTAMP)"
+                " ON CONFLICT(name, version) DO UPDATE SET"
+                " author = excluded.author,"
+                " origin_node = excluded.origin_node,"
+                " visibility = excluded.visibility,"
+                " checksum_hash = excluded.checksum_hash,"
+                " signature_hash = excluded.signature_hash,"
+                " synced_at = CURRENT_TIMESTAMP"
+            ),
+            {
+                "name": req.name, "ver": req.version, "author": req.author,
+                "origin": req.origin_node, "vis": req.visibility,
+                "cksum": checksum_hash, "sig": signature_hash,
+            },
+        )
+        conn.commit()
+
+    collection = f"lib_{req.name}_{req.version}".replace(":", "_").replace(".", "_").replace("-", "_")
+    doc_id = f"lib:{req.name}:{req.version}"
+    _delete_doc_points(collection, doc_id)
+    _db_set_doc(doc_id, collection, req.metadata)
+    try:
+        n = _ingest_chunks(doc_id, req.content, {**req.metadata, "collection": collection}, collection)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return {"name": req.name, "version": req.version, "chunks": n, "status": "ingested"}
+
+
+@app.get("/v1/catalog")
+def list_catalog(request: Request) -> dict:
+    """List all libraries held in custody with provenance metadata."""
+    _check_api_key(request)
+    with _db.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT name, version, author, origin_node, visibility, synced_at"
+                " FROM libraries ORDER BY name, version"
+            )
+        ).fetchall()
+    libraries = [
+        {
+            "name": r[0], "version": r[1], "author": r[2],
+            "origin_node": r[3], "visibility": r[4], "synced_at": str(r[5]) if r[5] else None,
+        }
+        for r in rows
+    ]
+    return {"count": len(libraries), "libraries": libraries}
 
 
 # ---------------------------------------------------------------------------
@@ -331,7 +488,7 @@ async def _call_tool(name: str, arguments: dict) -> list[TextContent]:
         collection = metadata.get("collection", "default")
 
         def _do_ingest() -> int:
-            _doc_collection[doc_id] = collection
+            _db_set_doc(doc_id, collection, metadata)
             return _ingest_chunks(doc_id, content, metadata, collection)
 
         n = await asyncio.to_thread(_do_ingest)

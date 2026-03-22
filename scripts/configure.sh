@@ -28,6 +28,7 @@ Commands:
   generate-litellm-config   Regenerate configs/models.json from models[] in config.json
   detect-hardware           Detect GPU/VRAM/RAM and suggest node profile
   recommend                 Interactive node profile recommender (writes to config.json)
+  sync-libraries            Push local .ai-library packages to the controller KI service
   help                      Show this message
 
 Environment:
@@ -175,6 +176,11 @@ EOF
             services=$'ollama\npromtail'
             echo "Note: node_profile=$node_profile — generating ollama + promtail quadlets only"
             ;;
+        knowledge-worker)
+            # Ollama + Promtail + Knowledge Index (SQLite) + local Qdrant
+            services=$'ollama\npromtail\nknowledge-index\nqdrant'
+            echo "Note: node_profile=$node_profile — generating ollama + promtail + knowledge-index + qdrant quadlets"
+            ;;
         *)
             # controller, peer: generate all services
             services=$(jq -r '.services | keys[]' "$CONFIG_FILE")
@@ -241,10 +247,15 @@ EOF
             done < <(jq -r --arg s "$svc" '.services[$s].secrets[]? | .name + " " + .target' "$CONFIG_FILE")
 
             # Environment — DATABASE_URL uses EnvironmentFile for credential injection at deploy time
+            # Exception: knowledge-worker knowledge-index uses SQLite (inline path, no password needed)
             local has_db_url
             has_db_url=$(jq -r --arg s "$svc" '.services[$s].environment // {} | has("DATABASE_URL")' "$CONFIG_FILE")
             if [[ "$has_db_url" == "true" ]]; then
-                echo "EnvironmentFile=${ai_stack_dir//\$HOME/%h}/configs/run/${svc}.env"
+                if [[ "$node_profile" == "knowledge-worker" && "$svc" == "knowledge-index" ]]; then
+                    echo "Environment=DATABASE_URL=sqlite:///${ai_stack_dir//\$HOME/$HOME}/knowledge-index/ki.db"
+                else
+                    echo "EnvironmentFile=${ai_stack_dir//\$HOME/%h}/configs/run/${svc}.env"
+                fi
             fi
             jq -r --arg s "$svc" '.services[$s].environment // {} | to_entries[] | select(.key != "DATABASE_URL") | "Environment=" + .key + "=" + .value' "$CONFIG_FILE"
 
@@ -836,12 +847,20 @@ cmd_recommend() {
             is_inference_capable=true
         fi
 
+        # Knowledge worker: inference-capable + sufficient disk (≥ 50 GB) for KI + Qdrant
+        local is_knowledge_capable=false
+        if [[ "$is_inference_capable" == "true" && "$disk_free_gb" -ge 50 ]]; then
+            is_knowledge_capable=true
+        fi
+
         # Assign profile
         if [[ "$is_controller_capable" == "true" ]]; then
             profile="controller"
         elif [[ "$is_peer_capable" == "true" ]]; then
             profile="peer"
             warnings+=("Peer profile requires Phase 10 implementation (not yet complete)")
+        elif [[ "$is_knowledge_capable" == "true" ]]; then
+            profile="knowledge-worker"
         elif [[ "$is_inference_capable" == "true" ]]; then
             profile="inference-worker"
         else
@@ -882,9 +901,15 @@ cmd_recommend() {
                 prereqs+=("Run: bash scripts/configure.sh generate-quadlets")
                 prereqs+=("Run: systemctl --user daemon-reload && bash scripts/start.sh")
                 ;;
+            knowledge-worker)
+                prereqs+=("Run: bash scripts/configure.sh generate-quadlets  (ollama + promtail + knowledge-index + qdrant)")
+                prereqs+=("Run: systemctl --user daemon-reload && systemctl --user start ollama.service qdrant.service knowledge-index.service")
+                prereqs+=("Run: bash scripts/configure.sh sync-libraries  (push local libraries to controller)")
+                ;;
             inference-worker)
                 prereqs+=("Run: bash scripts/configure.sh generate-quadlets  (ollama + promtail only)")
                 prereqs+=("Run: systemctl --user daemon-reload && systemctl --user start ollama.service")
+                prereqs+=("Tip: upgrade to knowledge-worker if disk reaches 50 GB free")
                 ;;
             peer)
                 prereqs+=("Phase 10 implementation required before deploying peer profile")
@@ -964,6 +989,121 @@ cmd_recommend() {
     echo ""
 }
 
+cmd_sync_libraries() {
+    require_config
+
+    local ai_stack_dir
+    ai_stack_dir=$(jq -r '.ai_stack_dir' "$CONFIG_FILE")
+    ai_stack_dir="${ai_stack_dir//\$HOME/$HOME}"
+
+    # Resolve controller address from nodes[]
+    local controller_address controller_fallback
+    controller_address=$(jq -r '(.nodes[] | select(.profile=="controller") | .address) // ""' "$CONFIG_FILE")
+    controller_fallback=$(jq -r '(.nodes[] | select(.profile=="controller") | .address_fallback) // ""' "$CONFIG_FILE")
+    local controller_host="${controller_address:-$controller_fallback}"
+
+    if [[ -z "$controller_host" || "$controller_host" == "null" ]]; then
+        echo "ERROR: No controller address found in config.json nodes[] — set .address or .address_fallback" >&2
+        exit 1
+    fi
+
+    local ki_port="${KI_PORT:-8100}"
+    local ki_url="http://${controller_host}:${ki_port}"
+    echo "Controller KI endpoint: $ki_url"
+    echo "  (override with KI_PORT env var or set .address on the controller node)"
+    echo ""
+
+    # Resolve API key: KI_API_KEY env var > Podman secret 'ki_api_key'
+    local api_key="${KI_API_KEY:-}"
+    if [[ -z "$api_key" ]] && podman secret inspect ki_api_key &>/dev/null 2>&1; then
+        api_key=$(podman secret inspect ki_api_key --showsecret 2>/dev/null | jq -r '.[].SecretData' || true)
+    fi
+
+    local origin_node
+    origin_node=$(jq -r '.nodes[] | select(.profile != "controller") | .name' "$CONFIG_FILE" 2>/dev/null | head -1)
+    origin_node="${origin_node:-$(hostname)}"
+
+    local lib_dir="${ai_stack_dir}/libraries"
+    if [[ ! -d "$lib_dir" ]]; then
+        echo "No libraries directory found at $lib_dir — nothing to sync."
+        return 0
+    fi
+
+    local total=0 synced=0 failed=0
+
+    for lib_path in "$lib_dir"/*/; do
+        [[ -d "$lib_path" ]] || continue
+        local lib_name
+        lib_name=$(basename "$lib_path")
+        (( total++ )) || true
+
+        local manifest="$lib_path/manifest.yaml"
+        if [[ ! -f "$manifest" ]]; then
+            echo "  [$lib_name] WARN: no manifest.yaml — skipping"
+            continue
+        fi
+
+        local version author visibility
+        version=$(grep '^version:' "$manifest" | awk '{print $2}' | tr -d '"' || echo "0.1.0")
+        author=$(grep '^author:' "$manifest" | awk '{print $2}' | tr -d '"' || echo "")
+        visibility=$(grep '^visibility:' "$manifest" | awk '{print $2}' | tr -d '"' || echo "public")
+        version="${version:-0.1.0}"
+        visibility="${visibility:-public}"
+
+        # Accumulate content from all .md and .txt files in the library
+        local content=""
+        while IFS= read -r -d '' f; do
+            content+=$(cat "$f")
+            content+=$'\n'
+        done < <(find "$lib_path" -maxdepth 2 -type f \( -name "*.md" -o -name "*.txt" \) -not -name "manifest.yaml" -print0 2>/dev/null)
+
+        if [[ -z "$content" ]]; then
+            echo "  [$lib_name] WARN: no readable content (.md/.txt) — skipping"
+            continue
+        fi
+
+        local checksum
+        checksum=$(printf '%s' "$content" | sha256sum | awk '{print $1}')
+
+        local signature=""
+        [[ -f "$lib_path/signature.asc" ]] && signature=$(cat "$lib_path/signature.asc")
+
+        local payload
+        payload=$(jq -n \
+            --arg name "$lib_name" \
+            --arg version "$version" \
+            --arg author "$author" \
+            --arg origin_node "$origin_node" \
+            --arg visibility "$visibility" \
+            --arg content "$content" \
+            --arg checksum "$checksum" \
+            --arg signature "$signature" \
+            '{name:$name,version:$version,author:$author,origin_node:$origin_node,visibility:$visibility,content:$content,checksum:$checksum,signature:$signature}')
+
+        local curl_args=(-s -o /tmp/ki_sync_resp.json -w "%{http_code}" \
+            -X POST "${ki_url}/v1/libraries" \
+            -H "Content-Type: application/json")
+        [[ -n "$api_key" ]] && curl_args+=(-H "Authorization: Bearer ${api_key}")
+        curl_args+=(-d "$payload")
+
+        local http_code
+        http_code=$(curl "${curl_args[@]}" 2>/dev/null || echo "000")
+
+        case "$http_code" in
+            201) echo "  [$lib_name] synced (v${version})";     (( synced++ )) || true ;;
+            200) echo "  [$lib_name] updated (v${version})";    (( synced++ )) || true ;;
+            *)   echo "  [$lib_name] FAILED (HTTP $http_code)";
+                 cat /tmp/ki_sync_resp.json 2>/dev/null; echo ""
+                 (( failed++ )) || true ;;
+        esac
+    done
+
+    echo ""
+    echo "Sync complete: ${synced} synced, ${failed} failed (${total} total)"
+    [[ "$failed" -gt 0 ]] && return 1
+    return 0
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -981,6 +1121,7 @@ case "${1:-help}" in
     generate-litellm-config) cmd_generate_litellm_config ;;
     detect-hardware)         cmd_detect_hardware ;;
     recommend)               cmd_recommend ;;
+    sync-libraries)          cmd_sync_libraries ;;
     help|--help|-h)          usage ;;
     *)
         echo "Unknown command: $1" >&2
