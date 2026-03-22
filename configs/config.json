@@ -70,6 +70,16 @@
       "name": "llama3-70b-8192",
       "backend": "groq",
       "api_key_secret": "groq_api_key"
+    },
+    {
+      "name": "claude-sonnet-4-5",
+      "backend": "anthropic",
+      "api_key_secret": "anthropic_api_key"
+    },
+    {
+      "name": "mistral-large-latest",
+      "backend": "mistral",
+      "api_key_secret": "mistral_api_key"
     }
   ],
   "services": {
@@ -346,6 +356,14 @@
         {
           "name": "groq_api_key",
           "target": "GROQ_API_KEY"
+        },
+        {
+          "name": "anthropic_api_key",
+          "target": "ANTHROPIC_API_KEY"
+        },
+        {
+          "name": "mistral_api_key",
+          "target": "MISTRAL_API_KEY"
         }
       ],
       "health_check": {

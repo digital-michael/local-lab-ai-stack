@@ -324,7 +324,7 @@ cmd_generate_secrets() {
                 fi
             fi
         # Cloud API keys are optional — press Enter to skip
-        elif [[ "$secret" == "openai_api_key" || "$secret" == "groq_api_key" || "$secret" == "anthropic_api_key" ]]; then
+        elif [[ "$secret" == "openai_api_key" || "$secret" == "groq_api_key" || "$secret" == "anthropic_api_key" || "$secret" == "mistral_api_key" ]]; then
             read -rsp "Enter value for secret '$secret' (press Enter to skip — cloud model will be unavailable): " value
             echo ""
         else
@@ -442,6 +442,16 @@ cmd_generate_litellm_config() {
         litellm_params: {
           model: ("anthropic/" + .name),
           api_key: ("os.environ/" + ((.api_key_secret // "anthropic_api_key") | ascii_upcase)),
+          max_tokens: 4096
+        },
+        model_info: { mode: "chat", input_cost_per_token: 0, output_cost_per_token: 0 }
+      }
+      elif .backend == "mistral" then {
+        id: .name,
+        description: (.name + " — hosted via Mistral AI"),
+        litellm_params: {
+          model: ("mistral/" + .name),
+          api_key: ("os.environ/" + ((.api_key_secret // "mistral_api_key") | ascii_upcase)),
           max_tokens: 4096
         },
         model_info: { mode: "chat", input_cost_per_token: 0, output_cost_per_token: 0 }
