@@ -15,7 +15,10 @@
       "address_fallback": null,
       "os": "linux",
       "deployment": "podman",
-      "models": ["llama3.1:8b", "qwen2.5-1.5b"]
+      "models": [
+        "llama3.1:8b",
+        "qwen2.5-1.5b"
+      ]
     },
     {
       "name": "macbook-m1",
@@ -24,7 +27,9 @@
       "address_fallback": "10.19.208.118",
       "os": "darwin",
       "deployment": "bare_metal",
-      "models": ["llama3.1:8b-instruct-q4_K_M"]
+      "models": [
+        "llama3.1:8b-instruct-q4_K_M"
+      ]
     },
     {
       "name": "alienware",
@@ -33,7 +38,9 @@
       "address_fallback": "10.19.208.113",
       "os": "linux",
       "deployment": "podman",
-      "models": ["llama3.2:3b-instruct-q4_K_M"]
+      "models": [
+        "llama3.2:3b-instruct-q4_K_M"
+      ]
     }
   ],
   "models": [
@@ -272,7 +279,10 @@
       "mcp": {
         "sse_endpoint": "/mcp/sse",
         "message_endpoint": "/mcp/messages",
-        "tools": ["search_knowledge", "ingest_document"],
+        "tools": [
+          "search_knowledge",
+          "ingest_document"
+        ],
         "transport": "http-sse"
       },
       "resources": {
