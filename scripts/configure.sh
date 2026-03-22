@@ -27,6 +27,7 @@ Commands:
   generate-secrets          Prompt for and create Podman secrets
   generate-litellm-config   Regenerate configs/models.json from models[] in config.json
   detect-hardware           Detect GPU/VRAM/RAM and suggest node profile
+  recommend                 Interactive node profile recommender (writes to config.json)
   help                      Show this message
 
 Environment:
@@ -657,6 +658,294 @@ cmd_detect_hardware() {
     fi
 }
 
+cmd_recommend() {
+    require_config
+
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║           AI Stack — Node Profile Recommender               ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+
+    # -----------------------------------------------------------------------
+    # 1. OS detection — gate out unsupported immediately
+    # -----------------------------------------------------------------------
+    local os arch
+    os=$(uname -s 2>/dev/null || echo "Linux")
+    arch=$(uname -m 2>/dev/null || echo "x86_64")
+
+    local os_label deployment_method
+    case "$os" in
+        Linux)
+            os_label="Linux ($arch)"
+            deployment_method="podman"   # refined below
+            ;;
+        Darwin)
+            os_label="macOS ($arch)"
+            deployment_method="bare-metal-macos"
+            ;;
+        *)
+            echo "⚠  Unsupported OS: $os"
+            echo "   Windows native is not supported as a stack node."
+            echo "   Options:"
+            echo "     • Use WSL2 (Ubuntu) and re-run this script inside WSL2"
+            echo "     • Connect this machine as a client only (no node deployment)"
+            exit 0
+            ;;
+    esac
+    echo "OS:   $os_label"
+
+    # -----------------------------------------------------------------------
+    # 2. Hardware detection
+    # -----------------------------------------------------------------------
+    local cpu_cores ram_gb gpu_name vram_gb podman_ver podman_ok disk_free_gb
+    cpu_cores=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 0)
+
+    if [[ "$os" == "Darwin" ]]; then
+        local ram_bytes
+        ram_bytes=$(sysctl -n hw.memsize 2>/dev/null || echo 0)
+        ram_gb=$(( ram_bytes / 1073741824 ))
+        gpu_name="Apple Silicon (Metal/unified)"
+        vram_gb=$ram_gb    # unified memory — conservative 40% used below
+    else
+        ram_gb=$(awk '/MemTotal/ {printf "%.0f", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo 0)
+        if command -v nvidia-smi &>/dev/null; then
+            gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || echo "")
+            local vram_mb
+            vram_mb=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 || echo 0)
+            vram_gb=$(awk "BEGIN{printf \"%.0f\", $vram_mb/1024}")
+        else
+            gpu_name=""
+            vram_gb=0
+        fi
+    fi
+
+    # Podman availability + version
+    if command -v podman &>/dev/null; then
+        podman_ver=$(podman --version 2>/dev/null | awk '{print $3}')
+        local podman_maj
+        podman_maj=$(echo "$podman_ver" | cut -d. -f1)
+        if [[ "$podman_maj" -ge 4 ]]; then
+            podman_ok=true
+        else
+            podman_ok=false
+        fi
+    else
+        podman_ver="not installed"
+        podman_ok=false
+    fi
+
+    # Disk free on project partition
+    disk_free_gb=$(df -BG "$PROJECT_ROOT" 2>/dev/null | awk 'NR==2{gsub("G",""); print $4}' || echo 0)
+
+    echo "CPU:  $cpu_cores cores"
+    echo "RAM:  ${ram_gb} GB"
+    [[ -n "$gpu_name" ]] && echo "GPU:  $gpu_name (${vram_gb} GB VRAM)"
+    [[ -z "$gpu_name" && "$os" != "Darwin" ]] && echo "GPU:  none detected"
+    echo "Disk: ${disk_free_gb} GB free (on project partition)"
+    echo "Podman: $podman_ver"
+    echo ""
+
+    # -----------------------------------------------------------------------
+    # 3. Shared-use gate — exit early for high-contention machines
+    # -----------------------------------------------------------------------
+    local machine_type hours_available
+    read -r -p "Machine type? [server/shared-use/laptop] (default: server): " machine_type
+    machine_type="${machine_type:-server}"
+
+    read -r -p "Hours available to the stack per day? [0-24] (default: 24): " hours_available
+    hours_available="${hours_available:-24}"
+
+    if [[ "$machine_type" == "shared-use" && "$hours_available" -lt 12 ]]; then
+        echo ""
+        echo "⚠  High-use shared systems with limited availability are not recommended"
+        echo "   as stack nodes — resource contention and intermittent uptime reduce"
+        echo "   reliability for other stack users."
+        echo ""
+        echo "   Alternatives:"
+        echo "     • Add a cloud provider (OpenAI / Anthropic / Mistral) for inference"
+        echo "     • Use this machine as a client only (OpenWebUI in a browser)"
+        echo ""
+        echo "No profile written."
+        exit 0
+    fi
+
+    # -----------------------------------------------------------------------
+    # 4. Remaining prompts
+    # -----------------------------------------------------------------------
+    local dedicated stays_awake connectivity
+
+    read -r -p "Dedicated to the stack (not also a desktop in active use)? [yes/no] (default: yes): " dedicated
+    dedicated="${dedicated:-yes}"
+
+    read -r -p "Stays awake under load (no sleep/suspend)? [yes/no] (default: yes): " stays_awake
+    stays_awake="${stays_awake:-yes}"
+
+    read -r -p "Connectivity to controller? [lan/vpn/internet] (default: internet): " connectivity
+    connectivity="${connectivity:-internet}"
+
+    # -----------------------------------------------------------------------
+    # 5. Profile decision logic
+    # -----------------------------------------------------------------------
+    local profile
+    local deploy_method
+    local warnings=()
+    local prereqs=()
+
+    # macOS — always inference-worker, bare-metal only
+    if [[ "$os" == "Darwin" ]]; then
+        profile="inference-worker"
+        deploy_method="bare-metal (ollama native)"
+        local target_vram=$(( vram_gb * 40 / 100 ))
+        if [[ $target_vram -ge 8 ]]; then
+            prereqs+=("Recommended model: llama3.1:8b-instruct-q4_K_M (~5 GB from unified RAM)")
+        else
+            prereqs+=("Recommended model: llama3.2:3b-q4_K_M (~2 GB from unified RAM)")
+        fi
+        prereqs+=("Install ollama: https://ollama.com/download")
+
+    # Linux path
+    else
+        # Determine deployment method
+        if [[ "$podman_ok" == "true" ]]; then
+            deploy_method="podman quadlets (systemd)"
+        else
+            deploy_method="bare-metal systemd (Podman unavailable or < 4.x)"
+            [[ "$podman_ok" == "false" && "$podman_ver" != "not installed" ]] && \
+                warnings+=("Podman $podman_ver < 4.0 — upgrade for full quadlet support")
+            [[ "$podman_ver" == "not installed" ]] && \
+                warnings+=("Podman not found — install: sudo dnf install -y podman")
+        fi
+
+        # Controller threshold: ≥ 12 cores, ≥ 48 GB RAM
+        local is_controller_capable=false
+        if [[ "$cpu_cores" -ge 12 && "$ram_gb" -ge 48 && "$dedicated" == "yes" && "$hours_available" -ge 20 ]]; then
+            is_controller_capable=true
+        fi
+
+        # Peer threshold: same as controller (Phase 10)
+        # For now peer == controller requirements
+        local is_peer_capable=false
+        if [[ "$cpu_cores" -ge 12 && "$ram_gb" -ge 48 && "$dedicated" == "yes" ]]; then
+            is_peer_capable=true
+        fi
+
+        # Inference worker: GPU-capable, any uptime
+        local is_inference_capable=false
+        if [[ "$vram_gb" -ge 4 || "$ram_gb" -ge 16 ]]; then
+            is_inference_capable=true
+        fi
+
+        # Assign profile
+        if [[ "$is_controller_capable" == "true" ]]; then
+            profile="controller"
+        elif [[ "$is_peer_capable" == "true" ]]; then
+            profile="peer"
+            warnings+=("Peer profile requires Phase 10 implementation (not yet complete)")
+        elif [[ "$is_inference_capable" == "true" ]]; then
+            profile="inference-worker"
+        else
+            profile="none"
+            warnings+=("Insufficient resources for any node role — recommend client-only use")
+        fi
+
+        # Resource warnings
+        [[ "$ram_gb" -lt 16 ]] && warnings+=("Low RAM (${ram_gb} GB) — inference will be CPU-only and slow")
+        [[ "$disk_free_gb" -lt 20 ]] && warnings+=("Low disk (${disk_free_gb} GB free) — model storage may be constrained")
+        [[ "$stays_awake" == "no" ]] && warnings+=("Sleep/suspend enabled — node will drop from mesh when idle; set power plan to never-sleep")
+        [[ "$vram_gb" -ge 4 ]] && \
+            { ls /etc/cdi/nvidia.yaml &>/dev/null 2>&1 || ls /run/cdi/nvidia.yaml &>/dev/null 2>&1; } || \
+            { [[ "$vram_gb" -ge 4 ]] && warnings+=("CDI not configured — GPU passthrough unavailable. Run: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml"); }
+
+        # Prerequisites by profile
+        case "$profile" in
+            controller)
+                prereqs+=("Run: bash scripts/configure.sh generate-secrets")
+                prereqs+=("Run: bash scripts/configure.sh generate-quadlets")
+                prereqs+=("Run: systemctl --user daemon-reload && bash scripts/start.sh")
+                ;;
+            inference-worker)
+                prereqs+=("Run: bash scripts/configure.sh generate-quadlets  (ollama + promtail only)")
+                prereqs+=("Run: systemctl --user daemon-reload && systemctl --user start ollama.service")
+                ;;
+            peer)
+                prereqs+=("Phase 10 implementation required before deploying peer profile")
+                ;;
+        esac
+
+        # Networking note
+        case "$connectivity" in
+            internet)
+                prereqs+=("Internet node: port 443 must be forwarded to this host")
+                prereqs+=("Recommend static IP or DDNS hostname for reliable connectivity")
+                prereqs+=("TLS + Authentik auth are handled by Traefik (already configured)")
+                ;;
+            vpn)
+                prereqs+=("VPN node: ensure WireGuard/Tailscale tunnel is up before deploying")
+                prereqs+=("Treat as LAN once tunnel is active — no extra port forwarding needed")
+                ;;
+            lan)
+                prereqs+=("LAN node: no external firewall changes needed")
+                ;;
+        esac
+    fi
+
+    # -----------------------------------------------------------------------
+    # 6. Output recommendation
+    # -----------------------------------------------------------------------
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "  Recommended profile:    $profile"
+    echo "  Deployment method:      $deploy_method"
+    echo "  Machine type:           $machine_type ($hours_available hrs/day)"
+    echo "  Connectivity:           $connectivity"
+    echo ""
+
+    if [[ ${#warnings[@]} -gt 0 ]]; then
+        echo "  ⚠  Warnings:"
+        for w in "${warnings[@]}"; do
+            echo "       • $w"
+        done
+        echo ""
+    fi
+
+    if [[ ${#prereqs[@]} -gt 0 ]]; then
+        echo "  Next steps:"
+        for p in "${prereqs[@]}"; do
+            echo "       • $p"
+        done
+        echo ""
+    fi
+
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    if [[ "$profile" == "none" ]]; then
+        echo "No profile written (insufficient resources)."
+        return 0
+    fi
+
+    # -----------------------------------------------------------------------
+    # 7. Offer to write profile to config.json
+    # -----------------------------------------------------------------------
+    local current_profile
+    current_profile=$(jq -r '.node_profile // "not set"' "$CONFIG_FILE")
+    local confirm
+    read -r -p "Write node_profile=\"$profile\" to config.json? (current: $current_profile) [yes/no] (default: yes): " confirm
+    confirm="${confirm:-yes}"
+
+    if [[ "$confirm" == "yes" ]]; then
+        local tmp
+        tmp=$(mktemp)
+        jq --arg p "$profile" '.node_profile = $p' "$CONFIG_FILE" > "$tmp" && mv "$tmp" "$CONFIG_FILE"
+        echo "✓ node_profile set to \"$profile\" in $CONFIG_FILE"
+        echo "  Run 'bash scripts/configure.sh generate-quadlets' to apply."
+    else
+        echo "Profile not written."
+    fi
+    echo ""
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -673,6 +962,7 @@ case "${1:-help}" in
     generate-secrets)        cmd_generate_secrets ;;
     generate-litellm-config) cmd_generate_litellm_config ;;
     detect-hardware)         cmd_detect_hardware ;;
+    recommend)               cmd_recommend ;;
     help|--help|-h)          usage ;;
     *)
         echo "Unknown command: $1" >&2
