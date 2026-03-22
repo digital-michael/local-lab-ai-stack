@@ -828,6 +828,8 @@ These collapse into the configuration system above. Tracked individually for vis
 - [ ] Federated RAG across remote library nodes
 - [ ] Multi-environment config support (dev/staging/prod) via configure.sh
 - [ ] Team-shared chat/context state — shared Postgres or sync protocol so chat history, user accounts, and conversation context are available across peer nodes (extends Phase 10 D-022)
+- [ ] **Federated MCP tool registry** — MCP tools defined on any node are discoverable and callable by agents on any other node without code duplication; single registry synced across the mesh; covers built-in tools (knowledge search, document ingest) and operator-defined custom tools
+
 - [ ] Knowledge library governance — content classification, safety, and ethics review controls for managed knowledge bases:
   - Data classification: PII/confidential detection — agent may query metadata/schema but not raw content
   - Content advisory: grounding and alignment checks (factual accuracy before ingestion)

@@ -145,3 +145,6 @@ Automated content classification, safety filtering, PII detection, and ethics al
 
 ### `[D]` Model A/B Testing
 Route a fraction of requests to a candidate model and compare quality against the default — built into the LiteLLM routing layer. (Future Features)
+
+### `[D]` Federated MCP Tool Registry
+MCP tools (web search, knowledge search, file access, API calls) defined once on any node are automatically discoverable and callable by AI agents running on any other node — no code duplication, no per-node tool configuration. Tool definitions live in a single registry and are shared across the mesh. (Future Features)
