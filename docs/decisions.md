@@ -1,5 +1,5 @@
 # Project Decisions — llm-agent-local-2
-**Last Updated:** 2026-03-08 UTC
+**Last Updated:** 2026-03-21 UTC
 **Target Audience:** LLM Agents
 
 ---
@@ -158,7 +158,7 @@ This file records architecture decisions made during work on this project. Each 
 | **Rationale** | Traefik's label-based discovery fits the Podman container model — new services are automatically routed without config file changes. Native forward-auth middleware integrates cleanly with Authentik for SSO. File-based dynamic configuration (since Podman lacks Docker's socket API) allows config reload without restarts. The operational cost is slightly higher than Caddy at initial setup but significantly lower at steady-state. |
 | **Driver** | Human-selected, agent-evaluated |
 | **Trigger** | Blocker — reverse proxy selection was required before deployment and TLS configuration could proceed. |
-| **Commit** | *(this commit)* |
+| **Commit** | `4561edf` |
 
 ---
 
@@ -172,7 +172,7 @@ This file records architecture decisions made during work on this project. Each 
 | **Rationale** | Routing is a distinct concern from vector search, model inference, and workflow orchestration. A standalone service can be tested, deployed, cached, and replaced independently. The REST API (versioned, OpenAPI-documented) enables future transport swaps (gRPC) or reimplementation without affecting consumers. FastAPI is a pragmatic MVP choice — lightweight, well-documented, async-native. |
 | **Driver** | Human-directed, agent-proposed alternatives |
 | **Trigger** | Blocker — the Knowledge Index was referenced throughout the architecture but had no implementation specification. |
-| **Commit** | *(this commit)* |
+| **Commit** | `4561edf` |
 
 ---
 
@@ -186,7 +186,7 @@ This file records architecture decisions made during work on this project. Each 
 | **Rationale** | Option 3 applies separation of concerns: identity metadata (stable) is separate from topic taxonomy (changes with content) and machine-readable indexes (changes with re-embedding). `checksums.txt` and `signature.asc` serve orthogonal verification purposes — integrity (all profiles) vs. provenance (profile-dependent). Split files enable independent tooling: a CLI can validate checksums without parsing YAML, a registry can index metadata.json without downloading vectors. |
 | **Driver** | Joint |
 | **Trigger** | Design dependency — the Knowledge Index Service (D-012) and discovery profiles (D-014) both require a concrete manifest specification. |
-| **Commit** | *(this commit)* |
+| **Commit** | `4561edf` |
 
 ---
 
@@ -200,7 +200,7 @@ This file records architecture decisions made during work on this project. Each 
 | **Rationale** | Three profiles map cleanly to real deployment contexts: **localhost** (filesystem scan, implicit trust — the operator placed the files there), **local** (mDNS/DNS-SD discovery, trust by network membership + optional signature), **WAN** (registry/federation protocol, mandatory signature verification). Each profile has escalating verification requirements that match escalating trust boundaries. MVP implements localhost only; local and WAN are specified but deferred. |
 | **Driver** | Joint |
 | **Trigger** | Design dependency — distributed node architecture (§7) and volume manifest (D-013) both reference discovery and trust without specifying the model. |
-| **Commit** | *(this commit)* |
+| **Commit** | `4561edf` |
 
 ---
 
@@ -214,7 +214,7 @@ This file records architecture decisions made during work on this project. Each 
 | **Rationale** | stdio is fundamentally incompatible with the containerized deployment model — an agent cannot spawn the knowledge-index container as a subprocess. HTTP/SSE fits the existing Traefik-fronted architecture: a new `/mcp` PathPrefix rule routes MCP traffic to the same backend container at port 8100. All MCP-supporting clients (Claude Desktop, Cursor, VS Code Copilot) support SSE transport. REST API remains intact alongside MCP — additive, not replacing. |
 | **Driver** | Agent-proposed, architecture-constrained |
 | **Trigger** | Phase 7 implementation dependency — transport choice required before implementing the MCP layer. |
-| **Commit** | *(this commit)* |
+| **Commit** | `0b997bc` |
 
 ---
 
@@ -228,7 +228,7 @@ This file records architecture decisions made during work on this project. Each 
 | **Rationale** | Option 3 matches workload characteristics: Ollama serves lightweight CPU-bound models that don't require GPU acceleration; vLLM serves quantized models where GPU parallelism is essential. CPU isolation is enforced by environment variable, not resource limits — simpler and more reliable than CUDA MPS. |
 | **Driver** | Agent-proposed, Phase 8 implementation |
 | **Trigger** | VRAM contention observed when both services started simultaneously. |
-| **Commit** | Phase 8 |
+| **Commit** | `795ac96` |
 
 ---
 
@@ -242,7 +242,7 @@ This file records architecture decisions made during work on this project. Each 
 | **Rationale** | Option 3 extends the existing SSOT architecture (D-002) consistently. `models[]` co-locates model definitions with service definitions in one file, making the full stack reviewable in one place. The generator (`configure.sh generate-litellm-config`) is deterministic — the same config always produces the same models.json. |
 | **Driver** | Agent-proposed, Phase 8 implementation |
 | **Trigger** | Discovery that models.json was manually maintained and could diverge from config.json. |
-| **Commit** | Phase 8 |
+| **Commit** | `795ac96` |
 
 ---
 
@@ -256,7 +256,7 @@ This file records architecture decisions made during work on this project. Each 
 | **Rationale** | Three profiles map to real deployment scenarios: a developer workstation (controller), a secondary Mac or GPU box running only Ollama (inference-worker), and a future fully-participatory node (peer). The `inference-worker` profile deploys only Ollama and Promtail — sufficient to contribute models and ship logs to the controller's Loki. `generate-quadlets` enforces the profile at quadlet-generation time, ensuring the right services are deployed. |
 | **Driver** | Agent-proposed, Phase 9 design |
 | **Trigger** | Architecture need — distributing inference across heterogeneous machines requires role-differentiated deployments. |
-| **Commit** | Phase 9a |
+| **Commit** | `ecbc5e3` |
 
 ---
 
@@ -270,7 +270,7 @@ This file records architecture decisions made during work on this project. Each 
 | **Rationale** | The M1's primary value as an inference worker is its Metal GPU, which delivers meaningful inference speedup on quantized models. Sacrificing Metal for container consistency defeats the purpose of using this hardware. Bare-metal Ollama is the officially supported path for Apple Silicon and is mature. Podman Machine benchmark deferred to a later phase when Metal passthrough support improves. |
 | **Driver** | Hardware constraint — Metal GPU inaccessible inside Podman Machine VM |
 | **Trigger** | Design review during Phase 9 planning — original D-019 assumed Podman Machine without evaluating GPU access. |
-| **Commit** | Phase 9a |
+| **Commit** | `ecbc5e3` |
 
 ---
 
@@ -284,7 +284,7 @@ This file records architecture decisions made during work on this project. Each 
 | **Rationale** | Static config is appropriate for Phase 9: the node topology is small (3 nodes), known in advance, and stable. Dynamic registration adds complexity (heartbeat protocol, stale-entry cleanup, race conditions on startup ordering) that is not justified by a 3-node static topology. The `nodes[]` schema is designed so dynamic registration can be layered on later without breaking the static config format. |
 | **Driver** | Agent-proposed, complexity vs. benefit tradeoff |
 | **Trigger** | Phase 9 planning — dynamic registration was the original design; revised after reviewing the actual topology size. |
-| **Commit** | Phase 9a |
+| **Commit** | `ecbc5e3` |
 
 ---
 
@@ -298,4 +298,32 @@ This file records architecture decisions made during work on this project. Each 
 | **Rationale** | Q4_K_M offers a good quality/size tradeoff for both CPU and GPU inference and is the most widely available quantization format in the Ollama model library. GGUF/Q4_K_M runs on both Linux GPU workers (Ollama CPU path) and macOS Metal (Ollama native). This unifies the model recommendation logic across platforms. Tier thresholds: ≥8 GB VRAM/≥20 GB RAM → 8B Q4_K_M; 4–8 GB → 7B Q4_K_M; 3–4 GB → 3B Q4_K_M; <3 GB → 1.5B Q8_0. |
 | **Driver** | Agent-proposed, Phase 9 cross-platform consistency |
 | **Trigger** | Adding macOS inference workers exposed the gap between AWQ (HuggingFace/vLLM path) and GGUF/Q4_K_M (Ollama path). |
-| **Commit** | Phase 9a |
+| **Commit** | `ecbc5e3` |
+
+---
+
+### D-022 — Shared State Scope for Peer Nodes
+
+| Field | Value |
+|---|---|
+| **Decision** | In peer node topology (Phase 10), inference routing and knowledge library discovery are shared across all peers. Chat history, user accounts, and Flowise flows remain node-local for MVP. Team-shared chat and context are deferred to a future extension phase. |
+| **Context** | Phase 10 introduces fully-participatory peer nodes. Determining which state is shared defines the complexity boundary: too little sharing reduces the value of federation; too much introduces distributed consistency problems (split-brain, conflict resolution, replication lag). |
+| **Options Considered** | (1) Share everything — unified user accounts, shared chat history, replicated Flowise flows. Maximally useful but highest consistency risk. (2) Share nothing — pure inference federation only, no cross-node knowledge or state. Simplest but misses the knowledge-sharing value proposition. (3) Share read-heavy, loosely-coupled state (inference routes, knowledge discovery); keep write-heavy, user-specific state local. |
+| **Rationale** | Option 3 matches the CAP theorem tradeoff for a LAN-connected multi-node system: inference model metadata and knowledge library manifests are read-heavy, eventually consistent, and low-risk to share. User sessions and chat history are write-heavy, strongly consistent, and high-risk to replicate. Deferring team-shared chat avoids premature complexity while delivering the primary peer-node value (more models, more knowledge). |
+| **Driver** | Joint |
+| **Trigger** | Phase 10 architecture planning — shared state scope required before designing the peer registration protocol. |
+| **Commit** | *(Phase 10)* |
+
+---
+
+### D-023 — Knowledge Sharing via `local` Discovery Profile (D-014)
+
+| Field | Value |
+|---|---|
+| **Decision** | Peer nodes share knowledge libraries using the `local` discovery profile defined in D-014: mDNS/DNS-SD service announcement (`_ai-library._tcp`) for LAN peers; static `nodes[]` entries for WAN-connected peers. Each node's Knowledge Index Service advertises its available volumes and forwards queries to peer indexes when local coverage is insufficient. Actual vector data remains on the originating node — only manifests and query results are exchanged. |
+| **Context** | Phase 10 requires a concrete mechanism for nodes to discover each other's knowledge libraries. D-014 defined three discovery profiles but deferred implementation of `local` and `WAN`. D-023 commits to `local` as the Phase 10 MVP transport. |
+| **Options Considered** | (1) Centralized registry — one node holds a global index. Single point of failure, violates peer autonomy. (2) Full vector replication — copy all vectors to all nodes. Storage cost O(n²); replication lag. (3) Manifest-only federation with query forwarding — share manifests (small), forward queries to originating node, merge results. |
+| **Rationale** | Option 3 (manifest federation + query proxying) avoids replicating large vector datasets while enabling cross-node search. Each node retains full autonomy and can operate independently if peers are unreachable. mDNS/DNS-SD is zero-config on LAN and widely supported. Static config provides the same capability for WAN without requiring multicast routing. |
+| **Driver** | Architecture constraint — full vector replication impractical for large knowledge bases |
+| **Trigger** | Phase 10 design dependency — knowledge sharing mechanism required before implementing peer registration. |
+| **Commit** | *(Phase 10)* |
