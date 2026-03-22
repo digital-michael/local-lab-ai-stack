@@ -141,3 +141,23 @@ fail() {
     echo "$*" >&3
     return 1
 }
+
+# ---------------------------------------------------------------------------
+# Helper: probe_node <host> <port>
+# ---------------------------------------------------------------------------
+# Returns 0 if a TCP connection to <host>:<port> succeeds within 5 seconds,
+# 1 otherwise. Used to gate remote-node tests.
+#
+# Usage:
+#   probe_node "TC25.mynetworksettings.com" 11434 && echo "reachable"
+#   if ! probe_node "$host" "$port"; then skip "node unreachable"; fi
+probe_node() {
+    local host="$1"
+    local port="$2"
+    # bash /dev/tcp is not available in all shells; use curl --connect-timeout
+    curl -s --connect-timeout 5 --max-time 5 \
+        -o /dev/null "http://${host}:${port}/" 2>/dev/null
+    # treat 0 (200-level) or 22 (HTTP error — server responded) as reachable
+    local rc=$?
+    [[ "$rc" -eq 0 || "$rc" -eq 22 ]]
+}
