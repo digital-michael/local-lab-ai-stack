@@ -795,6 +795,23 @@ These collapse into the configuration system above. Tracked individually for vis
 
 # 4 Future Features (architecture roadmap)
 
+- [ ] **Operator dashboard** — web UI with tab-based navigation across User, Team, System, and Admin contexts:
+  - **User tab**
+    - Personal contexts (private, user-scoped)
+    - Common/publicly-shared contexts (readable by all authenticated users)
+  - **Team tab**
+    - Team-only shared contexts (role-scoped)
+  - **Admin tab**
+    - Special admin contexts (definition TBD)
+    - Register / suspend / unregister inference nodes
+    - Restart, stop, backup, diagnose, and status operations per node
+    - Full library entries (private, sensitive — admin-only view)
+  - **System tab**
+    - Per-component health panel with links to: direct web interface, log stream, configuration, and metrics (performance, memory, API call counts)
+    - Registered nodes list with online/offline status, supported models, and hardware profile
+    - Library entries visible to users/teams (public, non-sensitive — auto-filtered for common auth view)
+  - Additional elements to be discovered as the stack matures
+
 - [ ] Service registry and discovery
 - [ ] Distributed vector shards (multi-node Qdrant)
 - [ ] GPU scheduling and multi-tenant inference
