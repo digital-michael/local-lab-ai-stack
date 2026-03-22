@@ -148,6 +148,15 @@ fi
 info "Quadlets generated: ollama + promtail only"
 
 # ---------------------------------------------------------------------------
+# Create required data directories
+# ---------------------------------------------------------------------------
+step "Creating data directories"
+AI_STACK_DIR=$(python3 -c "import json,os; print(json.load(open('$CONFIG_FILE'))['ai_stack_dir'].replace('\$HOME', os.environ['HOME']))")
+run mkdir -p "$AI_STACK_DIR/ollama"
+run mkdir -p "$AI_STACK_DIR/models"
+info "AI_STACK_DIR: $AI_STACK_DIR"
+
+# ---------------------------------------------------------------------------
 # Reload systemd and start Ollama
 # ---------------------------------------------------------------------------
 step "Enabling Ollama service"
