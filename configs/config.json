@@ -405,9 +405,7 @@
           "mode": "ro"
         }
       ],
-      "environment": {
-        "CUDA_VISIBLE_DEVICES": "0"
-      },
+      "environment": {},
       "secrets": [],
       "health_check": {
         "command": "bash -c 'echo > /dev/tcp/localhost/11434'",
