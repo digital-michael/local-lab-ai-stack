@@ -386,7 +386,7 @@
     },
     "ollama": {
       "image": "docker.io/ollama/ollama",
-      "tag": "0.17.7",
+      "tag": "0.18.2",
       "container_name": "ollama",
       "dns_alias": "ollama.ai-stack",
       "depends_on": [
@@ -406,7 +406,7 @@
         }
       ],
       "environment": {
-        "CUDA_VISIBLE_DEVICES": ""
+        "CUDA_VISIBLE_DEVICES": "0"
       },
       "secrets": [],
       "health_check": {
@@ -418,7 +418,7 @@
       "resources": {
         "cpus": 4,
         "memory": "16g",
-        "gpu": null
+        "gpu": "nvidia.com/gpu=all"
       }
     },
     "flowise": {
