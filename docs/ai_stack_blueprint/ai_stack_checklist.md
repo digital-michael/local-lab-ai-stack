@@ -628,17 +628,17 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ### Phase 9d — Remote Node Tests
 
-- [ ] **9d.1** Create `testing/layer2_remote_nodes.bats`
+- [x] **9d.1** Create `testing/layer2_remote_nodes.bats`
   - T-090: TCP reachability to M1 Ollama port (11434) from controller
   - T-091: LiteLLM `/v1/models` lists M1-hosted model
   - T-092: Completion request to M1-hosted model name succeeds and returns content
-  - T-093: TCP reachability to Alienware *(skip until 9c complete)*
-  - T-094: Completion request to Alienware model *(skip until 9c complete)*
+  - T-093: TCP reachability to Alienware
+  - T-094: Completion request to Alienware model
 
-- [ ] **9d.2** Add `probe_node()` helper to `testing/helpers.bash`
+- [x] **9d.2** Add `probe_node()` helper to `testing/helpers.bash`
   - Args: `<host> <port>` — returns 0 if TCP open, 1 otherwise; used in T-090/T-093
 
-- [ ] **9d.3** Run full test suite; verify no regressions; commit Phase 9d
+- [x] **9d.3** Run full test suite; verify no regressions; commit Phase 9d
 
 ---
 
@@ -891,6 +891,13 @@ Items requiring a decision before or during implementation.
 - Phase 10 decisions renumbered: D-022 (shared state scope), D-023 (knowledge sharing via D-014 local profile)
 - New considerations: #29 (inter-node DNS naming), #30 (macOS Podman Machine performance), #31 (model storage on multi-node)
 - 6 new deferrable items added for Phases 8–10; 1 future feature (team-shared chat/context)
+
+## Session Notes — Phase 9b–9d
+
+- **Phase 9b (TC25 M1)** complete — `llama3.1:8b-instruct-q4_K_M` routing verified: TC25 OK
+- **Phase 9c (SOL Alienware)** complete — 9 bugs found and fixed in setup-worker.sh / configure.sh / config.json (ports, CDI, CUDA env, deps, model tag, timeout, mkdir, enable→start, env propagation); ollama 0.18.2 running with GTX 970M GPU; `llama3.2:3b-instruct-q4_K_M` verified: SOL OK
+- **Phase 9d (remote node tests)** complete — `testing/layer2_remote_nodes.bats` T-090–T-094 all pass; `probe_node()` added to helpers.bash; 27/27 tests, 0 failures
+- Lessons recorded: podman §5–6 (ports/stale quadlet), litellm §1–2 (secrets/daemon-reload)
 
 ## Session Notes — Phase 9a
 
