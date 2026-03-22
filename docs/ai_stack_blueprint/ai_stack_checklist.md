@@ -837,7 +837,11 @@ These collapse into the configuration system above. Tracked individually for vis
   - Ethics alignment: positive/neutral/negative behavior classification with operator-defined context
   - Private/restricted content: opt-in isolated collection storage; excluded from default discovery
   - Prohibited topics list: operator-defined deny-list enforced at query and ingestion boundaries
-
+- [ ] **Getting Started guide and operator FAQ** — user-facing documentation for standing up and operating the stack day-to-day:
+  - Getting Started: install prerequisites, clone repo, run `configure.sh`, deploy, verify
+  - How-to: add a new model, add a hosted API provider, register an inference node, ingest documents, back up the stack
+  - FAQ: common failure modes and fixes (service not starting, model not routing, auth failures, TLS errors)
+  - To be filled in incrementally as the stack stabilises; finalization pass at end of Phase 10
 ---
 
 # 5 Open Considerations
