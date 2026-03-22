@@ -853,9 +853,27 @@ cmd_recommend() {
         [[ "$ram_gb" -lt 16 ]] && warnings+=("Low RAM (${ram_gb} GB) — inference will be CPU-only and slow")
         [[ "$disk_free_gb" -lt 20 ]] && warnings+=("Low disk (${disk_free_gb} GB free) — model storage may be constrained")
         [[ "$stays_awake" == "no" ]] && warnings+=("Sleep/suspend enabled — node will drop from mesh when idle; set power plan to never-sleep")
-        [[ "$vram_gb" -ge 4 ]] && \
-            { ls /etc/cdi/nvidia.yaml &>/dev/null 2>&1 || ls /run/cdi/nvidia.yaml &>/dev/null 2>&1; } || \
-            { [[ "$vram_gb" -ge 4 ]] && warnings+=("CDI not configured — GPU passthrough unavailable. Run: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml"); }
+        # CDI warning for any NVIDIA GPU (not just ≥4 GB)
+        if [[ "$vram_gb" -gt 0 ]]; then
+            if ! ls /etc/cdi/nvidia.yaml &>/dev/null 2>&1 && ! ls /run/cdi/nvidia.yaml &>/dev/null 2>&1; then
+                warnings+=("CDI not configured — GPU passthrough unavailable. Run: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml")
+            fi
+        fi
+
+        # Model recommendation based on VRAM (Linux)
+        if [[ "$vram_gb" -gt 0 ]]; then
+            if [[ "$vram_gb" -ge 8 ]]; then
+                prereqs+=("Recommended model: llama3.1:8b-instruct-q4_K_M (~5 GB VRAM) — high quality, fits with headroom")
+            elif [[ "$vram_gb" -ge 4 ]]; then
+                prereqs+=("Recommended model: mistral:7b-q4_K_M (~4 GB VRAM) — strong reasoning, tight fit")
+            elif [[ "$vram_gb" -ge 3 ]]; then
+                prereqs+=("Recommended model: llama3.2:3b-q4_K_M (~2 GB VRAM) — best fit for ${vram_gb} GB VRAM")
+            else
+                prereqs+=("Insufficient VRAM for GPU inference (${vram_gb} GB) — Ollama will fall back to CPU")
+            fi
+        else
+            prereqs+=("No GPU detected — Ollama will run CPU-only inference (slow for interactive use)")
+        fi
 
         # Prerequisites by profile
         case "$profile" in
