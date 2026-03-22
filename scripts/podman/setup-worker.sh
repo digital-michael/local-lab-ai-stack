@@ -162,14 +162,14 @@ info "AI_STACK_DIR: $AI_STACK_DIR"
 step "Enabling Ollama service"
 run systemctl --user daemon-reload
 run systemctl --user start ollama.service
-info "Waiting for Ollama to be ready..."
-for i in $(seq 1 30); do
+info "Waiting for Ollama to be ready (up to 120s — image pull on first run)..."
+for i in $(seq 1 120); do
     if curl -sf http://localhost:11434/ &>/dev/null; then
         info "Ollama ready (attempt $i)"
         break
     fi
-    if [[ $i -eq 30 ]]; then
-        echo "ERROR: Ollama did not become ready after 30 seconds." >&2
+    if [[ $i -eq 120 ]]; then
+        echo "ERROR: Ollama did not become ready after 120 seconds." >&2
         echo "       Check: journalctl --user -u ollama.service -n 50" >&2
         exit 1
     fi
