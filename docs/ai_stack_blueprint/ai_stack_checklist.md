@@ -851,6 +851,13 @@ These collapse into the configuration system above. Tracked individually for vis
 - [ ] Team-shared chat/context state — shared Postgres or sync protocol so chat history, user accounts, and conversation context are available across nodes (future, extends D-022)
 - [ ] **Federated MCP tool registry** — MCP tools defined on any node are discoverable and callable by agents on any other node without code duplication; single registry synced across the mesh; covers built-in tools (knowledge search, document ingest) and operator-defined custom tools
 
+- [ ] **Library access gating** — per-library access controls for content type, registered interest, and payment; applied at query and catalog endpoints:
+  - Content type gating: mark individual libraries as `public`, `restricted` (authenticated users only), or `private` (author + admin only); enforced at `/v1/query` and `/v1/catalog`
+  - Topic interest registration: users declare topics of interest; catalog filters and surfaces libraries matching their profile; enables opt-in discovery without exposing full catalog
+  - Payment gateway integration: libraries marked `licensed` require a valid entitlement before query access; entitlement issuance pluggable (API key grant, webhook from external payment processor, future on-platform billing); details TBD
+  - Author controls: library author can set or change visibility and licensing tier; history of tier changes recorded in PostgreSQL KI schema
+  - All gating logic lives in the controller KI service — worker nodes are unaware of visibility rules; they push packages and serve local fallback only
+
 - [ ] Knowledge library governance — content classification, safety, and ethics review controls for managed knowledge bases:
   - Data classification: PII/confidential detection — agent may query metadata/schema but not raw content
   - Content advisory: grounding and alignment checks (factual accuracy before ingestion)
