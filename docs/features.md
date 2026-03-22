@@ -80,10 +80,11 @@ Users can have conversations with any available AI model through a browser — n
 - _Powered by: [OpenWebUI](library/framework_components/openwebui/best_practices.md)_
 
 ### `[X]` Multi-Model Inference Routing
-The stack runs multiple AI models simultaneously and routes requests to the right one automatically. Models can live on different machines across the network.
+The stack runs multiple AI models simultaneously and routes requests to the right one automatically. Models can run locally, on remote inference nodes, or on hosted cloud providers — all behind the same single endpoint.
 - A single API endpoint handles all models — callers choose by model name
-- Models can run on the controller or on any registered inference node
-- Transparent routing; callers are unaware of which machine handles the request
+- Local models run on the controller or on any registered inference node
+- Hosted cloud models (OpenAI, Groq, Anthropic) can be added via API key — same routing interface, no code changes for callers
+- Transparent routing; callers are unaware of which machine or provider handles the request
 - _Powered by: [LiteLLM](library/framework_components/litellm/best_practices.md)_ · _Defined in: [configs/config.json](../configs/config.json) `models[]`_
 
 ### `[X]` Retrieval-Augmented Generation (RAG)
