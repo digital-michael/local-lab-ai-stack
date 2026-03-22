@@ -663,55 +663,75 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
-## Phase 10 — Full Peer Nodes and Shared Knowledge
+## Phase 10 — Knowledge-Worker Nodes and Library Custody
 
-**Goal:** Multiple nodes each run the complete stack independently. Nodes share inference capacity and knowledge libraries. Chat history and user state remain node-local for MVP; team-shared context is a future extension.
+**Goal:** TC25 and SOL upgrade from `inference-worker` to `knowledge-worker` — adding local Knowledge Index (SQLite) and Qdrant. Workers create knowledge library domains and push custody copies to the controller. All synced libraries are accessible from the controller regardless of worker availability.
 
 **Decisions:**
-- D-022: Shared state scope — inference routing and knowledge library discovery are shared across peers; chat history, user accounts, and Flowise flows remain node-local. Team-shared chat/context is deferred to a future phase.
-- D-023: Knowledge sharing via D-014 `local` discovery profile — peers discover each other's knowledge libraries via mDNS/DNS-SD on LAN, or static config for WAN
+- D-018 (revised): Four node profiles — `knowledge-worker` added; `peer` reserved for future disconnected deployments
+- D-022 (revised): Controller is custodian of all synced libraries; inference routing shared via LiteLLM; chat/accounts node-local
+- D-023 (revised): Workers push `.ai-library` packages to controller via HTTPS; controller ingests, records provenance, serves independently
+- D-024: `knowledge-worker` profile — Ollama + Promtail + KI (SQLite) + local Qdrant; hardware floor: 10 GB RAM / 4 cores / 50 GB disk
+- D-025: Library custody model — controller as custodian + provenance registry; `.ai-library` signature anchors authorship
 
-**Inputs:** Phase 9 complete, multiple nodes running the stack.
+**Inputs:** Phase 9 complete. TC25 and SOL running as `inference-worker`. Controller fully operational.
 
 ### Steps
 
-10.1. **Implement `peer` profile in `configure.sh`**
-   - Deploys all services (same as controller)
-   - Additionally runs `register-node.sh` on startup to share inference with other peers
-   - Exposes Knowledge Index API to the network (not just localhost)
+10.1. **Add SQLite support to Knowledge Index Service**
+   - Replace in-memory `_doc_collection` dict with SQLite persistence (`sqlite3` or SQLAlchemy)
+   - Schema: `documents` table (id, collection, metadata, created_at); `libraries` table (name, version, path, synced_at, visibility)
+   - `DATABASE_URL` env var: `sqlite:///...` on workers; existing `postgresql://...` unchanged on controller
+   - No migration required — app.py currently has zero database code (in-memory only)
 
-10.2. **Implement `local` discovery profile for knowledge sharing (D-014)**
-   - mDNS/DNS-SD service announcement: each node's Knowledge Index advertises via `_ai-library._tcp`
-   - Peers discover each other's Knowledge Index endpoints automatically
-   - Query routing: Knowledge Index forwards queries to peer indexes when local collection lacks coverage
-   - Volume manifest sync: peers exchange `manifest.yaml` metadata; actual vectors remain on the originating node
+10.2. **Implement `knowledge-worker` profile in `configure.sh generate-quadlets`**
+   - Service set: Ollama + Promtail + Knowledge Index + local Qdrant
+   - Knowledge Index quadlet: `DATABASE_URL=sqlite:///{{ ai_stack_dir }}/knowledge-index/ki.db`
+   - `node_profile=knowledge-worker` enforcement at generation time
 
-10.3. **WAN peer connectivity**
-   - Static peer entries in `nodes[]` for WAN-connected nodes (no mDNS across WAN)
-   - Mandatory TLS + mutual API key auth for inter-node calls over public internet
-   - Traefik on each peer exposes Knowledge Index and inference endpoints on HTTPS
-   - DNS naming strategy TBD (see Consideration #29)
+10.3. **Add `/v1/libraries` and `/v1/catalog` endpoints to Knowledge Index Service**
+   - `POST /v1/libraries` — receive `.ai-library` package (controller only); verify checksum; ingest into Qdrant; record provenance in PostgreSQL
+   - `GET /v1/catalog` — list all libraries: name, version, author, origin node, custody status, visibility
+   - Auth: existing `API_KEY` guard on all new endpoints
 
-10.4. **Cross-peer inference load balancing**
-   - LiteLLM on each peer knows about all models across all nodes
-   - Routing strategy: prefer local → then LAN peers → then WAN peers
-   - Fallback: if all instances of a model are down, return clear error (not silent timeout)
+10.4. **Implement `configure.sh sync-libraries` subcommand**
+   - Reads `nodes[]` in config.json to find controller address and API key
+   - Packages each `.ai-library` directory under `$AI_STACK_DIR/libraries/` and verifies checksums before push
+   - POSTs to controller `/v1/libraries` authenticated via `API_KEY`
+   - Reports per-library status: new / updated / unchanged / failed
 
-10.5. **Update diagnose.sh for peer topology**
-   - Full profile: show all known peers, their profiles, reachable models, knowledge indexes
-   - Detect split-brain: two controllers claiming the same network
+10.5. **Cross-node query routing on controller KI**
+   - Primary: query controller's own Qdrant (covers all custody libraries — no worker involvement)
+   - Fallback: proxy to origin worker for unsynced/draft libraries not yet pushed to custody
+   - Workers: answer local queries only; no cross-peer routing needed
+
+10.6. **Update `configure.sh recommend` for knowledge-worker upgrade path**
+   - If current profile is `inference-worker` AND disk ≥ 50 GB → suggest upgrade to `knowledge-worker`
+   - Add `sync-libraries` to next-steps output when `knowledge-worker` is recommended
+
+10.7. **Deploy `knowledge-worker` profile to TC25 and SOL**
+   - Update `node_profile` in config.json on each node via `configure.sh recommend` or direct edit
+   - Run `generate-quadlets` on each node; start Qdrant and Knowledge Index services
+   - Push any existing libraries: `bash scripts/configure.sh sync-libraries`
+
+10.8. **Update `diagnose.sh --profile full` for Phase 10 topology**
+   - Show library custody status: synced / draft / unsynced per known node
+   - Show `/v1/catalog` summary from controller (library count, authors, any missing custody copies)
+   - Alert if a worker library has no custody copy on the controller
 
 ### Outputs
-- Multiple nodes running full stack independently
-- Knowledge library queries federated across peers
-- Inference load-balanced across all available nodes
-- Each node works standalone; together they share capacity
+- TC25 and SOL running `knowledge-worker` profile (Ollama + Promtail + KI (SQLite) + local Qdrant)
+- Controller's Qdrant contains all custody copies of synced worker libraries
+- `configure.sh sync-libraries` pushes `.ai-library` packages to controller
+- Controller `/v1/catalog` lists all libraries with author, origin node, version, and custody status
+- All synced libraries accessible from controller regardless of worker availability
 
 ### Verification
-- Ingest a document on Node A → query returns results on Node B
-- Add a model on Node B → Node A's `/v1/models` lists it
-- Disconnect Node B → Node A continues working with reduced model/knowledge set
-- `diagnose.sh --profile full` on any peer shows complete topology
+- [ ] Ingest document on SOL → `sync-libraries` → `GET /query` on controller returns result
+- [ ] SOL offline → controller still serves SOL's synced libraries from custody Qdrant
+- [ ] `GET /v1/catalog` on controller lists all libraries with origin node and author
+- [ ] `configure.sh recommend` on inference-worker node (≥ 50 GB disk) suggests `knowledge-worker` upgrade
+- [ ] `diagnose.sh --profile full` shows library custody summary across all nodes
 
 ---
 
@@ -725,7 +745,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 - **Phase 7 (MCP)** is additive — the REST API is preserved. Phase 7 can be executed independently once the Knowledge Index Service is deployed and healthy.
 - **Phase 8 (GPU)** requires NVIDIA GPU with CDI configured. Can be skipped on CPU-only nodes. Purely local — no network dependencies.
 - **Phase 9 (Remote Nodes)** requires at least two machines with network connectivity. Can proceed with any OS (Linux or macOS with Podman Machine).
-- **Phase 10 (Peer Nodes)** builds on Phase 9 and D-014. Most complex phase — involves distributed state, discovery protocols, and cross-node query routing.
+- **Phase 10 (Knowledge-Worker Nodes)** builds on Phase 9. TC25/SOL upgrade from `inference-worker` to `knowledge-worker` (adds KI + Qdrant). Key new work: SQLite KI persistence, `/v1/libraries` custody push endpoint, `sync-libraries` subcommand.
 
 ---
 
@@ -789,7 +809,7 @@ These collapse into the configuration system above. Tracked individually for vis
 - [ ] **Add node profile support** — `controller`, `inference-worker`, `peer` profiles; `configure.sh` selects services per profile (see Phase 9)
 - [ ] **Implement dynamic node registration** — workers register with controller LiteLLM on startup; heartbeat; static fallback (see Phase 9)
 - [ ] **Set up macOS M1 inference worker** — Podman Machine, Ollama container, `register-node.sh` (see Phase 9)
-- [ ] **Implement `local` discovery profile for knowledge sharing** — mDNS/DNS-SD, cross-peer knowledge query routing (see Phase 10)
+- [ ] **Implement library custody sync** — `POST /v1/libraries` endpoint on controller KI; `configure.sh sync-libraries` subcommand on workers; provenance in PostgreSQL (see Phase 10, D-023)
 
 ---
 
@@ -828,7 +848,7 @@ These collapse into the configuration system above. Tracked individually for vis
 - [ ] Multi-model A/B testing through LiteLLM
 - [ ] Federated RAG across remote library nodes
 - [ ] Multi-environment config support (dev/staging/prod) via configure.sh
-- [ ] Team-shared chat/context state — shared Postgres or sync protocol so chat history, user accounts, and conversation context are available across peer nodes (extends Phase 10 D-022)
+- [ ] Team-shared chat/context state — shared Postgres or sync protocol so chat history, user accounts, and conversation context are available across nodes (future, extends D-022)
 - [ ] **Federated MCP tool registry** — MCP tools defined on any node are discoverable and callable by agents on any other node without code duplication; single registry synced across the mesh; covers built-in tools (knowledge search, document ingest) and operator-defined custom tools
 
 - [ ] Knowledge library governance — content classification, safety, and ethics review controls for managed knowledge bases:

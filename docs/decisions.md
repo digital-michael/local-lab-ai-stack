@@ -1,5 +1,5 @@
 # Project Decisions — llm-agent-local-2
-**Last Updated:** 2026-03-21 UTC
+**Last Updated:** 2026-03-22 UTC
 **Target Audience:** LLM Agents
 
 ---
@@ -246,17 +246,17 @@ This file records architecture decisions made during work on this project. Each 
 
 ---
 
-### D-018 — Node Profiles: `controller`, `inference-worker`, `peer`
+### D-018 — Node Profiles: `controller`, `inference-worker`, `knowledge-worker`, `peer`
 
 | Field | Value |
 |---|---|
-| **Decision** | Define three node profiles stored as `node_profile` in `config.json`: `controller` (full stack, all services), `inference-worker` (Ollama + Promtail only), `peer` (full stack, acts as both controller and remote provider). |
-| **Context** | Phase 9 requires multiple machines to contribute inference capacity. Each machine has different hardware and different roles. A single deployment model (full stack) wastes resources on lightweight worker nodes and doesn't fit the macOS bare-metal scenario. |
-| **Options Considered** | (1) One profile (deploy everything everywhere). (2) Two profiles (full stack vs. minimal). (3) Three profiles separating the coordination role (controller) from full peer participation. |
-| **Rationale** | Three profiles map to real deployment scenarios: a developer workstation (controller), a secondary Mac or GPU box running only Ollama (inference-worker), and a future fully-participatory node (peer). The `inference-worker` profile deploys only Ollama and Promtail — sufficient to contribute models and ship logs to the controller's Loki. `generate-quadlets` enforces the profile at quadlet-generation time, ensuring the right services are deployed. |
-| **Driver** | Agent-proposed, Phase 9 design |
-| **Trigger** | Architecture need — distributing inference across heterogeneous machines requires role-differentiated deployments. |
-| **Commit** | `ecbc5e3` |
+| **Decision** | Define four node profiles stored as `node_profile` in `config.json`: `controller` (full stack, all services, observability hub), `inference-worker` (Ollama + Promtail only), `knowledge-worker` (inference-worker + Knowledge Index + local Qdrant — contributes inference and local knowledge domains), `peer` (full stack, self-contained, for disconnected/field deployments where no controller is reachable). |
+| **Context** | Phase 9 introduced three profiles (`controller`, `inference-worker`, `peer`). Phase 10 adds `knowledge-worker` after hardware analysis showed TC25 (16 GB unified RAM) and SOL (31 GB RAM) lack the memory for a full peer stack (~24 GB overhead before inference) but can comfortably run inference + Knowledge Index + Qdrant (~10–12 GB total). The original `peer` profile was designed for full autonomy; `knowledge-worker` fills the practical gap between inference-only and full-peer. |
+| **Options Considered** | (1) Three profiles (original): `inference-worker` cannot contribute knowledge. (2) Redefine `peer` as `knowledge-worker`: conflates two distinct roles — knowledge contribution on LAN vs. full autonomy for disconnected deployment. (3) Four profiles: adds `knowledge-worker` as a distinct role with its own service set and hardware floor. |
+| **Rationale** | Four profiles map cleanly to real deployment scenarios: `controller` is the coordination hub (aggregates inference, holds custody library store, runs all UI); `inference-worker` is the lightest footprint (models only); `knowledge-worker` contributes both inference and local knowledge domains, syncing library packages to the controller; `peer` is reserved for future disconnected/field deployments where no controller is reachable. `generate-quadlets` enforces the profile at generation time. |
+| **Driver** | Joint — Phase 10 topology analysis |
+| **Trigger** | Hardware analysis of TC25 and SOL showed neither fits the full-peer memory floor; `knowledge-worker` fills the practical gap. |
+| **Commit** | `ecbc5e3` (original Phase 9), Phase 10 revision |
 
 ---
 
@@ -302,28 +302,56 @@ This file records architecture decisions made during work on this project. Each 
 
 ---
 
-### D-022 — Shared State Scope for Peer Nodes
+### D-022 — Shared State Scope: Controller as Custodian, Workers as Contributors
 
 | Field | Value |
 |---|---|
-| **Decision** | In peer node topology (Phase 10), inference routing and knowledge library discovery are shared across all peers. Chat history, user accounts, and Flowise flows remain node-local for MVP. Team-shared chat and context are deferred to a future extension phase. |
-| **Context** | Phase 10 introduces fully-participatory peer nodes. Determining which state is shared defines the complexity boundary: too little sharing reduces the value of federation; too much introduces distributed consistency problems (split-brain, conflict resolution, replication lag). |
-| **Options Considered** | (1) Share everything — unified user accounts, shared chat history, replicated Flowise flows. Maximally useful but highest consistency risk. (2) Share nothing — pure inference federation only, no cross-node knowledge or state. Simplest but misses the knowledge-sharing value proposition. (3) Share read-heavy, loosely-coupled state (inference routes, knowledge discovery); keep write-heavy, user-specific state local. |
-| **Rationale** | Option 3 matches the CAP theorem tradeoff for a LAN-connected multi-node system: inference model metadata and knowledge library manifests are read-heavy, eventually consistent, and low-risk to share. User sessions and chat history are write-heavy, strongly consistent, and high-risk to replicate. Deferring team-shared chat avoids premature complexity while delivering the primary peer-node value (more models, more knowledge). |
-| **Driver** | Joint |
-| **Trigger** | Phase 10 architecture planning — shared state scope required before designing the peer registration protocol. |
+| **Decision** | The controller acts as the custodian and serving hub for all knowledge library domains. Knowledge-workers contribute local library packages; inference routing is shared via LiteLLM model registration. Chat history, user accounts, and Flowise flows remain node-local. Team-shared chat is deferred to a future extension phase. |
+| **Context** | Phase 10 introduces `knowledge-worker` nodes that create and curate knowledge library domains. The previous model (original D-023) relied on manifest-only federation with live proxy calls to the origin node — meaning a worker had to be online for its knowledge to be served. This was unreliable and conflicted with the goal of libraries as durable, growing assets. |
+| **Options Considered** | (1) Manifest-only federation: proxy all queries to origin worker. Origin must be online; no provenance tracking. (2) Full vector replication: all nodes hold all vectors. Storage cost O(n²); sync complexity. (3) Custody model: controller holds an ingested copy of all synced library packages; workers are authors, controller is the serving custodian. |
+| **Rationale** | Option 3 (custody) matches the goal of libraries as durable assets. Once a worker pushes a library package to the controller, the controller ingests it into its own Qdrant collection and records provenance in PostgreSQL. The library is served by the controller independently of whether the origin worker is online. This makes libraries resilient, enables provenance tracking, and creates the foundation for versioning, access control, and future licensing. User sessions and chat history remain write-heavy and user-specific — not shared. |
+| **Driver** | Joint — library-as-asset vision |
+| **Trigger** | Phase 10 topology design and discussion of library provenance, safeguarding, and eventual-consistency distribution model. |
 | **Commit** | *(Phase 10)* |
 
 ---
 
-### D-023 — Knowledge Sharing via `local` Discovery Profile (D-014)
+### D-023 — Library Custody Sync: Workers Push, Controller Ingests
 
 | Field | Value |
 |---|---|
-| **Decision** | Peer nodes share knowledge libraries using the `local` discovery profile defined in D-014: mDNS/DNS-SD service announcement (`_ai-library._tcp`) for LAN peers; static `nodes[]` entries for WAN-connected peers. Each node's Knowledge Index Service advertises its available volumes and forwards queries to peer indexes when local coverage is insufficient. Actual vector data remains on the originating node — only manifests and query results are exchanged. |
-| **Context** | Phase 10 requires a concrete mechanism for nodes to discover each other's knowledge libraries. D-014 defined three discovery profiles but deferred implementation of `local` and `WAN`. D-023 commits to `local` as the Phase 10 MVP transport. |
-| **Options Considered** | (1) Centralized registry — one node holds a global index. Single point of failure, violates peer autonomy. (2) Full vector replication — copy all vectors to all nodes. Storage cost O(n²); replication lag. (3) Manifest-only federation with query forwarding — share manifests (small), forward queries to originating node, merge results. |
-| **Rationale** | Option 3 (manifest federation + query proxying) avoids replicating large vector datasets while enabling cross-node search. Each node retains full autonomy and can operate independently if peers are unreachable. mDNS/DNS-SD is zero-config on LAN and widely supported. Static config provides the same capability for WAN without requiring multicast routing. |
-| **Driver** | Architecture constraint — full vector replication impractical for large knowledge bases |
-| **Trigger** | Phase 10 design dependency — knowledge sharing mechanism required before implementing peer registration. |
+| **Decision** | Knowledge-workers push `.ai-library` packages to the controller via HTTPS (`POST /v1/libraries`). The controller verifies the package checksum, re-embeds content into its own Qdrant collection, records authorship, version, and origin node in its PostgreSQL KI schema, and marks the library as "in custody." The controller serves the library from that point forward, independent of the origin worker's availability. Workers retain their local copy; version updates are pushed the same way. Unsynced or draft libraries remain accessible via proxy fallback to the origin worker. |
+| **Context** | D-014 defined three discovery profiles (`localhost`, `local`, `WAN`) and deferred implementation. The original D-023 committed to the `local` profile using mDNS/DNS-SD with manifest-only federation and live query proxying. Phase 10 analysis revealed that live proxying forces origin workers to remain online to serve knowledge — undermining the durability and asset-value model. The custody model supersedes manifest federation for the Phase 10 MVP. |
+| **Options Considered** | (1) mDNS/DNS-SD + live proxy (original): zero-config discovery, but origin must be online; no provenance tracking. (2) Full replication: all nodes hold all vectors; high storage cost and sync complexity. (3) Custody push: workers push complete packages to controller; controller ingests and serves independently; workers are authors, controller is custodian and distributor. |
+| **Rationale** | Option 3 aligns with the library-as-asset vision (D-025). The `.ai-library` package format (D-013) already carries the required fields: `signature.asc` anchors authorship, `checksums.txt` enables integrity verification, `manifest.yaml` carries `version`/`author`/`license`. Custody push requires no multicast networking (WAN-friendly), is auditable, and enables provenance to be tracked independently of the contributing node's uptime. The `_ai-library._tcp` mDNS discovery is deferred — static `nodes[]` config is sufficient for the 3-node topology. |
+| **Driver** | Architecture constraint and library-as-asset vision |
+| **Trigger** | Phase 10 design: live proxying to origin workers was identified as a reliability gap and an obstacle to durable library assets. |
+| **Commit** | *(Phase 10)* |
+
+---
+
+### D-024 — `knowledge-worker` Profile: Services, Database, and Hardware Floor
+
+| Field | Value |
+|---|---|
+| **Decision** | The `knowledge-worker` profile deploys four services: Ollama (inference), Promtail (log shipper), Knowledge Index Service (SQLite metadata store), and local Qdrant (vector storage). `configure.sh generate-quadlets` enforces this service set when `node_profile` is `knowledge-worker`. The Knowledge Index on a knowledge-worker uses `DATABASE_URL=sqlite:///...` rather than PostgreSQL. Minimum hardware floor: 10 GB RAM, 4 CPU cores, 50 GB disk. Comfortable target: 16 GB RAM, 50–200 GB disk. |
+| **Context** | Phase 10 hardware analysis: TC25 (16 GB unified RAM) and SOL (31 GB RAM, 3 GB VRAM) can contribute inference and local knowledge without bearing the ~18–24 GB overhead of the full controller stack. The current `app.py` has zero database code — it uses an in-memory `_doc_collection` dict despite `DATABASE_URL=postgresql://...` in config.json. The SQLite switch is a zero-cost spec change now, not a migration. |
+| **Options Considered** | (1) PostgreSQL on workers: creates a network dependency or requires a second Postgres instance per worker (~1 GB overhead, admin complexity). (2) No database (in-memory only): state lost on restart; libraries must be re-ingested on every boot. (3) SQLite: single-file, zero-admin, single-writer, full transactional integrity. Backup is a file copy. |
+| **Rationale** | SQLite matches the workload exactly: single-writer (one KI process per node), local metadata only, append-heavy. The custody model (D-023) means cross-node sharing happens via push to the controller — not via database sync — so there is no multi-writer scenario on the worker's SQLite. Controller KI continues to use the existing PostgreSQL instance (co-tenant with Authentik and LiteLLM); this is a co-tenancy benefit, not extra cost. |
+| **Driver** | Joint — Phase 10 topology analysis |
+| **Trigger** | Hardware floor analysis for TC25 and SOL; discovery that app.py has no database code yet makes the SQLite spec change zero-cost now vs. a migration later. |
+| **Commit** | *(Phase 10)* |
+
+---
+
+### D-025 — Library Custody Model: Controller as Custodian, Workers as Authors
+
+| Field | Value |
+|---|---|
+| **Decision** | The controller is the custody and serving hub for all knowledge library domains. It holds ingested copies of all synced libraries, records provenance in its PostgreSQL KI schema, and exposes a `/v1/catalog` API listing all libraries with author, origin node, version, and custody status. Knowledge-workers are authors and contributors: they create, curate, and push library packages. The `.ai-library` package format (D-013) is the exchange unit: `signature.asc` anchors authorship, `manifest.yaml` carries `version`/`author`/`license`, and `checksums.txt` provides integrity. The controller never holds the signing key — provenance is verifiable by anyone with the author's public key. |
+| **Context** | Libraries represent accumulating intellectual value: curated knowledge, embeddings, topic taxonomies. The original D-023 model (live query proxy) treated libraries as transient distributed state. The custody model treats them as durable digital assets — created by contributors, safeguarded by the controller, eventually distributable or licensable. This framing was explicit in Phase 10 design: "a mechanism to unify, safeguard, and later monetize." |
+| **Options Considered** | (1) Live proxy model: no custody; origin must be online; no provenance tracking. (2) Shared filesystem/NFS: easy replication but no provenance, no access control, no per-library permissions. (3) Custody push + provenance registry: controller is custodian and registry; workers are signed contributors; the signature is the ownership anchor even after custody transfer. |
+| **Rationale** | Option 3 is the only model that supports the full lifecycle: author → curate → push → serve → version → access-control → license → monetize. The `.ai-library` format already contains all necessary fields — D-013 was designed with this intent. Monetization is a future phase, but the architecture must not foreclose it. Tracking author + version + signature from the first push ensures provenance is never reconstructed retroactively. The controller's PostgreSQL KI schema grows to include: `library_id`, `name`, `version`, `author`, `origin_node`, `signature_hash`, `checksum_hash`, `synced_at`, `visibility` (private/shared/licensed). |
+| **Driver** | Human-initiated vision; joint design |
+| **Trigger** | Phase 10 architecture discussion — framing libraries as digital artifacts with lifecycle value, not just distributed state. |
 | **Commit** | *(Phase 10)* |
