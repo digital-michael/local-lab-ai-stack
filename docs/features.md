@@ -6,6 +6,23 @@ A human-readable summary of what this stack provides, ordered from most to least
 
 ---
 
+## Overview
+
+This is a **self-hosted, privacy-first AI platform** that runs entirely on your own hardware — no cloud accounts, no usage fees, no data leaving your network.
+
+At its core, the stack gives a team:
+
+- **A chat interface** for conversational AI, backed by models running on local machines
+- **A private knowledge base** that AI can draw from when answering questions about your own documents
+- **A workflow builder** for automating multi-step tasks with AI without writing code
+- **Distributed inference** so that multiple machines contribute GPU compute to the shared model pool
+
+Everything is secured behind a single login, all traffic is encrypted, and the full state of the system can be backed up and restored with a single command.
+
+The stack is designed to grow: new inference nodes can be added to increase capacity, new models can be hot-swapped, and the architecture extends toward a fully peer-to-peer mesh where each node operates independently while contributing to the shared pool.
+
+---
+
 ## Table of Contents
 
 **Core Features** *(fully available)*
