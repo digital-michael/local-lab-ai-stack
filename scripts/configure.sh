@@ -183,6 +183,10 @@ EOF
     local ai_stack_dir
     ai_stack_dir=$(jq -r '.ai_stack_dir' "$CONFIG_FILE")
 
+    # Cache existing Podman secrets once — used to skip Secret= lines for unstored optional keys
+    local existing_podman_secrets
+    existing_podman_secrets=$(podman secret ls --format '{{.Name}}' 2>/dev/null)
+
     for svc in $services; do
         local file="$QUADLET_DIR/${svc}.container"
         local image tag container_name
@@ -225,8 +229,15 @@ EOF
                 echo "${line//\$HOME/%h}"
             done
 
-            # Secrets
-            jq -r --arg s "$svc" '.services[$s].secrets[]? | "Secret=" + .name + ",type=env,target=" + .target' "$CONFIG_FILE"
+            # Secrets — only emit lines for secrets that actually exist in the Podman store;
+            # optional cloud API keys may be absent if skipped during generate-secrets.
+            while IFS=' ' read -r _sn _tgt; do
+                if echo "$existing_podman_secrets" | grep -qx "$_sn"; then
+                    echo "Secret=${_sn},type=env,target=${_tgt}"
+                else
+                    printf '  [warn] %s: secret "%s" not in Podman store — skipping\n' "$svc" "$_sn" >&2
+                fi
+            done < <(jq -r --arg s "$svc" '.services[$s].secrets[]? | .name + " " + .target' "$CONFIG_FILE")
 
             # Environment — DATABASE_URL uses EnvironmentFile for credential injection at deploy time
             local has_db_url
