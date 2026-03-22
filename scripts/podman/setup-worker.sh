@@ -113,9 +113,9 @@ elif [[ $VRAM_FREE_INT -ge 8 ]]; then
 elif [[ $VRAM_FREE_INT -ge 4 ]]; then
     RECOMMENDED_MODEL="mistral:7b-q4_K_M"
 elif [[ $VRAM_FREE_INT -ge 3 ]]; then
-    RECOMMENDED_MODEL="llama3.2:3b-q4_K_M"
+    RECOMMENDED_MODEL="llama3.2:3b-instruct-q4_K_M"
 elif [[ $RAM_GB -ge 8 ]]; then
-    RECOMMENDED_MODEL="llama3.2:3b-q4_K_M"
+    RECOMMENDED_MODEL="llama3.2:3b-instruct-q4_K_M"
 else
     RECOMMENDED_MODEL="qwen2.5:1.5b-q8_0"
 fi

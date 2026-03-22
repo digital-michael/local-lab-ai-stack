@@ -33,7 +33,7 @@
       "address_fallback": "10.19.208.113",
       "os": "linux",
       "deployment": "podman",
-      "models": ["llama3.2:3b-q4_K_M"]
+      "models": ["llama3.2:3b-instruct-q4_K_M"]
     }
   ],
   "models": [
@@ -56,7 +56,7 @@
       "host": "macbook-m1"
     },
     {
-      "name": "llama3.2:3b-q4_K_M",
+      "name": "llama3.2:3b-instruct-q4_K_M",
       "backend": "ollama",
       "device": "gpu",
       "host": "alienware"
