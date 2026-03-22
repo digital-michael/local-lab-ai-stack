@@ -611,16 +611,16 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ### Phase 9c — Alienware Podman Worker *(requires access + address)*
 
-- [ ] **9c.1** Create `scripts/podman/setup-worker.sh`
+- [x] **9c.1** Create `scripts/podman/setup-worker.sh`
   - Verify Podman installed; run `detect-hardware` for model autoselect
   - Call `configure.sh generate-quadlets inference-worker` → ollama + promtail quadlets
   - Pull Ollama quantized model; `systemctl --user start ollama.service`
 
-- [ ] **9c.2** Fill Alienware `address` / `address_fallback` in `config.json` once known
+- [x] **9c.2** Fill Alienware `address` / `address_fallback` in `config.json` once known
 
-- [ ] **9c.3** Run `setup-worker.sh` on Alienware; regenerate + restart LiteLLM on controller
+- [x] **9c.3** Run `setup-worker.sh` on Alienware; regenerate + restart LiteLLM on controller
 
-- [ ] **9c.4** Verify and commit Phase 9c
+- [x] **9c.4** Verify and commit Phase 9c
   - Controller LiteLLM `/v1/models` lists Alienware-hosted model
   - Completion request routed to Alienware model succeeds
 
