@@ -835,9 +835,16 @@ These collapse into the configuration system above. Tracked individually for vis
     - Restart, stop, backup, diagnose, and status operations per node
     - Full library entries (private, sensitive — admin-only view)
     - Podman secrets inventory — list secret names, types, and creation/update timestamps (no values exposed); indicate which config-defined secrets are missing from the store
+  - **Nodes tab**
+    - Node list: node ID, display name, profile (`inference-worker` / `knowledge-worker` / `peer`), online/offline health indicator, last-seen timestamp
+    - Per-node detail view:
+      - Health: CPU / RAM / VRAM utilization, disk free, uptime
+      - Solution activity: recent LLM calls (model, prompt tokens, latency), active inference requests, error rate
+      - Loaded models: all models present in Ollama model store on that node
+      - Active models: models currently loaded into VRAM / serving requests
+      - Local libraries: `.ai-library` packages indexed by the node (name, version, author, visibility, sync status with controller)
   - **System tab**
     - Per-component health panel with links to: direct web interface, log stream, configuration, and metrics (performance, memory, API call counts)
-    - Registered nodes list with online/offline status, supported models, and hardware profile
     - Library entries visible to users/teams (public, non-sensitive — auto-filtered for common auth view)
   - Additional elements to be discovered as the stack matures
 
