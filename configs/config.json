@@ -392,7 +392,13 @@
       "depends_on": [
         "litellm"
       ],
-      "ports": [],
+      "ports": [
+        {
+          "host": 11434,
+          "container": 11434,
+          "bind": "0.0.0.0"
+        }
+      ],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/ollama",
