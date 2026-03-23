@@ -6,6 +6,19 @@
 #   1  Deployed but one or more services not active (degraded/stopped/failed)
 #   2  Not deployed (no quadlet .container files found in QUADLET_DIR)
 
+# macOS ships bash 3.2; this script requires bash 4+ (mapfile, declare -A).
+# Re-exec automatically with a newer bash if one is available.
+if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+    for _b in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+        if [[ -x "$_b" ]] && [[ "$("$_b" -c 'echo ${BASH_VERSINFO[0]}')" -ge 4 ]]; then
+            exec "$_b" "$0" "$@"
+        fi
+    done
+    echo "ERROR: bash 4+ required (found $BASH_VERSION)." >&2
+    echo "  Install: brew install bash" >&2
+    exit 1
+fi
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
