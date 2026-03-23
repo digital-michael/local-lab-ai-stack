@@ -17,6 +17,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="${CONFIG_FILE:-$PROJECT_ROOT/configs/config.json}"
+NODE_PROFILE_FILE="${NODE_PROFILE_FILE:-$PROJECT_ROOT/configs/node_profile}"
+
+_get_node_profile() {
+    if [[ -f "$NODE_PROFILE_FILE" ]]; then
+        local p; p=$(tr -d '[:space:]' < "$NODE_PROFILE_FILE")
+        [[ -n "$p" ]] && { echo "$p"; return; }
+    fi
+    jq -r '.node_profile // "controller"' "$CONFIG_FILE" 2>/dev/null || echo "controller"
+}
 QUADLET_DIR="${QUADLET_DIR:-$HOME/.config/containers/systemd}"
 
 FIX=false
@@ -697,7 +706,7 @@ _check_library_custody() {
     echo ""
     echo "  Library Custody"
     local node_profile
-    node_profile=$(jq -r '.node_profile // "knowledge-worker"' "$CONFIG_FILE" 2>/dev/null || echo "knowledge-worker")
+    node_profile=$(_get_node_profile)
 
     if [[ "$node_profile" != "controller" ]]; then
         printf "  [SKIP] %-20s not a controller node\n" "library-custody"

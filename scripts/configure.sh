@@ -8,6 +8,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="${CONFIG_FILE:-$PROJECT_ROOT/configs/config.json}"
 QUADLET_DIR="${QUADLET_DIR:-$HOME/.config/containers/systemd}"
+NODE_PROFILE_FILE="${NODE_PROFILE_FILE:-$PROJECT_ROOT/configs/node_profile}"
+
+# Returns the effective node profile: configs/node_profile override file wins,
+# then config.json .node_profile, then defaults to "controller".
+_get_node_profile() {
+    if [[ -f "$NODE_PROFILE_FILE" ]]; then
+        local p
+        p=$(tr -d '[:space:]' < "$NODE_PROFILE_FILE")
+        [[ -n "$p" ]] && { echo "$p"; return; }
+    fi
+    jq -r '.node_profile // "controller"' "$CONFIG_FILE" 2>/dev/null || echo "controller"
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -117,7 +129,7 @@ cmd_validate() {
 
     # Check for required secret names that don't exist yet — scoped to deployed services only
     local node_profile_v deployed_svcs required_secrets
-    node_profile_v=$(jq -r '.node_profile // "controller"' "$CONFIG_FILE")
+    node_profile_v=$(_get_node_profile)
     case "$node_profile_v" in
         inference-worker)  deployed_svcs='["ollama","promtail"]' ;;
         knowledge-worker)  deployed_svcs='["ollama","promtail","knowledge-index","qdrant"]' ;;
@@ -181,7 +193,7 @@ EOF
 
     # Service quadlets — filter by node_profile
     local node_profile services
-    node_profile=$(jq -r '.node_profile // "controller"' "$CONFIG_FILE")
+    node_profile=$(_get_node_profile)
     case "$node_profile" in
         inference-worker)
             # Ollama (CPU inference) + Promtail (log shipping) only
@@ -673,7 +685,9 @@ cmd_detect_hardware() {
     echo ""
     echo "=== Current config.json ==="
     if [[ -f "$CONFIG_FILE" ]]; then
-        echo "  node_profile: $(jq -r '.node_profile // "not set"' "$CONFIG_FILE")"
+        local _np; _np=$(_get_node_profile)
+        [[ -f "$NODE_PROFILE_FILE" ]] && _np+=' (override)'
+        echo "  node_profile: $_np"
         local model_count
         model_count=$(jq '.models | length' "$CONFIG_FILE" 2>/dev/null || echo 0)
         echo "  models[]:     $model_count defined"
@@ -981,19 +995,18 @@ cmd_recommend() {
     fi
 
     # -----------------------------------------------------------------------
-    # 7. Offer to write profile to config.json
+    # 7. Write profile to machine-local override file (gitignored)
     # -----------------------------------------------------------------------
     local current_profile
-    current_profile=$(jq -r '.node_profile // "not set"' "$CONFIG_FILE")
+    current_profile=$(_get_node_profile)
     local confirm
-    read -r -p "Write node_profile=\"$profile\" to config.json? (current: $current_profile) [yes/no] (default: yes): " confirm
+    read -r -p "Write node_profile=\"$profile\" to configs/node_profile? (current: $current_profile) [yes/no] (default: yes): " confirm
     confirm="${confirm:-yes}"
 
     if [[ "$confirm" == "yes" ]]; then
-        local tmp
-        tmp=$(mktemp)
-        jq --arg p "$profile" '.node_profile = $p' "$CONFIG_FILE" > "$tmp" && mv "$tmp" "$CONFIG_FILE"
-        echo "✓ node_profile set to \"$profile\" in $CONFIG_FILE"
+        echo "$profile" > "$NODE_PROFILE_FILE"
+        echo "✓ node_profile set to \"$profile\" in $NODE_PROFILE_FILE"
+        echo "  This file is gitignored — it will not be overwritten by git pull."
         echo "  Run 'bash scripts/configure.sh generate-quadlets' to apply."
     else
         echo "Profile not written."
