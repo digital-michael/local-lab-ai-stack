@@ -115,9 +115,21 @@ cmd_validate() {
         errors=$((errors + $(echo "$tbd_services" | wc -l)))
     fi
 
-    # Check for required secret names that don't exist yet
-    local required_secrets
-    required_secrets=$(jq -r '[.services[].secrets[]?.name] | unique[]' "$CONFIG_FILE")
+    # Check for required secret names that don't exist yet — scoped to deployed services only
+    local node_profile_v deployed_svcs required_secrets
+    node_profile_v=$(jq -r '.node_profile // "controller"' "$CONFIG_FILE")
+    case "$node_profile_v" in
+        inference-worker)  deployed_svcs='["ollama","promtail"]' ;;
+        knowledge-worker)  deployed_svcs='["ollama","promtail","knowledge-index","qdrant"]' ;;
+        *)                 deployed_svcs='null' ;;  # null = all services
+    esac
+    if [[ "$deployed_svcs" == "null" ]]; then
+        required_secrets=$(jq -r '[.services[].secrets[]?.name] | unique[]' "$CONFIG_FILE")
+    else
+        required_secrets=$(jq -r --argjson svcs "$deployed_svcs" \
+            '[.services | to_entries[] | select(.key as $k | $svcs | index($k) != null) | .value.secrets[]?.name] | unique[]' \
+            "$CONFIG_FILE")
+    fi
     for secret in $required_secrets; do
         if ! podman secret inspect "$secret" &>/dev/null; then
             echo "WARN: Podman secret '$secret' does not exist (run: configure.sh generate-secrets)"
