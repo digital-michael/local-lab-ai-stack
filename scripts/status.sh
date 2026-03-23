@@ -59,6 +59,39 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
+# ── Service state helpers ────────────────────────────────────────────────────
+# Returns: active | inactive | failed | unknown
+# Uses systemctl when a quadlet file exists; falls back to HTTP probe otherwise.
+_svc_state() {
+    local svc="$1"
+    if [[ -f "$QUADLET_DIR/${svc}.container" ]]; then
+        local s; s=$(systemctl --user is-active "${svc}.service" 2>/dev/null || true)
+        echo "${s:-unknown}"
+    else
+        local port path
+        case "$svc" in
+            ollama)          port=11434; path="" ;;
+            promtail)        port=9080;  path="/ready" ;;
+            knowledge-index) port=$(jq -r '.services["knowledge-index"].ports[0].host // 8000' "$CONFIG_FILE" 2>/dev/null || echo 8000); path="/health" ;;
+            qdrant)          port=6333;  path="/healthz" ;;
+            *)               echo "unknown"; return ;;
+        esac
+        if curl -sf --max-time 2 "http://localhost:${port}${path}" >/dev/null 2>&1; then
+            echo "active"
+        else
+            echo "inactive"
+        fi
+    fi
+}
+
+# Returns container health (only for quadlet-managed active containers)
+_svc_health() {
+    local svc="$1" state="$2"
+    if [[ "$state" == "active" && -f "$QUADLET_DIR/${svc}.container" ]]; then
+        podman inspect --format '{{.State.Health.Status}}' "$svc" 2>/dev/null || true
+    fi
+}
+
 # ── Deployment check ──────────────────────────────────────────────────────────
 
 quadlet_count=0
@@ -66,9 +99,10 @@ if [[ -d "$QUADLET_DIR" ]]; then
     quadlet_count=$(find "$QUADLET_DIR" -maxdepth 1 -name "*.container" 2>/dev/null | wc -l)
 fi
 
-if [[ $quadlet_count -eq 0 ]]; then
+# Bare-metal nodes have no quadlets but ollama runs natively
+if [[ $quadlet_count -eq 0 ]] && ! command -v ollama &>/dev/null; then
     if ! $QUIET; then
-        echo "Stack is NOT DEPLOYED (no quadlet files found in $QUADLET_DIR)"
+        echo "Stack is NOT DEPLOYED (no quadlet files found in $QUADLET_DIR, no bare-metal ollama found)"
         echo "Run: ./scripts/deploy.sh"
     fi
     exit 2
@@ -106,6 +140,24 @@ else
         '.services | keys[] | select(. as $k | $svcs | index($k) != null)' "$CONFIG_FILE")
 fi
 
+# Determine deploy mode: per-service, check whether a quadlet file exists
+_quadlet_svc_count=0
+_bare_svc_count=0
+for svc in "${services[@]}"; do
+    if [[ -f "$QUADLET_DIR/${svc}.container" ]]; then
+        _quadlet_svc_count=$((_quadlet_svc_count + 1))
+    else
+        _bare_svc_count=$((_bare_svc_count + 1))
+    fi
+done
+if [[ $_quadlet_svc_count -gt 0 && $_bare_svc_count -gt 0 ]]; then
+    _deploy_mode="mixed (podman + bare metal)"
+elif [[ $_quadlet_svc_count -gt 0 ]]; then
+    _deploy_mode="podman (quadlets)"
+else
+    _deploy_mode="bare metal"
+fi
+
 total=${#services[@]}
 active=0
 failed_count=0
@@ -114,17 +166,12 @@ unhealthy_count=0
 declare -A svc_states=()
 declare -A svc_health=()
 for svc in "${services[@]}"; do
-    state=$(systemctl --user is-active "${svc}.service" 2>/dev/null || true)
-    [[ -z "$state" ]] && state="unknown"
+    state=$(_svc_state "$svc")
     svc_states[$svc]="$state"
     [[ "$state" == "active"  ]] && active=$((active + 1))
     [[ "$state" == "failed"  ]] && failed_count=$((failed_count + 1))
 
-    # Container-level health (only meaningful when active)
-    health=""
-    if [[ "$state" == "active" ]]; then
-        health=$(podman inspect --format '{{.State.Health.Status}}' "$svc" 2>/dev/null || true)
-    fi
+    health=$(_svc_health "$svc" "$state")
     svc_health[$svc]="$health"
     [[ "$health" == "unhealthy" ]] && unhealthy_count=$((unhealthy_count + 1))
 done
@@ -143,30 +190,33 @@ if ! $QUIET; then
     echo "AI Stack Status"
     echo "════════════════════════════════════════"
     printf "  %-${col}s %s\n" "node profile" "$(_get_node_profile)"
+    printf "  %-${col}s %s\n" "deploy mode" "$_deploy_mode"
 
-    # Network
-    if podman network exists "$net_name" 2>/dev/null; then
-        printf "  %-${col}s %s\n" "network/${net_name}" "exists"
-    else
-        printf "  %-${col}s %s\n" "network/${net_name}" "MISSING"
-    fi
-
-    # Secrets summary — scoped to profile services
-    if [[ "$_profile_svcs" == "null" ]]; then
-        mapfile -t all_secrets < <(jq -r '[.services[].secrets[]?.name] | unique[]' "$CONFIG_FILE" 2>/dev/null || true)
-    else
-        mapfile -t all_secrets < <(jq -r --argjson svcs "$_profile_svcs" \
-            '[.services | to_entries[] | select(.key as $k | $svcs | index($k) != null) | .value.secrets[]?.name] | unique[]' \
-            "$CONFIG_FILE" 2>/dev/null || true)
-    fi
-    total_secrets=${#all_secrets[@]}
-    present_secrets=0
-    for secret in "${all_secrets[@]}"; do
-        if podman secret inspect "$secret" &>/dev/null 2>&1; then
-            present_secrets=$((present_secrets + 1))
+    # Network and secrets — only relevant when podman is in use
+    if [[ $_quadlet_svc_count -gt 0 ]]; then
+        if podman network exists "$net_name" 2>/dev/null; then
+            printf "  %-${col}s %s\n" "network/${net_name}" "exists"
+        else
+            printf "  %-${col}s %s\n" "network/${net_name}" "MISSING"
         fi
-    done
-    printf "  %-${col}s %s\n" "secrets" "${present_secrets}/${total_secrets} present"
+
+        # Secrets summary — scoped to profile services
+        if [[ "$_profile_svcs" == "null" ]]; then
+            mapfile -t all_secrets < <(jq -r '[.services[].secrets[]?.name] | unique[]' "$CONFIG_FILE" 2>/dev/null || true)
+        else
+            mapfile -t all_secrets < <(jq -r --argjson svcs "$_profile_svcs" \
+                '[.services | to_entries[] | select(.key as $k | $svcs | index($k) != null) | .value.secrets[]?.name] | unique[]' \
+                "$CONFIG_FILE" 2>/dev/null || true)
+        fi
+        total_secrets=${#all_secrets[@]}
+        present_secrets=0
+        for secret in "${all_secrets[@]}"; do
+            if podman secret inspect "$secret" &>/dev/null 2>&1; then
+                present_secrets=$((present_secrets + 1))
+            fi
+        done
+        printf "  %-${col}s %s\n" "secrets" "${present_secrets}/${total_secrets} present"
+    fi
 
     echo ""
     printf "  %-${col}s %-10s %s\n" "SERVICE" "STATE" "HEALTH"
