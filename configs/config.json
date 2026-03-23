@@ -11,7 +11,7 @@
     {
       "name": "workstation",
       "profile": "controller",
-      "address": null,
+      "address": "SERVICES.mynetworksettings.com",
       "address_fallback": null,
       "os": "linux",
       "deployment": "podman",
