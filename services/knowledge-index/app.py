@@ -6,10 +6,17 @@
 #   POST /documents          — ingest a document (chunk → embed → store in Qdrant)
 #   PUT  /documents/{id}     — replace a document
 #   DELETE /documents/{id}   — remove a document from Qdrant
-#   POST /query              — vector search over a named collection
+#   POST /query              — vector search (custody-aware routing on controller)
 #   GET  /health             — readiness probe (used by pytest module-level skip guard)
 #   POST /v1/libraries       — custody ingest: receive .ai-library package from a worker
 #   GET  /v1/catalog         — list all libraries with provenance metadata
+#
+# Cross-node query routing (D-023 revised, 10.5):
+#   On the controller (NODE_PROFILE=controller):
+#     1. Query local Qdrant collection as requested
+#     2. If empty/404 and collection maps to a custody library — re-query the custody collection
+#     3. If still empty and origin node known — proxy to origin worker KI (fallback)
+#   On workers (knowledge-worker): local Qdrant only; no routing.
 #
 # MCP (Model Context Protocol) — HTTP/SSE transport (D-015):
 #   GET  /mcp/sse            — establish SSE stream (MCP clients connect here)
@@ -54,6 +61,9 @@ QDRANT_KEY    = os.environ.get("QDRANT_API_KEY", "")
 CHUNK_SIZE    = int(os.environ.get("CHUNK_SIZE", "400"))   # max chars per chunk
 API_KEY       = os.environ.get("API_KEY", "")              # guards /mcp/* and /query when set
 DATABASE_URL  = os.environ.get("DATABASE_URL", "sqlite:///ki.db")  # sqlite (workers) or postgresql (controller)
+NODE_PROFILE  = os.environ.get("NODE_PROFILE", "knowledge-worker")  # controller enables cross-node routing
+NODE_NAME     = os.environ.get("NODE_NAME", "")            # this node's name (for proxy auth header)
+KI_API_KEY    = os.environ.get("KI_API_KEY", API_KEY)      # API key used when proxying to origin workers
 
 # ---------------------------------------------------------------------------
 # HTTP clients (module-level singletons; closed on shutdown if needed)
@@ -134,6 +144,90 @@ def _db_del_doc(doc_id: str) -> None:
     with _db.connect() as conn:
         conn.execute(text("DELETE FROM documents WHERE id = :id"), {"id": doc_id})
         conn.commit()
+
+
+def _db_get_custody_collection(collection: str) -> str | None:
+    """
+    On the controller, check if *collection* corresponds to a custody library.
+    Returns the Qdrant collection name for the library, or None if not found.
+    The library collection is named 'lib_{name}_{version}' with non-alphanumeric
+    chars replaced by '_'; the match is done by normalising the requested name.
+    """
+    if NODE_PROFILE != "controller":
+        return None
+    norm = collection.replace(":", "_").replace(".", "_").replace("-", "_")
+    # Exact match against stored lib collections
+    with _db.connect() as conn:
+        rows = conn.execute(
+            text("SELECT name, version FROM libraries")
+        ).fetchall()
+    for name, version in rows:
+        candidate = f"lib_{name}_{version}".replace(":", "_").replace(".", "_").replace("-", "_")
+        if candidate == norm or candidate == f"lib_{norm}":
+            return candidate
+    return None
+
+
+def _db_get_origin_node_url(collection: str) -> str | None:
+    """Return the origin node KI URL for a library collection, or None."""
+    if NODE_PROFILE != "controller":
+        return None
+    norm = collection.replace(":", "_").replace(".", "_").replace("-", "_")
+    with _db.connect() as conn:
+        rows = conn.execute(
+            text("SELECT name, version, origin_node FROM libraries WHERE origin_node IS NOT NULL AND origin_node != ''")
+        ).fetchall()
+    for name, version, origin_node in rows:
+        candidate = f"lib_{name}_{version}".replace(":", "_").replace(".", "_").replace("-", "_")
+        if candidate == norm or candidate == f"lib_{norm}":
+            # origin_node may be a hostname — KI runs on port 8100
+            return f"http://{origin_node}:8100"
+    return None
+
+
+def _qdrant_search(collection: str, vec: list[float], top_k: int) -> list[dict]:
+    """Run a vector search against a Qdrant collection; returns [] on 404."""
+    resp = _qdrant.post(
+        f"/collections/{collection}/points/search",
+        json={"vector": vec, "limit": top_k, "with_payload": True},
+    )
+    if resp.status_code == 404:
+        return []
+    resp.raise_for_status()
+    results = []
+    for hit in resp.json().get("result", []):
+        payload = hit.get("payload", {})
+        results.append({
+            "text":        payload.get("text", ""),
+            "score":       hit.get("score", 0.0),
+            "document_id": payload.get("doc_id", ""),
+            "source":      payload.get("source", ""),
+            "metadata":    payload.get("metadata", {}),
+        })
+    return results
+
+
+def _proxy_query_to_origin(origin_url: str, req_collection: str, vec_query: str, top_k: int) -> list[dict]:
+    """
+    Proxy a /query request to the origin worker KI.
+    *vec_query* is the natural-language query (origin re-embeds using its own model).
+    Returns results list or [] on any error (fallback is always silent).
+    """
+    proxy_headers: dict[str, str] = {"Content-Type": "application/json"}
+    if KI_API_KEY:
+        proxy_headers["Authorization"] = f"Bearer {KI_API_KEY}"
+    try:
+        resp = httpx.post(
+            f"{origin_url}/query",
+            json={"query": vec_query, "collection": req_collection, "top_k": top_k},
+            headers=proxy_headers,
+            timeout=15.0,
+        )
+        if resp.status_code == 200:
+            return resp.json().get("results", [])
+    except Exception:  # noqa: BLE001 — proxy failure is non-fatal
+        pass
+    return []
 
 # ---------------------------------------------------------------------------
 # FastAPI app
@@ -300,29 +394,27 @@ def delete_document(doc_id: str) -> dict:
 
 @app.post("/query")
 def query_documents(req: QueryRequest) -> dict:
+    """Vector search with cross-node custody routing on controller nodes."""
     try:
         vec = _embed(req.query)
     except httpx.HTTPStatusError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    resp = _qdrant.post(
-        f"/collections/{req.collection}/points/search",
-        json={"vector": vec, "limit": req.top_k, "with_payload": True},
-    )
-    if resp.status_code == 404:
-        return {"results": []}
-    resp.raise_for_status()
+    # --- Primary: search the requested collection directly
+    results = _qdrant_search(req.collection, vec, req.top_k)
 
-    results = []
-    for hit in resp.json().get("result", []):
-        payload = hit.get("payload", {})
-        results.append({
-            "text":        payload.get("text", ""),
-            "score":       hit.get("score", 0.0),
-            "document_id": payload.get("doc_id", ""),
-            "source":      payload.get("source", ""),
-            "metadata":    payload.get("metadata", {}),
-        })
+    # --- Controller routing: if primary empty, check custody namespace
+    if not results and NODE_PROFILE == "controller":
+        custody_col = _db_get_custody_collection(req.collection)
+        if custody_col and custody_col != req.collection:
+            results = _qdrant_search(custody_col, vec, req.top_k)
+
+        # --- Fallback: proxy to origin worker for unsynced/draft libraries
+        if not results:
+            origin_url = _db_get_origin_node_url(req.collection)
+            if origin_url:
+                results = _proxy_query_to_origin(origin_url, req.collection, req.query, req.top_k)
+
     return {"results": results}
 
 
@@ -458,22 +550,15 @@ async def _call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         def _do_search() -> dict:
             vec = _embed(query)
-            resp = _qdrant.post(
-                f"/collections/{collection}/points/search",
-                json={"vector": vec, "limit": top_k, "with_payload": True},
-            )
-            if resp.status_code == 404:
-                return {"results": []}
-            resp.raise_for_status()
-            results = []
-            for hit in resp.json().get("result", []):
-                payload = hit.get("payload", {})
-                results.append({
-                    "text":        payload.get("text", ""),
-                    "score":       hit.get("score", 0.0),
-                    "document_id": payload.get("doc_id", ""),
-                    "source":      payload.get("source", ""),
-                })
+            results = _qdrant_search(collection, vec, top_k)
+            if not results and NODE_PROFILE == "controller":
+                custody_col = _db_get_custody_collection(collection)
+                if custody_col and custody_col != collection:
+                    results = _qdrant_search(custody_col, vec, top_k)
+                if not results:
+                    origin_url = _db_get_origin_node_url(collection)
+                    if origin_url:
+                        results = _proxy_query_to_origin(origin_url, collection, query, top_k)
             return {"results": results}
 
         result = await asyncio.to_thread(_do_search)
