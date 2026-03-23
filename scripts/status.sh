@@ -11,7 +11,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="${CONFIG_FILE:-$PROJECT_ROOT/configs/config.json}"
+NODE_PROFILE_FILE="${NODE_PROFILE_FILE:-$PROJECT_ROOT/configs/node_profile}"
 QUADLET_DIR="${QUADLET_DIR:-$HOME/.config/containers/systemd}"
+
+_get_node_profile() {
+    if [[ -f "$NODE_PROFILE_FILE" ]]; then
+        local p; p=$(tr -d '[:space:]' < "$NODE_PROFILE_FILE")
+        [[ -n "$p" ]] && { echo "$p"; return; }
+    fi
+    jq -r '.node_profile // "controller"' "$CONFIG_FILE" 2>/dev/null || echo "controller"
+}
 
 QUIET=false
 CHECK_ONLY=false
@@ -120,6 +129,7 @@ if ! $QUIET; then
     echo ""
     echo "AI Stack Status"
     echo "════════════════════════════════════════"
+    printf "  %-${col}s %s\n" "node profile" "$(_get_node_profile)"
 
     # Network
     if podman network exists "$net_name" 2>/dev/null; then
