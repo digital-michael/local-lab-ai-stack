@@ -91,7 +91,20 @@ fi
 # ── Gather service states ─────────────────────────────────────────────────────
 
 net_name=$(jq -r '.network.name' "$CONFIG_FILE")
-mapfile -t services < <(jq -r '.services | keys[]' "$CONFIG_FILE")
+
+# Filter services to those expected for this node profile
+case "$(_get_node_profile)" in
+    inference-worker)  _profile_svcs='["ollama","promtail"]' ;;
+    knowledge-worker)  _profile_svcs='["ollama","promtail","knowledge-index","qdrant"]' ;;
+    *)                 _profile_svcs='null' ;;  # controller/peer: all services
+esac
+
+if [[ "$_profile_svcs" == "null" ]]; then
+    mapfile -t services < <(jq -r '.services | keys[]' "$CONFIG_FILE")
+else
+    mapfile -t services < <(jq -r --argjson svcs "$_profile_svcs" \
+        '.services | keys[] | select(. as $k | $svcs | index($k) != null)' "$CONFIG_FILE")
+fi
 
 total=${#services[@]}
 active=0
@@ -138,8 +151,14 @@ if ! $QUIET; then
         printf "  %-${col}s %s\n" "network/${net_name}" "MISSING"
     fi
 
-    # Secrets summary
-    mapfile -t all_secrets < <(jq -r '[.services[].secrets[]?.name] | unique[]' "$CONFIG_FILE" 2>/dev/null || true)
+    # Secrets summary — scoped to profile services
+    if [[ "$_profile_svcs" == "null" ]]; then
+        mapfile -t all_secrets < <(jq -r '[.services[].secrets[]?.name] | unique[]' "$CONFIG_FILE" 2>/dev/null || true)
+    else
+        mapfile -t all_secrets < <(jq -r --argjson svcs "$_profile_svcs" \
+            '[.services | to_entries[] | select(.key as $k | $svcs | index($k) != null) | .value.secrets[]?.name] | unique[]' \
+            "$CONFIG_FILE" 2>/dev/null || true)
+    fi
     total_secrets=${#all_secrets[@]}
     present_secrets=0
     for secret in "${all_secrets[@]}"; do
