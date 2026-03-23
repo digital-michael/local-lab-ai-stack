@@ -24,6 +24,9 @@ __pycache__/
 *.pid
 tmp/
 
+# Machine-local node profile override (not committed; set by configure.sh recommend)
+configs/node_profile
+
 # Meta framework (collaboration protocol — separate repo, symlinked locally)
 docs/meta
 docs/meta_local/dynamics.md
