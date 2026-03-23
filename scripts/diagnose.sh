@@ -688,6 +688,73 @@ _check_resource_pressure() {
     return $warn
 }
 
+# ── Full check: library custody status (controller only) ─────────────────────
+# Hits GET /v1/catalog on the local knowledge-index KI and reports which
+# libraries have been synced (synced_at non-null) and which are missing.
+# Only runs when NODE_PROFILE=controller and knowledge-index is active.
+
+_check_library_custody() {
+    echo ""
+    echo "  Library Custody"
+    local node_profile
+    node_profile=$(jq -r '.node_profile // "knowledge-worker"' "$CONFIG_FILE" 2>/dev/null || echo "knowledge-worker")
+
+    if [[ "$node_profile" != "controller" ]]; then
+        printf "  [SKIP] %-20s not a controller node\n" "library-custody"
+        return 0
+    fi
+
+    local ki_state
+    ki_state=$(systemctl --user is-active knowledge-index.service 2>/dev/null || true)
+    if [[ "$ki_state" != "active" ]]; then
+        printf "  [SKIP] %-20s knowledge-index not active\n" "library-custody"
+        return 0
+    fi
+
+    local ki_port catalog_url response
+    ki_port=$(jq -r '.services["knowledge-index"].ports[0] // "8100"' "$CONFIG_FILE" 2>/dev/null \
+        | grep -oP '^\d+' || echo "8100")
+    catalog_url="http://localhost:${ki_port}/v1/catalog"
+
+    response=$(curl -sf --max-time 5 "$catalog_url" 2>/dev/null) || {
+        printf "  [FAIL] %-20s /v1/catalog unreachable at %s\n" "library-custody" "$catalog_url"
+        return 1
+    }
+
+    local total synced unsynced
+    total=$(echo "$response"   | jq '.libraries | length' 2>/dev/null || echo 0)
+    synced=$(echo "$response"  | jq '[.libraries[] | select(.synced_at != null)] | length' 2>/dev/null || echo 0)
+    unsynced=$(echo "$response" | jq '[.libraries[] | select(.synced_at == null)] | length' 2>/dev/null || echo 0)
+
+    if [[ "$total" -eq 0 ]]; then
+        printf "  [PASS] %-20s no libraries in custody\n" "library-custody"
+        return 0
+    fi
+
+    if [[ "$unsynced" -gt 0 ]]; then
+        printf "  [WARN] %-20s %d/%d libraries missing custody copy\n" "library-custody" "$unsynced" "$total"
+        echo "$response" | jq -r '.libraries[] | select(.synced_at == null) | "         ! \(.name):\(.version) (origin: \(.origin_node // "unknown"))"' 2>/dev/null || true
+        warn=$((warn + 1))
+    else
+        printf "  [PASS] %-20s %d/%d libraries synced\n" "library-custody" "$synced" "$total"
+    fi
+
+    # Warn if any known worker node has contributed zero libraries
+    local worker_nodes
+    worker_nodes=$(jq -r '.nodes[] | select(.profile == "inference-worker") | .name' "$CONFIG_FILE" 2>/dev/null || true)
+    while IFS= read -r node; do
+        [[ -z "$node" ]] && continue
+        local node_count
+        node_count=$(echo "$response" | jq --arg n "$node" '[.libraries[] | select(.origin_node == $n)] | length' 2>/dev/null || echo 0)
+        if [[ "$node_count" -eq 0 ]]; then
+            printf "  [WARN] %-20s worker '%s' has 0 libraries in catalog\n" "library-custody" "$node"
+            warn=$((warn + 1))
+        fi
+    done <<< "$worker_nodes"
+
+    return 0
+}
+
 # ── Full check: per-service API readiness probe ───────────────────────────────
 # Runs the service's health_check.command inside the container to confirm
 # the application layer is responding (not just the port).
@@ -806,6 +873,11 @@ if [[ "$PROFILE" == "full" ]]; then
         _api_probe "$svc" || probe_rc=$?
         [[ $probe_rc -ne 0 ]] && fail=$((fail + 1))
     done
+
+    # Library custody status (controller only)
+    custody_fail=0
+    _check_library_custody || custody_fail=$?
+    fail=$((fail + custody_fail))
 fi
 
 echo ""
