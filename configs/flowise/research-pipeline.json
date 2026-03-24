@@ -1,0 +1,380 @@
+{
+  "_meta": {
+    "description": "Research Pipeline Chatflow — D-031 Phase A (controller-side fallback) + Phase B stub (enhanced-worker dispatch)",
+    "flowise_version": "3.0.13",
+    "schema_version": "1.0",
+    "created": "2026-03-24",
+    "decision_refs": ["D-029", "D-031", "D-033"],
+    "phase_a": "Controller KI node handles /v1/search directly. No enhanced-workers required. KI_BASE_URL defaults to http://knowledge-index.ai-stack:8100.",
+    "phase_b": "Set KI_BASE_URL env/variable to the target enhanced-worker KI address (http://<node>:8100) when dispatching research to a worker with web_search capability.",
+    "import_instructions": "Import via Flowise UI: Chatflows > Add > Import. Or via API: POST /api/v1/chatflows/importchatflows. Credential 'litellm_openai_key' must be pre-configured in Flowise with the LiteLLM master key. KI_BASE_URL and KI_API_KEY are read from process.env at execution time.",
+    "credential_note": "Create a Flowise OpenAI API credential named 'litellm_openai_key' pointing at http://litellm.ai-stack:4000 with the LiteLLM master key value."
+  },
+  "nodes": [
+    {
+      "id": "chatOpenAI_0",
+      "position": { "x": 600, "y": 50 },
+      "type": "customNode",
+      "data": {
+        "id": "chatOpenAI_0",
+        "label": "LiteLLM Synthesis Model",
+        "version": 6,
+        "name": "chatOpenAI",
+        "type": "ChatOpenAI",
+        "baseClasses": ["ChatOpenAI", "BaseChatModel", "BaseLanguageModel"],
+        "category": "Chat Models",
+        "description": "OpenAI-compatible chat model via LiteLLM internal endpoint",
+        "inputParams": [
+          {
+            "label": "Connect Credential",
+            "name": "credential",
+            "type": "credential",
+            "credentialNames": ["openAIApi"]
+          },
+          {
+            "label": "Model Name",
+            "name": "modelName",
+            "type": "asyncOptions",
+            "loadMethod": "listModels"
+          },
+          {
+            "label": "Temperature",
+            "name": "temperature",
+            "type": "number",
+            "default": 0.9,
+            "optional": true
+          },
+          {
+            "label": "Streaming",
+            "name": "streaming",
+            "type": "boolean",
+            "default": true,
+            "optional": true
+          },
+          {
+            "label": "Base Path",
+            "name": "basePath",
+            "type": "string",
+            "optional": true,
+            "description": "Override the base URL for the OpenAI API"
+          }
+        ],
+        "inputAnchors": [],
+        "inputs": {
+          "modelName": "llama3.1:8b",
+          "temperature": 0.3,
+          "streaming": true,
+          "basePath": "http://litellm.ai-stack:4000"
+        },
+        "outputAnchors": [
+          {
+            "id": "chatOpenAI_0-output-chatOpenAI-ChatOpenAI|BaseChatModel|BaseLanguageModel",
+            "name": "chatOpenAI",
+            "label": "ChatOpenAI",
+            "description": "",
+            "type": "ChatOpenAI | BaseChatModel | BaseLanguageModel"
+          }
+        ],
+        "outputs": {},
+        "credential": "litellm_openai_key"
+      },
+      "width": 300,
+      "height": 470,
+      "selected": false,
+      "positionAbsolute": { "x": 600, "y": 50 },
+      "dragging": false
+    },
+    {
+      "id": "customTool_webSearch",
+      "position": { "x": 50, "y": 50 },
+      "type": "customNode",
+      "data": {
+        "id": "customTool_webSearch",
+        "label": "KI Web Search",
+        "version": 2,
+        "name": "customTool",
+        "type": "CustomTool",
+        "baseClasses": ["DynamicTool", "Tool"],
+        "category": "Tools",
+        "description": "HTTP tool: calls POST /v1/search on the Knowledge Index Service. Phase A uses controller KI; Phase B uses enhanced-worker KI (set KI_BASE_URL env).",
+        "inputParams": [
+          {
+            "label": "Tool Name",
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "label": "Tool Description",
+            "name": "description",
+            "type": "string",
+            "rows": 4
+          },
+          {
+            "label": "Return Direct",
+            "name": "returnDirect",
+            "type": "boolean",
+            "optional": true
+          },
+          {
+            "label": "Input Schema",
+            "name": "schema",
+            "type": "datagrid",
+            "description": "Define the input schema for the tool",
+            "datagrid": [
+              { "field": "key",         "headerName": "Key",         "editable": true },
+              { "field": "type",        "headerName": "Type",        "editable": true },
+              { "field": "required",    "headerName": "Required",    "editable": true },
+              { "field": "description", "headerName": "Description", "editable": true }
+            ],
+            "optional": true
+          },
+          {
+            "label": "Javascript Function",
+            "name": "javascriptFunction",
+            "type": "code"
+          }
+        ],
+        "inputAnchors": [],
+        "inputs": {
+          "name": "ki_web_search",
+          "description": "Search the web for current information on a topic and ingest results into the research knowledge base. Use this when the user asks to research, investigate, or find current information about a topic. Returns a summary of ingested results.",
+          "returnDirect": false,
+          "schema": [
+            {
+              "key": "query",
+              "type": "string",
+              "required": "true",
+              "description": "The research query to search for"
+            },
+            {
+              "key": "collection",
+              "type": "string",
+              "required": "false",
+              "description": "Qdrant collection to store results in (default: web_research)"
+            },
+            {
+              "key": "max_results",
+              "type": "number",
+              "required": "false",
+              "description": "Maximum web results to ingest (default: 5)"
+            }
+          ],
+          "javascriptFunction": "// KI Web Search Tool — D-031\n// Phase A: controller KI (KI_BASE_URL = http://knowledge-index.ai-stack:8100)\n// Phase B: set KI_BASE_URL to enhanced-worker address before dispatching.\n//\n// Input: JSON string with { query, collection?, max_results? }\n// Output: JSON string summarising ingestion result\n\nconst KI_BASE_URL = process.env.KI_BASE_URL || 'http://knowledge-index.ai-stack:8100';\nconst KI_API_KEY  = process.env.KI_API_KEY  || '';\n\nconst input      = JSON.parse($input);\nconst query      = input.query;\nconst collection = input.collection  || 'web_research';\nconst maxResults = input.max_results || 5;\n\nconst headers = { 'Content-Type': 'application/json' };\nif (KI_API_KEY) headers['Authorization'] = `Bearer ${KI_API_KEY}`;\n\nconst resp = await fetch(`${KI_BASE_URL}/v1/search`, {\n  method:  'POST',\n  headers,\n  body:    JSON.stringify({ query, max_results: maxResults, collection }),\n});\n\n// 501 = web search not enabled on this node (TAVILY_API_KEY absent)\nif (resp.status === 501) {\n  return JSON.stringify({\n    status:  'unavailable',\n    message: 'Web search not enabled on this node (TAVILY_API_KEY not set). ' +\n             'Phase B: target an enhanced-worker with web_search capability.',\n    query,\n    collection,\n  });\n}\n\nif (!resp.ok) {\n  const body = await resp.text();\n  throw new Error(`KI /v1/search failed — HTTP ${resp.status}: ${body}`);\n}\n\nconst data = await resp.json();\nreturn JSON.stringify({\n  status:             'ok',\n  query:              data.query,\n  results_found:      data.results_found,\n  documents_ingested: data.documents_ingested,\n  collection:         data.collection,\n  custody_pushed:     data.custody_pushed,\n  message: `Ingested ${data.documents_ingested} of ${data.results_found} web results ` +\n           `into collection '${data.collection}'.`,\n});\n"
+        },
+        "outputAnchors": [
+          {
+            "id": "customTool_webSearch-output-customTool-DynamicTool|Tool",
+            "name": "customTool",
+            "label": "CustomTool",
+            "description": "",
+            "type": "DynamicTool | Tool"
+          }
+        ],
+        "outputs": {}
+      },
+      "width": 300,
+      "height": 620,
+      "selected": false,
+      "positionAbsolute": { "x": 50, "y": 50 },
+      "dragging": false
+    },
+    {
+      "id": "customTool_kiQuery",
+      "position": { "x": 50, "y": 750 },
+      "type": "customNode",
+      "data": {
+        "id": "customTool_kiQuery",
+        "label": "KI Knowledge Query",
+        "version": 2,
+        "name": "customTool",
+        "type": "CustomTool",
+        "baseClasses": ["DynamicTool", "Tool"],
+        "category": "Tools",
+        "description": "HTTP tool: calls POST /query on the Knowledge Index Service to retrieve relevant chunks from an ingested collection.",
+        "inputParams": [
+          {
+            "label": "Tool Name",
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "label": "Tool Description",
+            "name": "description",
+            "type": "string",
+            "rows": 4
+          },
+          {
+            "label": "Return Direct",
+            "name": "returnDirect",
+            "type": "boolean",
+            "optional": true
+          },
+          {
+            "label": "Input Schema",
+            "name": "schema",
+            "type": "datagrid",
+            "description": "Define the input schema for the tool",
+            "datagrid": [
+              { "field": "key",         "headerName": "Key",         "editable": true },
+              { "field": "type",        "headerName": "Type",        "editable": true },
+              { "field": "required",    "headerName": "Required",    "editable": true },
+              { "field": "description", "headerName": "Description", "editable": true }
+            ],
+            "optional": true
+          },
+          {
+            "label": "Javascript Function",
+            "name": "javascriptFunction",
+            "type": "code"
+          }
+        ],
+        "inputAnchors": [],
+        "inputs": {
+          "name": "ki_query_knowledge",
+          "description": "Retrieve relevant information from the knowledge base that has already been ingested. Use after ki_web_search to pull the most relevant text chunks for answering the user's question. Returns ranked context passages with source citations.",
+          "returnDirect": false,
+          "schema": [
+            {
+              "key": "query",
+              "type": "string",
+              "required": "true",
+              "description": "The query to search the knowledge base for"
+            },
+            {
+              "key": "collection",
+              "type": "string",
+              "required": "false",
+              "description": "Qdrant collection to query (default: web_research)"
+            },
+            {
+              "key": "top_k",
+              "type": "number",
+              "required": "false",
+              "description": "Number of chunks to retrieve (default: 5)"
+            }
+          ],
+          "javascriptFunction": "// KI Knowledge Query Tool — D-031\n// Calls POST /query on the Knowledge Index Service and formats results.\n// Targets the same KI node as ki_web_search (KI_BASE_URL env).\n//\n// Input: JSON string with { query, collection?, top_k? }\n// Output: formatted context string with ranked passages and sources\n\nconst KI_BASE_URL = process.env.KI_BASE_URL || 'http://knowledge-index.ai-stack:8100';\nconst KI_API_KEY  = process.env.KI_API_KEY  || '';\n\nconst input      = JSON.parse($input);\nconst query      = input.query;\nconst collection = input.collection || 'web_research';\nconst topK       = input.top_k     || 5;\n\nconst headers = { 'Content-Type': 'application/json' };\nif (KI_API_KEY) headers['Authorization'] = `Bearer ${KI_API_KEY}`;\n\nconst resp = await fetch(`${KI_BASE_URL}/query`, {\n  method:  'POST',\n  headers,\n  body:    JSON.stringify({ query, collection, top_k: topK }),\n});\n\nif (!resp.ok) {\n  const body = await resp.text();\n  throw new Error(`KI /query failed — HTTP ${resp.status}: ${body}`);\n}\n\nconst data    = await resp.json();\nconst results = data.results || [];\n\nif (results.length === 0) {\n  return 'No relevant information found in the knowledge base. ' +\n         'Try calling ki_web_search first to ingest current information.';\n}\n\nconst lines = results.map((r, i) => {\n  const source = r.source || r.metadata?.url || 'unknown';\n  const score  = typeof r.score === 'number' ? r.score.toFixed(3) : 'n/a';\n  return `[${i + 1}] (relevance: ${score})\\n${r.text}\\nSource: ${source}`;\n});\n\nreturn `Retrieved ${results.length} passages from collection '${collection}':\\n\\n` +\n       lines.join('\\n\\n---\\n\\n');\n"
+        },
+        "outputAnchors": [
+          {
+            "id": "customTool_kiQuery-output-customTool-DynamicTool|Tool",
+            "name": "customTool",
+            "label": "CustomTool",
+            "description": "",
+            "type": "DynamicTool | Tool"
+          }
+        ],
+        "outputs": {}
+      },
+      "width": 300,
+      "height": 620,
+      "selected": false,
+      "positionAbsolute": { "x": 50, "y": 750 },
+      "dragging": false
+    },
+    {
+      "id": "toolAgent_0",
+      "position": { "x": 1000, "y": 350 },
+      "type": "customNode",
+      "data": {
+        "id": "toolAgent_0",
+        "label": "Research Supervisor",
+        "version": 2,
+        "name": "toolAgent",
+        "type": "ToolAgent",
+        "baseClasses": ["AgentExecutor"],
+        "category": "Agents",
+        "description": "Agent that orchestrates web research and knowledge retrieval using KI tools. D-031 Phase A controller-side implementation.",
+        "inputParams": [
+          {
+            "label": "System Message",
+            "name": "systemMessage",
+            "type": "string",
+            "rows": 4,
+            "optional": true,
+            "default": "You are a helpful assistant."
+          },
+          {
+            "label": "Max Iterations",
+            "name": "maxIterations",
+            "type": "number",
+            "optional": true
+          }
+        ],
+        "inputAnchors": [
+          {
+            "label": "Tools",
+            "name": "tools",
+            "type": "Tool",
+            "list": true
+          },
+          {
+            "label": "Language Model",
+            "name": "model",
+            "type": "BaseChatModel"
+          },
+          {
+            "label": "Memory",
+            "name": "memory",
+            "type": "BaseChatMemory",
+            "optional": true
+          }
+        ],
+        "inputs": {
+          "systemMessage": "You are a research supervisor agent. Research topics thoroughly and provide well-sourced answers.\n\nResearch protocol (Phase A — controller node):\n1. Call ki_web_search to fetch and ingest current information on the topic.\n2. Call ki_query_knowledge to retrieve the most relevant passages from what was ingested.\n3. Synthesize a clear, accurate answer grounded in the retrieved context.\n4. Always cite sources (URLs) when available.\n5. If ki_web_search returns 'unavailable' (no TAVILY_API_KEY on this node), skip to\n   ki_query_knowledge to check for previously ingested information, then inform\n   the user if no relevant context exists.\n\nPhase B extension (enhanced-worker dispatch):\n  The KI_BASE_URL environment variable will be set to the target enhanced-worker's\n  KI endpoint when the controller dispatches research to a capable worker node.\n  Both tools automatically use this override — no flow changes required.",
+          "maxIterations": 5,
+          "model": "{{chatOpenAI_0.data.instance}}",
+          "tools": [
+            "{{customTool_webSearch.data.instance}}",
+            "{{customTool_kiQuery.data.instance}}"
+          ]
+        },
+        "outputAnchors": [
+          {
+            "id": "toolAgent_0-output-toolAgent-AgentExecutor",
+            "name": "toolAgent",
+            "label": "ToolAgent",
+            "description": "",
+            "type": "AgentExecutor"
+          }
+        ],
+        "outputs": {}
+      },
+      "width": 300,
+      "height": 430,
+      "selected": false,
+      "positionAbsolute": { "x": 1000, "y": 350 },
+      "dragging": false
+    }
+  ],
+  "edges": [
+    {
+      "source": "chatOpenAI_0",
+      "sourceHandle": "chatOpenAI_0-output-chatOpenAI-ChatOpenAI|BaseChatModel|BaseLanguageModel",
+      "target": "toolAgent_0",
+      "targetHandle": "toolAgent_0-input-model-BaseChatModel",
+      "type": "buttonedge",
+      "id": "edge_chatOpenAI_0-toolAgent_0",
+      "data": { "label": "model" }
+    },
+    {
+      "source": "customTool_webSearch",
+      "sourceHandle": "customTool_webSearch-output-customTool-DynamicTool|Tool",
+      "target": "toolAgent_0",
+      "targetHandle": "toolAgent_0-input-tools-Tool",
+      "type": "buttonedge",
+      "id": "edge_customTool_webSearch-toolAgent_0",
+      "data": { "label": "tools[0]" }
+    },
+    {
+      "source": "customTool_kiQuery",
+      "sourceHandle": "customTool_kiQuery-output-customTool-DynamicTool|Tool",
+      "target": "toolAgent_0",
+      "targetHandle": "toolAgent_0-input-tools-Tool",
+      "type": "buttonedge",
+      "id": "edge_customTool_kiQuery-toolAgent_0",
+      "data": { "label": "tools[1]" }
+    }
+  ],
+  "viewport": { "x": 0, "y": 0, "zoom": 0.75 }
+}
