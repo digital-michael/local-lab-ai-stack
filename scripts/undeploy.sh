@@ -210,6 +210,14 @@ if $MODE_SERVICES; then
             else
                 echo "  No promtail plist found — skipping."
             fi
+            # Remove any stale quadlet files left by a previous mis-detected podman deploy
+            if [[ -d "$QUADLET_DIR" ]]; then
+                _stale=$(find "$QUADLET_DIR" -maxdepth 1 \( -name "*.container" -o -name "ai-stack.network" \) 2>/dev/null)
+                if [[ -n "$_stale" ]]; then
+                    find "$QUADLET_DIR" -maxdepth 1 \( -name "*.container" -o -name "ai-stack.network" \) -delete 2>/dev/null || true
+                    echo "  Removed stale quadlet files from $QUADLET_DIR"
+                fi
+            fi
         else
             _unit="$HOME/.config/systemd/user/promtail.service"
             if [[ -f "$_unit" ]]; then
