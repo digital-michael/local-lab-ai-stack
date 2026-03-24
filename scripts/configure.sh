@@ -118,6 +118,15 @@ cmd_validate() {
 
     echo "Validating $CONFIG_FILE ..."
 
+    # Check config.json schema_version — must be 1.2 or later
+    local schema_ver
+    schema_ver=$(jq -r '.schema_version // "0"' "$CONFIG_FILE")
+    if [[ "$schema_ver" < "1.2" ]]; then
+        echo "ERROR: config.json schema_version='${schema_ver}' — expected >=1.2."
+        echo "       Run: bash scripts/configure.sh migrate  or manually update schema_version."
+        errors=$((errors + 1))
+    fi
+
     # Check for TBD image tags
     local tbd_services
     tbd_services=$(jq -r '.services | to_entries[] | select(.value.tag == "TBD") | .key' "$CONFIG_FILE")
@@ -131,9 +140,9 @@ cmd_validate() {
     local node_profile_v deployed_svcs required_secrets
     node_profile_v=$(_get_node_profile)
     case "$node_profile_v" in
-        inference-worker)  deployed_svcs='["ollama","promtail"]' ;;
-        knowledge-worker)  deployed_svcs='["ollama","promtail","knowledge-index","qdrant"]' ;;
-        *)                 deployed_svcs='null' ;;  # null = all services
+        inference-worker)                  deployed_svcs='["ollama","promtail"]' ;;
+        enhanced-worker|knowledge-worker)  deployed_svcs='["ollama","promtail","knowledge-index","qdrant"]' ;;
+        *)                                 deployed_svcs='null' ;;  # null = all services
     esac
     if [[ "$deployed_svcs" == "null" ]]; then
         required_secrets=$(jq -r '[.services[].secrets[]?.name] | unique[]' "$CONFIG_FILE")
@@ -200,13 +209,14 @@ EOF
             services=$'ollama\npromtail'
             echo "Note: node_profile=$node_profile — generating ollama + promtail quadlets only"
             ;;
-        knowledge-worker)
-            # Ollama + Promtail + Knowledge Index (SQLite) + local Qdrant
+        enhanced-worker|knowledge-worker)
+            # enhanced-worker: Ollama + Promtail + Knowledge Index (SQLite) + local Qdrant
+            # knowledge-worker: legacy alias — identical service set
             services=$'ollama\npromtail\nknowledge-index\nqdrant'
             echo "Note: node_profile=$node_profile — generating ollama + promtail + knowledge-index + qdrant quadlets"
             ;;
         *)
-            # controller, peer: generate all services
+            # controller, peer: generate all services (skip minio if not defined)
             services=$(jq -r '.services | keys[]' "$CONFIG_FILE")
             ;;
     esac
@@ -275,7 +285,7 @@ EOF
             local has_db_url
             has_db_url=$(jq -r --arg s "$svc" '.services[$s].environment // {} | has("DATABASE_URL")' "$CONFIG_FILE")
             if [[ "$has_db_url" == "true" ]]; then
-                if [[ "$node_profile" == "knowledge-worker" && "$svc" == "knowledge-index" ]]; then
+                if [[ ("$node_profile" == "knowledge-worker" || "$node_profile" == "enhanced-worker") && "$svc" == "knowledge-index" ]]; then
                     echo "Environment=DATABASE_URL=sqlite:///${ai_stack_dir//\$HOME/$HOME}/knowledge-index/ki.db"
                 else
                     echo "EnvironmentFile=${ai_stack_dir//\$HOME/%h}/configs/run/${svc}.env"
@@ -879,20 +889,21 @@ cmd_recommend() {
             is_inference_capable=true
         fi
 
-        # Knowledge worker: inference-capable + sufficient disk (≥ 50 GB) for KI + Qdrant
-        local is_knowledge_capable=false
+        # Enhanced-worker: inference-capable + sufficient disk (≥ 50 GB) for KI + Qdrant
+        # Activates web_search capability when TAVILY_API_KEY is set as a Podman secret.
+        local is_enhanced_capable=false
         if [[ "$is_inference_capable" == "true" && "$disk_free_gb" -ge 50 ]]; then
-            is_knowledge_capable=true
+            is_enhanced_capable=true
         fi
 
-        # Assign profile
+        # Assign profile (D-029: knowledge-worker replaced by enhanced-worker)
         if [[ "$is_controller_capable" == "true" ]]; then
             profile="controller"
         elif [[ "$is_peer_capable" == "true" ]]; then
             profile="peer"
             warnings+=("Peer profile requires Phase 10 implementation (not yet complete)")
-        elif [[ "$is_knowledge_capable" == "true" ]]; then
-            profile="knowledge-worker"
+        elif [[ "$is_enhanced_capable" == "true" ]]; then
+            profile="enhanced-worker"
         elif [[ "$is_inference_capable" == "true" ]]; then
             profile="inference-worker"
         else
@@ -933,7 +944,17 @@ cmd_recommend() {
                 prereqs+=("Run: bash scripts/configure.sh generate-quadlets")
                 prereqs+=("Run: systemctl --user daemon-reload && bash scripts/start.sh")
                 ;;
+            enhanced-worker)
+                prereqs+=("Run: bash scripts/configure.sh generate-quadlets  (ollama + promtail + knowledge-index + qdrant)")
+                prereqs+=("Run: systemctl --user daemon-reload && systemctl --user start ollama.service qdrant.service knowledge-index.service promtail.service")
+                prereqs+=("Optional: add TAVILY_API_KEY Podman secret to enable web_search capability")
+                prereqs+=("         printf '<key>' | podman secret create tavily_api_key -")
+                prereqs+=("         printf '<controller-ki-url>' | podman secret create controller_ki_url -")
+                prereqs+=("Run: bash scripts/configure.sh sync-libraries  (push local libraries to controller)")
+                ;;
             knowledge-worker)
+                # legacy profile — treated identically to enhanced-worker at runtime
+                prereqs+=("Note: knowledge-worker is a legacy alias for enhanced-worker (D-029)")
                 prereqs+=("Run: bash scripts/configure.sh generate-quadlets  (ollama + promtail + knowledge-index + qdrant)")
                 prereqs+=("Run: systemctl --user daemon-reload && systemctl --user start ollama.service qdrant.service knowledge-index.service")
                 prereqs+=("Run: bash scripts/configure.sh sync-libraries  (push local libraries to controller)")
@@ -941,7 +962,7 @@ cmd_recommend() {
             inference-worker)
                 prereqs+=("Run: bash scripts/configure.sh generate-quadlets  (ollama + promtail only)")
                 prereqs+=("Run: systemctl --user daemon-reload && systemctl --user start ollama.service")
-                prereqs+=("Tip: upgrade to knowledge-worker if disk reaches 50 GB free")
+                prereqs+=("Tip: upgrade to enhanced-worker if disk reaches 50 GB free")
                 ;;
             peer)
                 prereqs+=("Phase 10 implementation required before deploying peer profile")
