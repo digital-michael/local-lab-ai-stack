@@ -1,5 +1,5 @@
 # AI Stack — Implementation Checklist
-**Last Updated:** 2026-03-10 UTC
+**Last Updated:** 2026-03-24 UTC
 
 ## Purpose
 Master task tracker for the AI Multivolume RAG Platform. Covers blockers, deferrable work, future features, and open considerations. Updated as items are resolved.
@@ -733,6 +733,127 @@ This section defines the reproducible, sequenced implementation plan across all 
 - [ ] `configure.sh recommend` on inference-worker node (≥ 50 GB disk) suggests `knowledge-worker` upgrade
 - [ ] `diagnose.sh --profile full` shows library custody summary across all nodes
 
+> **⚠️ Phase 10 superseded by D-029 (2026-03-24):** The `knowledge-worker` profile was redesigned as `enhanced-worker` after architecture analysis showed the original profile lacked both a content creation path and a local RAG path. Phase 10 steps 10.1–10.7 are **not implemented** and are replaced by Phase 12. The `/v1/libraries`, `/v1/catalog`, and SQLite persistence work remains valid and is incorporated into Phase 12.
+
+---
+
+## Phase 11 — Node Registry Phase A: Per-Node Files + LiteLLM Aliases + L5 Tests
+
+**Goal:** Extract `nodes[]` from config.json into per-node files under `configs/nodes/`. Update all scripts to glob node files. Register per-node LiteLLM model aliases. Implement Layer 5 distributed smoke tests (L1 + L2).
+
+**Decisions:** D-026 (per-node files, status + alias fields), D-028 (L5 distributed tests)
+
+**Inputs:** Phase 9 complete. SERVICES, TC25, SOL all operational as inference-workers.
+
+### Steps
+
+11.1. **Create `configs/nodes/` directory and write per-node files**
+   - `configs/nodes/controller-1.json` — SERVICES, profile: controller, status: active, capabilities: []
+   - `configs/nodes/inference-worker-1.json` — TC25 (macbook-m1), profile: inference-worker, status: active, os: darwin, deployment: bare_metal, capabilities: []
+   - `configs/nodes/inference-worker-2.json` — SOL (alienware), profile: inference-worker, status: active, os: linux, deployment: podman, capabilities: []
+   - Schema per D-026 + D-029: `schema_version`, `alias`, `name`, `address`, `address_fallback`, `status`, `profile`, `os`, `deployment`, `registered_at`, `models`, `capabilities`
+
+11.2. **Remove `nodes[]` from config.json; bump schema_version to 1.1**
+   - Remove the entire `"nodes": [...]` array from `configs/config.json`
+   - Change `"schema_version": "1.0"` to `"schema_version": "1.1"`
+
+11.3. **Update all scripts that read `.nodes[]` to glob `configs/nodes/*.json`**
+   - `scripts/configure.sh` — `generate-litellm-config`, `generate-quadlets`, `detect-hardware` all read `.nodes[]`; replace with node file glob
+   - `scripts/deploy.sh`, `scripts/status.sh`, `scripts/pull-models.sh` — any node-aware logic
+
+11.4. **Update `pull-models.sh` to register per-node LiteLLM model aliases**
+   - For each active node file with `models[]`, register `ollama/<model>@<alias>` with `api_base: http://<node.address>:11434`
+   - Example: `ollama/llama3.2:3b-instruct-q4_K_M@inference-worker-2` → `api_base: http://SOL.mynetworksettings.com:11434`
+
+11.5. **Create `testing/layer5_distributed/` test suite**
+   - `conftest.py` — enumerate `configs/nodes/*.json`, filter `status == active`; `metrics_recorder` fixture writes `testing/layer5_distributed/results/<timestamp>.json` at session teardown
+   - `test_l1_liveness.py` — direct `GET http://<address>:11434/api/tags` per active node; binary pass/fail
+   - `test_l2_routing.py` — LiteLLM per-node model-ID targeting; `x-litellm-backend` header assertion; streaming for `ttft`; ~4 cases per node (echo, arithmetic, instruction following, single-turn context)
+
+### Outputs
+- `configs/nodes/` with 3 files; `config.json` at schema_version 1.1 with `nodes[]` removed
+- All scripts glob node files; no remaining `.nodes[]` references
+- `pull-models.sh` registers per-node alias routes in LiteLLM
+- L5 test suite passes: L1 all nodes reachable, L2 routing confirmed
+
+### Verification
+- [ ] `jq '.nodes' configs/config.json` returns `null`
+- [ ] `ls configs/nodes/` shows 3 `.json` files
+- [ ] `bash scripts/configure.sh generate-litellm-config` succeeds
+- [ ] `pytest testing/layer5_distributed/ -v` — L1 all pass; L2 all pass with `results/<timestamp>.json` written
+
+---
+
+## Phase 12 — Enhanced Worker Foundation Phase A (Controller-Side)
+
+**Goal:** Implement the Phase A controller-side foundation: MCP auth fix, MinIO file repository, capabilities[] in node schema, LiteLLM RAG hook, web research pipeline (controller fallback), app.py `/v1/search` + SQLite persistence + `/v1/libraries` + `/v1/catalog`.
+
+**Decisions:** D-029 (profile redesign), D-030 (LiteLLM RAG hook), D-031 (web research pipeline), D-032 (MinIO), D-033 (MCP scope + auth fix)
+
+**Inputs:** Phase 11 complete. All scripts reading from `configs/nodes/*.json`.
+
+### Steps
+
+12.1. **Fix MCP auth: set `API_KEY` secret; update Traefik `/mcp/*` route**
+   - Add `{ "name": "knowledge_index_api_key", "target": "API_KEY" }` to knowledge-index `secrets[]` in config.json
+   - Add `api-key-auth` middleware to `configs/traefik/dynamic/middlewares.yaml` (Bearer token against a known key)
+   - Update `configs/traefik/dynamic/services.yaml`: `/mcp/*` router uses `api-key-auth`; `/v1/*` router retains Authentik forward-auth
+
+12.2. **Add MinIO to config.json; deploy; create buckets**
+   - Add `minio` service entry: `docker.io/minio/minio`, port 9000 (S3 API, `0.0.0.0`), port 9001 (console, `127.0.0.1` bind), dns_alias `minio.ai-stack`, secrets `minio_root_user` + `minio_root_password`
+   - Bump `schema_version` to `1.2`
+   - `generate-quadlets` produces `minio.container`
+   - On first start: create buckets `documents`, `outputs` via MinIO client; create service account for Flowise + LiteLLM hook
+
+12.3. **Add `capabilities[]` to all node files**
+   - Add `"capabilities": []` to all three existing node files from Phase 11
+   - Update D-026 schema reference in node files to note `capabilities[]` field
+
+12.4. **Implement LiteLLM `async_pre_call_hook` for RAG injection**
+   - `configs/litellm/hooks.py`: `AsyncRAGHook` class implementing `async_pre_call_hook`
+   - Extract last user message → `POST /query` to controller KI (`KI_BASE_URL` env var) → prepend top-k results into system message
+   - If result metadata contains `source_url`, fetch MinIO pre-signed file content and append (truncated to context window)
+   - No-op when `KI_BASE_URL` unset or KI returns empty results
+   - Mount into LiteLLM container; configure `LITELLM_CUSTOM_CALLBACK`
+
+12.5. **Add `POST /v1/search` to `services/knowledge-index/app.py`**
+   - Accepts `{ "query": str, "collection": str, "max_results": int = 5 }`
+   - Returns HTTP 501 if `TAVILY_API_KEY` unset (capability flag — correct behaviour for inference-workers)
+   - When set: Tavily search → `_ingest_chunks()` to local Qdrant → trigger custody push to controller
+   - Add `tavily-python` to `requirements.txt`
+
+12.6. **Add SQLite persistence + `/v1/libraries` + `/v1/catalog` to `app.py`** *(from Phase 10)*
+   - Replace in-memory `_doc_collection` dict with SQLAlchemy `documents` + `libraries` tables; `DATABASE_URL` selects sqlite vs postgresql
+   - `POST /v1/libraries` — receive `.ai-library` package, verify checksum, ingest to Qdrant, record provenance in DB
+   - `GET /v1/catalog` — list all libraries with name, version, author, origin node, custody status, visibility
+
+12.7. **Flowise Supervisor flow: web research controller-fallback path**
+   - Flowise Supervisor: submit research topic → check node files for `web_search` in `capabilities[]` → if none, run controller-local Tavily → summarize via LiteLLM → `POST /documents` on controller KI
+   - Export flow JSON to `configs/flowise/research-pipeline.json`
+
+12.8. **Update `configure.sh` for enhanced-worker profile and schema_version 1.2**
+   - Add `enhanced-worker` profile to `generate-quadlets` (service set: Ollama + Promtail + KI + Qdrant)
+   - `validate` subcommand accepts schema_version 1.2
+
+### Outputs
+- MCP endpoint requires API key; Traefik routes correct for both developer tools and REST clients
+- MinIO running with `documents` and `outputs` buckets
+- Node files declare `capabilities[]`
+- LiteLLM RAG hook active on controller
+- `POST /v1/search` returns 501 on all current nodes (correct — no Tavily key set)
+- `/v1/libraries`, `/v1/catalog`, and SQLite persistence live in `app.py`
+- Flowise controller-fallback web research flow operational
+
+### Verification
+- [ ] `curl -H "Authorization: Bearer <key>" https://<host>/mcp/sse` → 200
+- [ ] `curl https://<host>/mcp/sse` (no auth) → 401
+- [ ] MinIO console accessible at `http://127.0.0.1:9001`; buckets exist
+- [ ] `jq '.capabilities' configs/nodes/inference-worker-1.json` returns `[]`
+- [ ] Inference request via OpenWebUI → LiteLLM logs show RAG hook executed
+- [ ] `POST /v1/search` on controller KI → 501
+- [ ] Flowise research flow: submit topic → `GET /v1/catalog` shows new library entry
+- [ ] `pytest testing/layer5_distributed/ -v` still passes
+
 ---
 
 ## Execution Notes
@@ -745,7 +866,9 @@ This section defines the reproducible, sequenced implementation plan across all 
 - **Phase 7 (MCP)** is additive — the REST API is preserved. Phase 7 can be executed independently once the Knowledge Index Service is deployed and healthy.
 - **Phase 8 (GPU)** requires NVIDIA GPU with CDI configured. Can be skipped on CPU-only nodes. Purely local — no network dependencies.
 - **Phase 9 (Remote Nodes)** requires at least two machines with network connectivity. Can proceed with any OS (Linux or macOS with Podman Machine).
-- **Phase 10 (Knowledge-Worker Nodes)** builds on Phase 9. TC25/SOL upgrade from `inference-worker` to `knowledge-worker` (adds KI + Qdrant). Key new work: SQLite KI persistence, `/v1/libraries` custody push endpoint, `sync-libraries` subcommand.
+- **Phase 10 (Knowledge-Worker Nodes)** ⚠️ SUPERSEDED by D-029. Do not execute Phase 10 steps. See Phase 12.
+- **Phase 11 (Node Registry Phase A)** builds on Phase 9. Extracts `nodes[]` into per-node files, adds `capabilities[]` field, updates all scripts, registers per-node LiteLLM aliases, and adds L5 distributed smoke tests. Prerequisite for Phase 12.
+- **Phase 12 (Enhanced Worker Foundation Phase A)** is entirely controller-side. TC25 and SOL remain `inference-worker` throughout Phase A. Key new components: MinIO (file repo), LiteLLM RAG hook, app.py `/v1/search` + SQLite + library custody endpoints, Flowise research flow, MCP auth fix. Phase B (Task Receiver on worker nodes, reassigning SOL to `enhanced-worker`) is deferred.
 
 ---
 
