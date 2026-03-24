@@ -10,7 +10,7 @@
 #
 # Prerequisites:
 #   - Layer 0 and Layer 1 must pass.
-#   - LiteLLM must be running on the controller (localhost:9000).
+#   - LiteLLM must be running on the controller (localhost:${LITELLM_PORT}).
 #   - The 'litellm_master_key' Podman secret must be provisioned.
 #   - Remote nodes must be running ollama on port 11434 (or tests skip).
 #
@@ -128,7 +128,7 @@ print(n['models'][0] if n and n.get('models') else '')
 
     run curl -s --max-time 15 \
         -H "Authorization: Bearer $LITELLM_KEY" \
-        "http://localhost:9000/v1/models"
+        "http://localhost:${LITELLM_PORT}/v1/models"
 
     [[ "$status" -eq 0 ]] || {
         echo "curl failed connecting to LiteLLM (exit $status)" >&3
@@ -168,7 +168,7 @@ assert target in models, f'{target!r} not found in /v1/models: {models}'
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer $LITELLM_KEY" \
         -d "{\"model\":\"$M1_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"reply with only: TC25 OK\"}],\"max_tokens\":20}" \
-        "http://localhost:9000/v1/chat/completions"
+        "http://localhost:${LITELLM_PORT}/v1/chat/completions"
 
     [[ "$status" -eq 0 ]] || {
         echo "curl failed (exit $status)" >&3
@@ -227,7 +227,7 @@ print(d['choices'][0]['message']['content'])
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer $LITELLM_KEY" \
         -d "{\"model\":\"$SOL_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"reply with only: SOL OK\"}],\"max_tokens\":20}" \
-        "http://localhost:9000/v1/chat/completions"
+        "http://localhost:${LITELLM_PORT}/v1/chat/completions"
 
     [[ "$status" -eq 0 ]] || {
         echo "curl failed (exit $status)" >&3

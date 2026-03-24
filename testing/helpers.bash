@@ -16,6 +16,63 @@ export PROJECT_ROOT
 export CONFIG_FILE="$PROJECT_ROOT/configs/config.json"
 
 # ---------------------------------------------------------------------------
+# Port variables — loaded from config.json at suite startup
+# ---------------------------------------------------------------------------
+# A single Python call reads every service's host-port from config.json and
+# exports named variables. A port remap in config.json automatically flows
+# through to all tests — no manual grep-and-update required.
+# Falls back to sensible defaults if config.json is absent (e.g. CI lint).
+# ---------------------------------------------------------------------------
+if [[ -f "$CONFIG_FILE" ]] && command -v python3 &>/dev/null; then
+    _port_exports=$(python3 - "$CONFIG_FILE" <<'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f:
+    c = json.load(f)
+svcs = c.get("services", {})
+# (var_name, service_key, port_index)
+mappings = [
+    ("TRAEFIK_HTTP_PORT",    "traefik",          0),
+    ("TRAEFIK_HTTPS_PORT",   "traefik",          1),
+    ("TRAEFIK_API_PORT",     "traefik",          2),
+    ("POSTGRES_PORT",        "postgres",         0),
+    ("QDRANT_PORT",          "qdrant",           0),
+    ("KNOWLEDGE_INDEX_PORT", "knowledge-index",  0),
+    ("LITELLM_PORT",         "litellm",          0),
+    ("FLOWISE_PORT",         "flowise",          0),
+    ("OPENWEBUI_PORT",       "openwebui",        0),
+    ("PROMETHEUS_PORT",      "prometheus",       0),
+    ("GRAFANA_PORT",         "grafana",          0),
+    ("LOKI_PORT",            "loki",             0),
+    ("MINIO_PORT",           "minio",            0),
+    ("MINIO_CONSOLE_PORT",   "minio",            1),
+]
+for var, svc, idx in mappings:
+    try:
+        val = svcs[svc]["ports"][idx]["host"]
+        print(f"export {var}={val}")
+    except (KeyError, IndexError):
+        pass
+PYEOF
+)
+    eval "$_port_exports"
+fi
+# Defaults for environments where config.json is unavailable
+export TRAEFIK_HTTP_PORT="${TRAEFIK_HTTP_PORT:-80}"
+export TRAEFIK_HTTPS_PORT="${TRAEFIK_HTTPS_PORT:-443}"
+export TRAEFIK_API_PORT="${TRAEFIK_API_PORT:-8080}"
+export POSTGRES_PORT="${POSTGRES_PORT:-5432}"
+export QDRANT_PORT="${QDRANT_PORT:-6333}"
+export KNOWLEDGE_INDEX_PORT="${KNOWLEDGE_INDEX_PORT:-8100}"
+export LITELLM_PORT="${LITELLM_PORT:-9000}"
+export FLOWISE_PORT="${FLOWISE_PORT:-3001}"
+export OPENWEBUI_PORT="${OPENWEBUI_PORT:-9090}"
+export PROMETHEUS_PORT="${PROMETHEUS_PORT:-9091}"
+export GRAFANA_PORT="${GRAFANA_PORT:-3000}"
+export LOKI_PORT="${LOKI_PORT:-3100}"
+export MINIO_PORT="${MINIO_PORT:-9100}"
+export MINIO_CONSOLE_PORT="${MINIO_CONSOLE_PORT:-9101}"
+
+# ---------------------------------------------------------------------------
 # Service lists
 # ---------------------------------------------------------------------------
 

@@ -9,7 +9,7 @@
 
 load 'helpers'
 
-PROM_URL="http://localhost:9091"
+PROM_URL="http://localhost:${PROMETHEUS_PORT}"
 
 setup_file() {
     local missing=()

@@ -16,7 +16,7 @@
 load 'helpers'
 
 PROMTAIL_INTERNAL="http://promtail.ai-stack:9080"
-LOKI_URL="http://localhost:3100"
+LOKI_URL="http://localhost:${LOKI_PORT}"
 TEST_LOG_FILE="${AI_STACK_DIR}/logs/promtail_bats_test.log"
 
 setup_file() {

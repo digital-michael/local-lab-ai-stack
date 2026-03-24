@@ -48,7 +48,7 @@ teardown() {
 
     curl -sf --max-time 10 "${auth_args[@]}" \
         -X DELETE \
-        "http://localhost:6333/collections/${QDRANT_TEST_COLLECTION}" \
+        "http://localhost:${QDRANT_PORT}/collections/${QDRANT_TEST_COLLECTION}" \
         &>/dev/null || true
 }
 
@@ -68,7 +68,7 @@ qdrant_curl() {
 # ---------------------------------------------------------------------------
 
 @test "T-028: qdrant GET /collections returns 200 with valid JSON" {
-    run qdrant_curl "http://localhost:6333/collections"
+    run qdrant_curl "http://localhost:${QDRANT_PORT}/collections"
     [[ "$status" -eq 0 ]] || {
         echo "curl failed connecting to Qdrant (exit $status)" >&3
         return 1
@@ -100,7 +100,7 @@ qdrant_curl() {
 # ---------------------------------------------------------------------------
 
 @test "T-029: qdrant full CRUD cycle — create collection, insert, query, delete" {
-    local base_url="http://localhost:6333"
+    local base_url="http://localhost:${QDRANT_PORT}"
     local coll_url="${base_url}/collections/${QDRANT_TEST_COLLECTION}"
 
     # -- 1. Create collection ------------------------------------------------

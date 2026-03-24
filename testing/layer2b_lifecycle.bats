@@ -103,7 +103,7 @@ wait_for_http() {
     wait_for_active "$test_svc" 30 || return 1
 
     # Smoke check: Prometheus still responds
-    wait_for_http "200" "http://localhost:9091/-/healthy" 30 || return 1
+    wait_for_http "200" "http://localhost:${PROMETHEUS_PORT}/-/healthy" 30 || return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -186,14 +186,14 @@ wait_for_http() {
     }
 
     # Wait for Flowise HTTP to be ready (ping endpoint is whitelisted, returns 200)
-    wait_for_http "200" "http://localhost:3001/api/v1/ping" 90
+    wait_for_http "200" "http://localhost:${FLOWISE_PORT}/api/v1/ping" 90
 
     # New password must be accepted via account/basic-auth (Flowise v3 credential check)
     local new_result
     new_result=$(curl -s --max-time 10 \
         -X POST -H "Content-Type: application/json" \
         -d "{\"username\":\"admin\",\"password\":\"${new_pass}\"}" \
-        "http://localhost:3001/api/v1/account/basic-auth" | jq -r '.message // empty')
+        "http://localhost:${FLOWISE_PORT}/api/v1/account/basic-auth" | jq -r '.message // empty')
     [[ "$new_result" == "Authentication successful" ]] || {
         echo "New credential not accepted (got: $new_result). Restoring original." >&3
         printf '%s' "$original_pass" | podman secret create --replace "$secret_name" - >/dev/null 2>&1 || true
@@ -206,7 +206,7 @@ wait_for_http() {
     old_result=$(curl -s --max-time 10 \
         -X POST -H "Content-Type: application/json" \
         -d "{\"username\":\"admin\",\"password\":\"${original_pass}\"}" \
-        "http://localhost:3001/api/v1/account/basic-auth" | jq -r '.message // empty')
+        "http://localhost:${FLOWISE_PORT}/api/v1/account/basic-auth" | jq -r '.message // empty')
     [[ "$old_result" == "Authentication failed" ]] || {
         echo "Old credential still accepted after rotation (got: $old_result)." >&3
     }
@@ -219,12 +219,12 @@ wait_for_http() {
 
     # Verify the restored password actually works — catches cascading failure where
     # "original_pass" was already a stale rotated value from a prior failed restore.
-    wait_for_http "200" "http://localhost:3001/api/v1/ping" 60 || return 1
+    wait_for_http "200" "http://localhost:${FLOWISE_PORT}/api/v1/ping" 60 || return 1
     local restore_check
     restore_check=$(curl -s --max-time 10 \
         -X POST -H "Content-Type: application/json" \
         -d "{\"username\":\"admin\",\"password\":\"${original_pass}\"}" \
-        "http://localhost:3001/api/v1/account/basic-auth" | jq -r '.message // empty')
+        "http://localhost:${FLOWISE_PORT}/api/v1/account/basic-auth" | jq -r '.message // empty')
     [[ "$restore_check" == "Authentication successful" ]] || {
         echo "WARN: Restored password '${original_pass:0:6}...' was not accepted by Flowise." >&3
         echo "The secret was likely already stale before this test ran." >&3
@@ -318,11 +318,11 @@ wait_for_http() {
     fi
 
     # Final smoke: Prometheus and Grafana as health gate
-    wait_for_http "200" "http://localhost:9091/-/healthy" 30 || {
+    wait_for_http "200" "http://localhost:${PROMETHEUS_PORT}/-/healthy" 30 || {
         echo "Prometheus did not return healthy after cold-boot" >&3
         return 1
     }
-    wait_for_http "200" "http://localhost:3000/api/health" 30 || {
+    wait_for_http "200" "http://localhost:${GRAFANA_PORT}/api/health" 30 || {
         echo "Grafana did not return healthy after cold-boot" >&3
         return 1
     }
