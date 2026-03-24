@@ -1059,6 +1059,46 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
+## Phase 17 — Local/WAN Discovery Profile Specification + Foundation
+
+**Goal:** Formalize the local (mDNS/DNS-SD) and WAN (registry federation) discovery protocols from D-014 into concrete specifications, populate node configs with capability metadata, and add stub endpoints that compile and test but require peers/registry to function.
+
+**Decisions:** D-014a (local profile: mDNS/DNS-SD), D-014b (WAN profile: registry federation)
+
+**NOT in scope:** Actual mDNS broadcast/listen implementation (requires zeroconf and real peers), WAN registry server software, GPG signature tooling, automatic peer registration.
+
+### Tasks
+- [x] 17.1 Expand D-014 in decisions.md with D-014a and D-014b sub-specifications
+  - D-014a: service type `_ai-library._tcp`, TXT record fields, discovery flow, trust model, prerequisites
+  - D-014b: registry API shape `POST /v1/registry/publish` + `GET /v1/registry/search`, publish payload, trust model, prerequisites
+- [x] 17.2 Populate `capabilities[]` on all node configs
+  - controller-1: `["knowledge-index", "qdrant", "postgres"]`, `ki_port: 8100`, schema_version 1.2
+  - inference-worker-1: `["inference"]`
+  - inference-worker-2: `["inference"]`
+- [x] 17.3 Add stub endpoints to app.py
+  - `DISCOVERY_PROFILE` and `REGISTRY_URL` env vars
+  - `GET /v1/catalog/peers` — reads node configs, filters by `knowledge-index` capability, queries peer `/v1/catalog` endpoints, merges results. Returns 501 when `local` not in profile.
+  - `GET /v1/catalog/registry` — returns 501 when `REGISTRY_URL` unset or `WAN` not in profile. When set, proxies `GET {REGISTRY_URL}/v1/registry/search`.
+- [x] 17.4 Close stale deferrable items in checklist §3
+- [x] 17.5 Add pytest coverage for stub endpoints
+- [x] 17.6 Update features.md
+
+### Outputs
+- Updated `docs/decisions.md` (D-014a, D-014b sub-specifications)
+- Updated `configs/nodes/*.json` (capabilities[], ki_port, schema 1.2)
+- Updated `services/knowledge-index/app.py` (2 new env vars, 2 stub endpoints)
+- New/updated test file for discovery stubs
+- Updated `docs/features.md`
+
+### Verification
+- [ ] `python3 -c "import ast; ast.parse(...)"` on app.py passes
+- [ ] `GET /v1/catalog/peers` returns 501 when `DISCOVERY_PROFILE=localhost`
+- [ ] `GET /v1/catalog/registry` returns 501 when `REGISTRY_URL` is empty
+- [ ] All 3 node config files parse as valid JSON
+- [ ] Pytest tests for stubs pass
+
+---
+
 ## Execution Notes
 
 - **Phases 1–3 are documentation and configuration.** They can be executed in a single session with no external dependencies.
@@ -1128,8 +1168,8 @@ These collapse into the configuration system above. Tracked individually for vis
 - [x] **Decide Flowise database backend** — **Decision: SQLite (local `DATABASE_PATH`)** for MVP. Rationale: Flowise stores flow definitions and API keys only — low-volume metadata unsuitable for shared PostgreSQL without added complexity. Migrate to PostgreSQL if multi-instance Flowise or shared workflow DB becomes a requirement. (Resolves Consideration #25)
 - [x] **Build Knowledge Index Service** — `services/knowledge-index/` Python/FastAPI microservice; embeddings via ollama llama3.1:8b; Qdrant storage; T-062–T-065, T-067–T-068 passing (commit `fb08f2c`, 2026-03-10)
 - [x] **Implement localhost discovery profile** — `POST /v1/scan` endpoint in knowledge-index; scans LIBRARIES_DIR for .ai-library packages; parses manifest.yaml (PyYAML), verifies checksums.txt (warn-only), ingests documents/ into Qdrant, registers with origin_node=localhost; ScanRequest {path, force}; T-070–T-074 (Phase 15, commit TBD)
-- [ ] **Specify local and WAN discovery profiles** — mDNS/DNS-SD for local, registry/federation for WAN (see D-013)
-- [ ] **Build volume ingestion pipeline** — process raw documents into `.ai-library` manifest structure; handle embedding, vector storage, and checksum generation (see D-013)
+- [x] **Specify local and WAN discovery profiles** — D-014a (local: mDNS/DNS-SD `_ai-library._tcp`, TXT records, zeroconf) and D-014b (WAN: `POST /v1/registry/publish`, `GET /v1/registry/search`, mandatory GPG signature). Stub endpoints `GET /v1/catalog/peers` and `GET /v1/catalog/registry` added (Phase 17).
+- [x] **Build volume ingestion pipeline** — `configure.sh build-library` subcommand: `--source`, `--name`, `--version`, `--author`, `--license`, `--description`, `--output`; produces `manifest.yaml`, `documents/`, `metadata.json`, `checksums.txt`; T-095–T-097b (Phase 16, commit `2eaeb8d`).
 - [x] **Integrate MCP server into Knowledge Index Service** — implemented in Phase 7 (`app.py` lines 607+): `search_knowledge` and `ingest_document` MCP tools over HTTP/SSE transport at `/mcp/sse`; auth guard on `API_KEY`; cross-node routing in `search_knowledge` mirrors REST `/query` behaviour. Deferrable entry was a stale duplicate of Phase 7 (already ✅ COMPLETE).
 - [ ] **Enable local GPU for vLLM** — CDI setup, pin Ollama to CPU, select quantized model for 8 GB VRAM, add `models[]` config section, auto-generate LiteLLM model_list (see Phase 8)
 - [ ] **Add `configure.sh detect-hardware`** — detect GPU/VRAM/RAM, suggest node profile and viable models (see Phase 8)

@@ -202,6 +202,71 @@ This file records architecture decisions made during work on this project. Each 
 | **Trigger** | Design dependency — distributed node architecture (§7) and volume manifest (D-013) both reference discovery and trust without specifying the model. |
 | **Commit** | `4561edf` |
 
+#### D-014a — Local Profile: mDNS/DNS-SD Specification (Phase 17)
+
+Concrete protocol specification for the **local** discovery profile.
+
+**Service advertisement:**
+- DNS-SD service type: `_ai-library._tcp`
+- Port: the node's Knowledge Index HTTP port (default `8100`)
+- TXT record fields:
+  - `node=<node-name>` — matches `name` in `configs/nodes/<alias>.json`
+  - `profile=<node-profile>` — `controller`, `enhanced-worker`, etc.
+  - `ki_version=<semver>` — KI service version (from image tag or build)
+  - `libraries=<count>` — number of locally cataloged libraries
+- One service instance per node running KI; re-announced when library count changes.
+
+**Discovery flow:**
+1. Controller polls `_ai-library._tcp` via mDNS browse (Python `zeroconf` library or `avahi-browse`).
+2. Each discovered peer's `/v1/catalog` is fetched over HTTP.
+3. Result is merged with local catalog and returned via `GET /v1/catalog/peers`.
+4. Libraries with `profiles` containing `"local"` are eligible; `"localhost"`-only libraries are excluded from peer responses.
+
+**Trust model:**
+- Network membership is the trust boundary — any host on the LAN segment that advertises `_ai-library._tcp` is trusted.
+- `checksums.txt` is verified on the receiving end if the library is synced.
+- `signature.asc` is verified if present; absence is a warning, not a failure.
+
+**Prerequisites for activation:**
+- Node config must include `"knowledge-index"` in its `capabilities[]` array.
+- `DISCOVERY_PROFILE` env var must include `local` (e.g. `DISCOVERY_PROFILE=localhost,local`).
+- Python `zeroconf>=0.100` or host `avahi-daemon` + `avahi-browse` available.
+
+#### D-014b — WAN Profile: Registry Federation Specification (Phase 17)
+
+Concrete protocol specification for the **WAN** discovery profile.
+
+**Registry model:**
+- A registry is an HTTP service exposing two endpoints:
+  - `POST /v1/registry/publish` — a node announces its catalog (authenticated).
+  - `GET  /v1/registry/search?q=<query>` — search across all published catalogs.
+- The registry is an independent, read-mostly service — not necessarily on the controller.
+- Nodes publish their catalog periodically (configurable interval, default 1h).
+
+**Publish payload:**
+```json
+{
+  "node": "<node-name>",
+  "ki_url": "https://<address>:<port>",
+  "libraries": [
+    {"name": "...", "version": "...", "author": "...", "profiles": ["WAN", "local"]}
+  ],
+  "signature": "<detached-signature-of-payload>"
+}
+```
+
+**Trust model:**
+- Mandatory `signature.asc` per library — absent signature is a hard error.
+- Registry verifies the publish payload detached signature against the node's registered public key.
+- Consuming nodes verify `checksums.txt` AND `signature.asc` before ingesting any WAN-sourced library.
+
+**Prerequisites for activation:**
+- `REGISTRY_URL` env var set on the KI service (e.g. `https://registry.example.com`).
+- `DISCOVERY_PROFILE` env var must include `WAN`.
+- GPG public keys of trusted authors must be imported into the node's keyring.
+
+**Not built yet:** No registry server implementation exists. `GET /v1/catalog/registry` returns HTTP 501 with an explanatory message when `REGISTRY_URL` is unset.
+
 ---
 
 ### D-015 — MCP Transport: HTTP/SSE (not stdio)

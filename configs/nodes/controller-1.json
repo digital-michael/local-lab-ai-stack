@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "alias": "controller-1",
   "name": "workstation",
   "address": "SERVICES.mynetworksettings.com",
@@ -13,5 +13,6 @@
     "llama3.1:8b",
     "qwen2.5-1.5b"
   ],
-  "capabilities": []
+  "capabilities": ["knowledge-index", "qdrant", "postgres"],
+  "ki_port": 8100
 }

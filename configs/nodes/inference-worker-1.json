@@ -12,5 +12,5 @@
   "models": [
     "llama3.1:8b-instruct-q4_K_M"
   ],
-  "capabilities": []
+  "capabilities": ["inference"]
 }
