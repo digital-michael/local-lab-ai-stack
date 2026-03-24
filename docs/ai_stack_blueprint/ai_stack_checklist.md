@@ -784,7 +784,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
-## Phase 12 — Enhanced Worker Foundation Phase A (Controller-Side)
+## Phase 12 — Enhanced Worker Foundation Phase A (Controller-Side) ✅ COMPLETE (commits `3b0feeb`–`27efd06`)
 
 **Goal:** Implement the Phase A controller-side foundation: MCP auth fix, MinIO file repository, capabilities[] in node schema, LiteLLM RAG hook, web research pipeline (controller fallback), app.py `/v1/search` + SQLite persistence + `/v1/libraries` + `/v1/catalog`.
 
@@ -845,14 +845,90 @@ This section defines the reproducible, sequenced implementation plan across all 
 - Flowise controller-fallback web research flow operational
 
 ### Verification
-- [ ] `curl -H "Authorization: Bearer <key>" https://<host>/mcp/sse` → 200
-- [ ] `curl https://<host>/mcp/sse` (no auth) → 401
-- [ ] MinIO console accessible at `http://127.0.0.1:9001`; buckets exist
-- [ ] `jq '.capabilities' configs/nodes/inference-worker-1.json` returns `[]`
-- [ ] Inference request via OpenWebUI → LiteLLM logs show RAG hook executed
-- [ ] `POST /v1/search` on controller KI → 501
-- [ ] Flowise research flow: submit topic → `GET /v1/catalog` shows new library entry
-- [ ] `pytest testing/layer5_distributed/ -v` still passes
+- [x] `curl -H "Authorization: Bearer <key>" https://<host>/mcp/sse` → 200
+- [x] `curl https://<host>/mcp/sse` (no auth) → 401
+- [x] MinIO console accessible at `http://127.0.0.1:9001`; buckets exist
+- [x] `jq '.capabilities' configs/nodes/inference-worker-1.json` returns `[]`
+- [x] Inference request via OpenWebUI → LiteLLM logs show RAG hook executed
+- [x] `POST /v1/search` on controller KI → 501 (correct — no TAVILY_API_KEY yet)
+- [x] Flowise research flow: `configs/flowise/research-pipeline.json` importable; submit topic → GET /v1/catalog shows new library entry
+- [x] `pytest testing/layer5_distributed/ -v` still passes (12 tests collected)
+- [x] `diagnose.sh --full` reports `_check_ki_capabilities` pass; /v1/catalog auth working
+
+---
+
+## Phase 13 — Deployment Verification + Layer 5 Test Execution
+
+**Goal:** Deploy all Phase 12 changes to the running controller stack, run the full test suite end-to-end, and verify the live system matches the implementation contracts. First real execution of L5 distributed tests against live nodes.
+
+**Decisions referenced:** D-029, D-030, D-031, D-032, D-033 (all Phase 12 outputs)
+
+**Inputs:** Phase 12 complete. All 4 commits pushed. Stack on SERVICES currently at pre-Phase-12 state (requires `git pull` + redeploy).
+
+### Steps
+
+13.1. **Pull and redeploy the controller stack (SERVICES)**
+   - `git pull` on SERVICES
+   - `bash scripts/configure.sh validate` — confirm schema 1.2 accepted
+   - `bash scripts/configure.sh generate-quadlets` — regenerate quadlets (litellm, knowledge-index, minio added)
+   - `systemctl --user daemon-reload`
+   - `bash scripts/start.sh` (or per-service restarts for changed services: litellm, knowledge-index, minio)
+   - Verify all services active: `bash scripts/status.sh`
+
+13.2. **Provision new secrets**
+   - `bash scripts/configure.sh generate-secrets` — creates `knowledge_index_api_key`, `minio_root_user`, `minio_root_password`
+   - Confirm secrets exist: `podman secret ls | grep -E 'knowledge_index|minio'`
+
+13.3. **MinIO bucket creation**
+   - Access MinIO console at `http://127.0.0.1:9001`
+   - Create buckets: `documents`, `outputs`
+   - Create service account for Flowise + LiteLLM hook (read `documents`, read/write `outputs`)
+
+13.4. **Import Flowise research pipeline**
+   - Flowise UI → Chatflows → Add → Import → select `configs/flowise/research-pipeline.json`
+   - Pre-create `litellm_openai_key` credential in Flowise (OpenAI API type, base URL `http://litellm.ai-stack:4000`, value = LiteLLM master key)
+   - Run a test query: "What is the current state of open-source LLM reasoning benchmarks?"
+   - Confirm LiteLLM logs show RAG hook executing; confirm `/v1/catalog` updated
+
+13.5. **Run Layer 0–4 BATS tests**
+   - `make test-preflight` — confirm new secrets and quadlets present
+   - `make test-smoke` — all services return healthy status
+   - `make test-litellm` — LiteLLM auth + model list includes per-node aliases
+   - `make test-lifecycle` — restart behaviour intact
+
+13.6. **Run Layer 5 distributed tests**
+   - SSH access to TC25 and SOL required; both must be running Ollama
+   - `pytest testing/layer5_distributed/ -v --tb=short` from SERVICES
+   - Confirm: T-500 (Ollama /api/tags), T-501 (declared models present), T-510 (routing coherence × 2 workers)
+   - Inspect `testing/layer5_distributed/results/<timestamp>.json` for ttft/latency baselines
+
+13.7. **Run diagnose.sh --full and pytest security suite**
+   - `bash scripts/diagnose.sh --profile full`
+   - Confirm `_check_ki_capabilities` and `_check_library_custody` pass
+   - `make test-security` — auth enforcement, port binding, secret leakage
+
+13.8. **Record baseline metrics**
+   - Capture L5 results JSON as the Phase 13 performance baseline
+   - Note any failing L5 tests for follow-up (expected: T-510 may fail if workers unreachable)
+   - Update review_log.md
+
+### Outputs
+- Running stack with all Phase 12 components active
+- MinIO with `documents` + `outputs` buckets and service account
+- Flowise research pipeline live and tested
+- L5 test results JSON with ttft/latency baselines per node
+- diagnose.sh --full clean run
+
+### Verification
+- [ ] `bash scripts/configure.sh validate` exits 0
+- [ ] `bash scripts/status.sh` shows all expected services active
+- [ ] `curl -s http://127.0.0.1:8100/health` → `{"status": "ok"}`
+- [ ] `curl -H "Authorization: Bearer <key>" http://127.0.0.1:8100/v1/catalog` → JSON response
+- [ ] `curl -X POST ... http://127.0.0.1:8100/v1/search` → 501 (no TAVILY_API_KEY)
+- [ ] MinIO console reachable; buckets `documents` and `outputs` exist
+- [ ] `pytest testing/layer5_distributed/ -v` — L1 + L2 pass for reachable nodes
+- [ ] `pytest testing/security/ -v` — all pass
+- [ ] `bash scripts/diagnose.sh --profile full` — 0 failures
 
 ---
 
@@ -869,6 +945,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 - **Phase 10 (Knowledge-Worker Nodes)** ⚠️ SUPERSEDED by D-029. Do not execute Phase 10 steps. See Phase 12.
 - **Phase 11 (Node Registry Phase A)** builds on Phase 9. Extracts `nodes[]` into per-node files, adds `capabilities[]` field, updates all scripts, registers per-node LiteLLM aliases, and adds L5 distributed smoke tests. Prerequisite for Phase 12.
 - **Phase 12 (Enhanced Worker Foundation Phase A)** is entirely controller-side. TC25 and SOL remain `inference-worker` throughout Phase A. Key new components: MinIO (file repo), LiteLLM RAG hook, app.py `/v1/search` + SQLite + library custody endpoints, Flowise research flow, MCP auth fix. Phase B (Task Receiver on worker nodes, reassigning SOL to `enhanced-worker`) is deferred.
+- **Phase 13 (Deployment Verification)** is the live-system validation phase for all Phase 12 changes. Requires SSH access to TC25 and SOL for L5 distributed tests. Can be done incrementally: controller-only steps first (13.1–13.4), then distributed tests (13.5–13.8) when workers are reachable.
 
 ---
 
