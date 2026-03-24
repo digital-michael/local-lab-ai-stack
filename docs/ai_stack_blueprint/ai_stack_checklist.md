@@ -1052,7 +1052,7 @@ These collapse into the configuration system above. Tracked individually for vis
 - [ ] **Implement localhost discovery profile** — filesystem scan of volumes directory, manifest parsing (see D-013)
 - [ ] **Specify local and WAN discovery profiles** — mDNS/DNS-SD for local, registry/federation for WAN (see D-013)
 - [ ] **Build volume ingestion pipeline** — process raw documents into `.ai-library` manifest structure; handle embedding, vector storage, and checksum generation (see D-013)
-- [ ] **Integrate MCP server into Knowledge Index Service** — expose `search_knowledge` and `ingest_document` as MCP tools over HTTP/SSE transport; Anthropic `mcp[server]` Python SDK; mount at `/mcp/sse` alongside REST API; add Traefik routing and pytest coverage (see Phase 7)
+- [x] **Integrate MCP server into Knowledge Index Service** — implemented in Phase 7 (`app.py` lines 607+): `search_knowledge` and `ingest_document` MCP tools over HTTP/SSE transport at `/mcp/sse`; auth guard on `API_KEY`; cross-node routing in `search_knowledge` mirrors REST `/query` behaviour. Deferrable entry was a stale duplicate of Phase 7 (already ✅ COMPLETE).
 - [ ] **Enable local GPU for vLLM** — CDI setup, pin Ollama to CPU, select quantized model for 8 GB VRAM, add `models[]` config section, auto-generate LiteLLM model_list (see Phase 8)
 - [ ] **Add `configure.sh detect-hardware`** — detect GPU/VRAM/RAM, suggest node profile and viable models (see Phase 8)
 - [ ] **Add node profile support** — `controller`, `inference-worker`, `peer` profiles; `configure.sh` selects services per profile (see Phase 9)
