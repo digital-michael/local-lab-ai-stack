@@ -41,6 +41,7 @@ Commands:
   detect-hardware           Detect GPU/VRAM/RAM and suggest node profile
   recommend                 Interactive node profile recommender (writes to config.json)
   sync-libraries            Push local .ai-library packages to the controller KI service
+  build-library             Package a directory of raw documents into a .ai-library bundle
   help                      Show this message
 
 Environment:
@@ -1158,6 +1159,152 @@ cmd_sync_libraries() {
 }
 
 # ---------------------------------------------------------------------------
+# build-library — Package raw documents into a .ai-library bundle (D-013)
+# ---------------------------------------------------------------------------
+
+cmd_build_library() {
+    # Parse named flags
+    local source_dir="" lib_name="" lib_version="0.1.0"
+    local lib_author="" lib_license="" lib_description=""
+    local output_dir=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --source)      source_dir="$2";      shift 2 ;;
+            --name)        lib_name="$2";        shift 2 ;;
+            --version)     lib_version="$2";     shift 2 ;;
+            --author)      lib_author="$2";      shift 2 ;;
+            --license)     lib_license="$2";     shift 2 ;;
+            --description) lib_description="$2"; shift 2 ;;
+            --output)      output_dir="$2";      shift 2 ;;
+            *) echo "ERROR: unknown flag: $1" >&2
+               echo "Usage: configure.sh build-library --source <dir> --name <slug> [--version <semver>] [--author <name>] [--license <spdx>] [--description <text>] [--output <dir>]" >&2
+               exit 1 ;;
+        esac
+    done
+
+    # Validate required flags
+    if [[ -z "$source_dir" ]]; then
+        echo "ERROR: --source is required" >&2
+        exit 1
+    fi
+    if [[ -z "$lib_name" ]]; then
+        echo "ERROR: --name is required" >&2
+        exit 1
+    fi
+
+    # Validate name format (kebab-case: starts and ends with alnum, may contain hyphens)
+    if ! [[ "$lib_name" =~ ^[a-z0-9][a-z0-9-]*[a-z0-9]$ ]]; then
+        echo "ERROR: --name must be kebab-case (e.g. my-library)" >&2
+        exit 1
+    fi
+    # Validate version format (semver MAJOR.MINOR.PATCH)
+    if ! [[ "$lib_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "ERROR: --version must be semver (e.g. 1.0.0)" >&2
+        exit 1
+    fi
+
+    if [[ ! -d "$source_dir" ]]; then
+        echo "ERROR: source directory does not exist: $source_dir" >&2
+        exit 1
+    fi
+
+    # Resolve output dir
+    if [[ -z "$output_dir" ]]; then
+        local ai_stack_dir
+        if [[ -f "$CONFIG_FILE" ]]; then
+            ai_stack_dir=$(jq -r '.ai_stack_dir // ""' "$CONFIG_FILE" 2>/dev/null || echo "")
+            ai_stack_dir="${ai_stack_dir//\$HOME/$HOME}"
+        fi
+        ai_stack_dir="${ai_stack_dir:-$HOME/ai-stack}"
+        output_dir="${ai_stack_dir}/libraries/${lib_name}"
+    fi
+
+    echo "Building .ai-library package:"
+    echo "  name:    $lib_name"
+    echo "  version: $lib_version"
+    echo "  source:  $source_dir"
+    echo "  output:  $output_dir"
+    echo ""
+
+    # Create output structure
+    local docs_dir="${output_dir}/documents"
+    mkdir -p "$docs_dir"
+
+    # Copy supported document files from source (top-level only)
+    local file_count=0 total_bytes=0
+    while IFS= read -r -d '' src_file; do
+        local fname
+        fname=$(basename "$src_file")
+        # Skip hidden files and manifest itself
+        [[ "$fname" == .* ]]         && continue
+        [[ "$fname" == manifest.yaml ]] && continue
+        cp "$src_file" "$docs_dir/$fname"
+        (( file_count++ )) || true
+        local fsize
+        fsize=$(wc -c < "$src_file" 2>/dev/null || echo 0)
+        (( total_bytes += fsize )) || true
+    done < <(find "$source_dir" -maxdepth 1 -type f \( \
+        -name "*.md"   -o -name "*.txt"  -o -name "*.rst" \
+        -o -name "*.yaml" -o -name "*.yml" \
+        -o -name "*.json" -o -name "*.html" -o -name "*.htm" \
+    \) -print0 2>/dev/null)
+
+    if [[ "$file_count" -eq 0 ]]; then
+        echo "WARN: No supported document files found in $source_dir" >&2
+        echo "      Supported extensions: .md .txt .rst .yaml .yml .json .html .htm" >&2
+    fi
+
+    # Write manifest.yaml
+    local created_at
+    created_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u)
+    {
+        echo "name: \"${lib_name}\""
+        echo "version: \"${lib_version}\""
+        [[ -n "$lib_author" ]]      && echo "author: \"${lib_author}\""
+        [[ -n "$lib_license" ]]     && echo "license: \"${lib_license}\""
+        [[ -n "$lib_description" ]] && echo "description: \"${lib_description}\""
+        echo "profiles:"
+        echo "  - localhost"
+        echo "created_at: \"${created_at}\""
+    } > "${output_dir}/manifest.yaml"
+
+    # Write metadata.json
+    jq -n \
+        --arg  name        "$lib_name" \
+        --arg  version     "$lib_version" \
+        --arg  source      "$(realpath "$source_dir" 2>/dev/null || echo "$source_dir")" \
+        --argjson file_count  "$file_count" \
+        --argjson total_bytes "$total_bytes" \
+        --arg  created_at  "$created_at" \
+        '{name:$name,version:$version,source:$source,file_count:$file_count,total_bytes:$total_bytes,created_at:$created_at}' \
+        > "${output_dir}/metadata.json"
+
+    # Write checksums.txt (sha256sum format: "<hash>  documents/<filename>")
+    local checksums_file="${output_dir}/checksums.txt"
+    : > "$checksums_file"
+    if [[ "$file_count" -gt 0 ]]; then
+        while IFS= read -r -d '' doc_file; do
+            local fname
+            fname=$(basename "$doc_file")
+            local fhash
+            fhash=$(sha256sum "$doc_file" | awk '{print $1}')
+            echo "${fhash}  documents/${fname}" >> "$checksums_file"
+        done < <(find "$docs_dir" -maxdepth 1 -type f -print0 | sort -z)
+    fi
+
+    echo "Package built:"
+    echo "  ${output_dir}/manifest.yaml"
+    echo "  ${output_dir}/documents/  (${file_count} file(s), ${total_bytes} bytes)"
+    echo "  ${output_dir}/metadata.json"
+    echo "  ${output_dir}/checksums.txt"
+    echo ""
+    echo "Next steps:"
+    echo "  Ingest locally:     POST /v1/scan with path=${output_dir%/*}"
+    echo "  Push to controller: configure.sh sync-libraries"
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1175,6 +1322,7 @@ case "${1:-help}" in
     detect-hardware)         cmd_detect_hardware ;;
     recommend)               cmd_recommend ;;
     sync-libraries)          cmd_sync_libraries ;;
+    build-library)           cmd_build_library "${@:2}" ;;
     help|--help|-h)          usage ;;
     *)
         echo "Unknown command: $1" >&2
