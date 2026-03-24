@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ai-stack:library-manifest",
+  "title": "AI Stack Library Manifest",
+  "description": "Schema for manifest.yaml found inside a .ai-library knowledge package (D-013).",
+  "type": "object",
+  "required": ["name", "version"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
+      "description": "Unique library identifier in kebab-case slug format (e.g. 'golang-best-practices')."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Semantic version string (MAJOR.MINOR.PATCH, e.g. '1.0.0')."
+    },
+    "author": {
+      "type": "string",
+      "description": "Free-form author identifier (person, team, or node name)."
+    },
+    "license": {
+      "type": "string",
+      "description": "SPDX license expression (e.g. 'CC-BY-4.0', 'MIT', 'Apache-2.0')."
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable summary of the library contents."
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["localhost", "local", "WAN"]
+      },
+      "minItems": 1,
+      "uniqueItems": true,
+      "default": ["localhost"],
+      "description": "Discovery profiles this volume supports. See D-014 for profile semantics."
+    },
+    "language": {
+      "type": "string",
+      "pattern": "^[a-z]{2}(-[A-Z]{2})?$",
+      "description": "Primary language of the content as an ISO 639-1 code (e.g. 'en', 'de', 'pt-BR')."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of when this package version was created."
+    }
+  },
+
+  "$comment": "Package layout and checksums.txt format — see D-013 in docs/meta_local/decisions.md",
+  "examples": [
+    {
+      "name": "golang-best-practices",
+      "version": "1.0.0",
+      "author": "alice",
+      "license": "CC-BY-4.0",
+      "description": "Curated Go programming best practices and patterns.",
+      "profiles": ["localhost", "local"],
+      "language": "en",
+      "created_at": "2026-03-24T00:00:00Z"
+    }
+  ]
+}
