@@ -86,7 +86,7 @@ _svc_state() {
         local port path
         case "$svc" in
             ollama)          port=11434; path="" ;;
-            promtail)        port=9080;  path="/ready" ;;
+            promtail)        port=9080;  path="/metrics" ;; # /ready → 500 when scrape_configs is empty
             knowledge-index) port=$(jq -r '.services["knowledge-index"].ports[0].host // 8000' "$CONFIG_FILE" 2>/dev/null || echo 8000); path="/health" ;;
             qdrant)          port=6333;  path="/healthz" ;;
             *)               echo "unknown"; return ;;
