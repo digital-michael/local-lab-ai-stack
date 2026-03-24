@@ -34,6 +34,15 @@ _detect_deploy_mode() {
     fi
 }
 
+# Returns "systemd" if systemctl --user is available, otherwise "none"
+_detect_service_manager() {
+    if command -v systemctl &>/dev/null && systemctl --user status &>/dev/null 2>&1; then
+        echo "systemd"
+    else
+        echo "none"
+    fi
+}
+
 MODE_SERVICES=false
 MODE_DATA=false
 MODE_HARD=false
@@ -159,13 +168,18 @@ if $MODE_SERVICES; then
     "$SCRIPT_DIR/status.sh" --check --quiet 2>/dev/null || deploy_check=$?
 
     _deploy_mode=$(_detect_deploy_mode)
+    _svc_mgr=$(_detect_service_manager)
 
     if [[ "$_deploy_mode" == "podman" ]]; then
         if [[ $deploy_check -ne 2 ]]; then
             echo "Stopping services..."
             mapfile -t services < <(jq -r '.services | keys[]' "$CONFIG_FILE")
             for svc in "${services[@]}"; do
-                systemctl --user stop "${svc}.service" 2>/dev/null || true
+                if [[ "$_svc_mgr" == "systemd" ]]; then
+                    systemctl --user stop "${svc}.service" 2>/dev/null || true
+                else
+                    podman stop "$svc" 2>/dev/null || true
+                fi
             done
             echo "Services stopped."
         else
@@ -174,8 +188,10 @@ if $MODE_SERVICES; then
         echo "Removing quadlet files from $QUADLET_DIR ..."
         find "$QUADLET_DIR" -maxdepth 1 \( -name "*.container" -o -name "ai-stack.network" \) \
             -delete 2>/dev/null || true
-        systemctl --user daemon-reload
-        echo "Quadlets removed and systemd reloaded."
+        if [[ "$_svc_mgr" == "systemd" ]]; then
+            systemctl --user daemon-reload
+        fi
+        echo "Quadlets removed."
     else
         # Bare-metal: unload and remove native service files
         _os=$(uname -s)
