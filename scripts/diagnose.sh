@@ -749,8 +749,9 @@ _check_library_custody() {
     fi
 
     # Warn if any known worker node has contributed zero libraries
-    local worker_nodes
-    worker_nodes=$(jq -r '.nodes[] | select(.profile == "inference-worker") | .name' "$CONFIG_FILE" 2>/dev/null || true)
+    local worker_nodes _nodes_dir
+    _nodes_dir="$(dirname "$CONFIG_FILE")/nodes"
+    worker_nodes=$(for _f in "$_nodes_dir"/*.json; do [[ -f "$_f" ]] && jq -r 'select(.profile == "inference-worker") | .name // empty' "$_f"; done 2>/dev/null || true)
     while IFS= read -r node; do
         [[ -z "$node" ]] && continue
         local node_count

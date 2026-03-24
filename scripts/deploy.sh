@@ -142,10 +142,8 @@ cp -r "$PROJECT_ROOT/configs/promtail/." "$AI_STACK_CONFIGS/promtail/"
 
 # On worker nodes, repoint promtail at the controller's Loki (not local loki.ai-stack)
 if [[ "$NODE_PROFILE" != "controller" ]]; then
-    _controller_addr=$(jq -r '
-        .nodes[] | select(.profile == "controller") |
-        .address // .address_fallback // empty
-    ' "$CONFIG_FILE" 2>/dev/null | head -1)
+    _nodes_dir="$(dirname "$CONFIG_FILE")/nodes"
+    _controller_addr=$(for _f in "$_nodes_dir"/*.json; do [[ -f "$_f" ]] && jq -r 'select(.profile == "controller") | .address // .address_fallback // empty' "$_f"; done 2>/dev/null | head -1 || true)
     if [[ -n "$_controller_addr" ]]; then
         # sed -i.bak is portable across macOS (requires suffix) and Linux
         sed -i.bak "s|http://loki\.ai-stack:3100|http://${_controller_addr}:3100|g" \
