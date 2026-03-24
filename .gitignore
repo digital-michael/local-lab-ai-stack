@@ -23,6 +23,7 @@ __pycache__/
 *.log
 *.pid
 tmp/
+testing/layer5_distributed/results/
 
 # Machine-local node profile override (not committed; set by configure.sh recommend)
 configs/node_profile

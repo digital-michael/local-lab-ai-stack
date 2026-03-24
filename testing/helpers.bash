@@ -19,22 +19,22 @@ export CONFIG_FILE="$PROJECT_ROOT/configs/config.json"
 # Service lists
 # ---------------------------------------------------------------------------
 
-# All 14 services defined in configs/config.json
+# All 15 services defined in configs/config.json
 SERVICES_ALL=(
     authentik flowise grafana knowledge-index litellm
-    loki ollama openwebui postgres prometheus promtail qdrant traefik vllm
+    loki minio ollama openwebui postgres prometheus promtail qdrant traefik vllm
 )
 export SERVICES_ALL
 
-# 12 services deployable without GPU or custom-built image
+# Controller-profile services expected to be active (non-GPU, non-worker-only)
 SERVICES_DEPLOYED=(
-    authentik flowise grafana litellm loki
-    ollama openwebui postgres prometheus promtail qdrant traefik
+    authentik flowise grafana knowledge-index litellm loki
+    minio openwebui postgres prometheus promtail qdrant traefik
 )
 export SERVICES_DEPLOYED
 
-# Services deferred pending GPU availability or custom image build
-SERVICES_DEFERRED=(knowledge-index vllm)
+# Services requiring GPU hardware or worker-node profile; checked separately
+SERVICES_DEFERRED=(ollama vllm)
 export SERVICES_DEFERRED
 
 # ---------------------------------------------------------------------------
@@ -42,7 +42,8 @@ export SERVICES_DEFERRED
 # ---------------------------------------------------------------------------
 
 SECRETS=(
-    authentik_secret_key flowise_password litellm_master_key
+    authentik_secret_key flowise_password knowledge_index_api_key
+    litellm_master_key minio_root_password minio_root_user
     openwebui_api_key postgres_password qdrant_api_key
 )
 export SECRETS

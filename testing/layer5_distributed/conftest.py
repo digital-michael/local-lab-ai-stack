@@ -108,7 +108,7 @@ def active_workers() -> list[dict]:
 class MetricsRecorder:
     def __init__(self, suite: str):
         self.suite = suite
-        self.run_id = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+        self.run_id = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         self.results: list[dict] = []
 
     def record(

@@ -164,14 +164,18 @@ if [[ "$DEPLOY_MODE" == "podman" ]]; then
     mkdir -p "$AI_STACK_CONFIGS/prometheus"
     mkdir -p "$AI_STACK_CONFIGS/grafana/provisioning/datasources"
     mkdir -p "$AI_STACK_CONFIGS/grafana/provisioning/dashboards"
+    mkdir -p "$AI_STACK_CONFIGS/litellm"
     mkdir -p "$AI_STACK_DIR/flowise"
     mkdir -p "$AI_STACK_DIR/openwebui"
     mkdir -p "$AI_STACK_DIR/grafana"
+    mkdir -p "$AI_STACK_DIR/minio"
 
     cp -r "$PROJECT_ROOT/configs/traefik/."    "$AI_STACK_CONFIGS/traefik/"
     cp -r "$PROJECT_ROOT/configs/prometheus/." "$AI_STACK_CONFIGS/prometheus/"
     cp -r "$PROJECT_ROOT/configs/loki/."       "$AI_STACK_CONFIGS/loki/"
     cp -r "$PROJECT_ROOT/configs/grafana/."    "$AI_STACK_CONFIGS/grafana/"
+    cp    "$PROJECT_ROOT/configs/litellm/proxy_config.yaml" "$AI_STACK_CONFIGS/litellm/proxy_config.yaml"
+    cp    "$PROJECT_ROOT/configs/litellm/hooks.py"          "$AI_STACK_CONFIGS/litellm/hooks.py"
 
     "$SCRIPT_DIR/configure.sh" validate
     "$SCRIPT_DIR/configure.sh" generate-quadlets

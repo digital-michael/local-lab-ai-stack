@@ -1010,6 +1010,9 @@ These collapse into the configuration system above. Tracked individually for vis
 - [ ] **Implement dynamic node registration** — workers register with controller LiteLLM on startup; heartbeat; static fallback (see Phase 9)
 - [ ] **Set up macOS M1 inference worker** — Podman Machine, Ollama container, `register-node.sh` (see Phase 9)
 - [ ] **Implement library custody sync** — `POST /v1/libraries` endpoint on controller KI; `configure.sh sync-libraries` subcommand on workers; provenance in PostgreSQL (see Phase 10, D-023)
+- [ ] **Drive smoke tests from `config.json`** — all port literals in `testing/layer1_smoke.bats` (and other BATS tests) are currently hardcoded; `testing/helpers.bash` should expose port variables read from `config.json` via `jq` (e.g. `LITELLM_PORT`, `MINIO_PORT`, `PROMETHEUS_PORT`, ...) so that a port remap in config automatically flows through to the tests without manual grep-and-update. This was exposed when MinIO was remapped to 9100/9101.
+- [ ] **Add MinIO smoke test (T-021)** — `testing/layer1_smoke.bats` has no MinIO entry; add `T-021: minio S3 API /minio/health/live returns 200` at `http://localhost:${MINIO_PORT}/minio/health/live` (port driven by the config-driven variable above).
+- [ ] **License inventory** — Enumerate and publish licenses for all components used in this solution: container images (Ollama, LiteLLM, MinIO, Flowise, Qdrant, Authentik, PostgreSQL, Traefik, Grafana, Loki, Prometheus, OpenWebUI), Python packages (`services/knowledge-index/requirements.txt`, `.venv/`), and LLM model weights (Llama 3.1, Llama 3.2, Qwen 2.5). Create `docs/licenses/THIRD_PARTY.md` with SPDX identifiers and source links. Add `pip-licenses` or `trivy` scan to CI. Note: Llama 3.x uses Meta's custom license (commercial use allowed above certain thresholds).
 
 ---
 
