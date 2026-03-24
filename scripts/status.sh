@@ -251,8 +251,8 @@ if ! $QUIET; then
     # sep_width tracks the visual width of the separator line (excludes 2-space indent)
     sep_width=0
     if [[ $VERBOSE -ge 2 ]]; then
-        sep_width=$((col + 56))
-        printf "  %-${col}s %-10s %-12s %-9s %s\n" "SERVICE" "STATE" "HEALTH" "PORT" "URL"
+        sep_width=$((col + 46))
+        printf "  %-${col}s %-10s %-12s %s\n" "SERVICE" "STATE" "HEALTH" "URL"
     elif [[ $VERBOSE -eq 1 ]]; then
         sep_width=$((col + 32))
         printf "  %-${col}s %-10s %-12s %s\n" "SERVICE" "STATE" "HEALTH" "PORT"
@@ -271,7 +271,7 @@ if ! $QUIET; then
         if [[ $VERBOSE -ge 2 ]]; then
             _port_val=$(_svc_port "$svc")
             _url_val="${_port_val:+http://localhost:${_port_val}}"
-            printf "  %-${col}s %-10s %-12s %-9s %s\n" "$svc" "$display" "$health_display" "${_port_val:--}" "${_url_val:--}"
+            printf "  %-${col}s %-10s %-12s %s\n" "$svc" "$display" "$health_display" "${_url_val:--}"
         elif [[ $VERBOSE -eq 1 ]]; then
             _port_val=$(_svc_port "$svc")
             printf "  %-${col}s %-10s %-12s %s\n" "$svc" "$display" "$health_display" "${_port_val:--}"
