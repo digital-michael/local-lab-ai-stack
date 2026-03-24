@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "ai_stack_dir": "$HOME/ai-stack",
   "network": {
     "name": "ai-stack-net",
@@ -673,6 +673,56 @@
         "command": "bash -c 'echo > /dev/tcp/localhost/9080'",
         "interval": "30s",
         "retries": 3,
+        "timeout": "5s"
+      },
+      "resources": {
+        "cpus": 1,
+        "memory": "1g",
+        "gpu": null
+      }
+    },
+    "minio": {
+      "image": "docker.io/minio/minio",
+      "tag": "RELEASE.2025-04-22T22-12-26Z",
+      "container_name": "minio",
+      "dns_alias": "minio.ai-stack",
+      "depends_on": [],
+      "ports": [
+        {
+          "host": 9000,
+          "container": 9000,
+          "bind": "127.0.0.1"
+        },
+        {
+          "host": 9001,
+          "container": 9001,
+          "bind": "127.0.0.1"
+        }
+      ],
+      "volumes": [
+        {
+          "host": "$AI_STACK_DIR/minio",
+          "container": "/data",
+          "mode": "rw"
+        }
+      ],
+      "environment": {},
+      "secrets": [
+        {
+          "name": "minio_root_user",
+          "target": "MINIO_ROOT_USER"
+        },
+        {
+          "name": "minio_root_password",
+          "target": "MINIO_ROOT_PASSWORD"
+        }
+      ],
+      "command": ["server", "/data", "--console-address", ":9001"],
+      "buckets": ["documents", "outputs", "research", "libraries"],
+      "health_check": {
+        "command": "bash -c 'curl -sf http://localhost:9000/minio/health/live'",
+        "interval": "30s",
+        "retries": 5,
         "timeout": "5s"
       },
       "resources": {

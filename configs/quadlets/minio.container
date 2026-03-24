@@ -1,0 +1,39 @@
+# minio.container
+# MinIO S3-compatible object storage — controller node only.
+# Provides: documents, outputs, research, libraries buckets (D-032)
+# Console: http://localhost:9001 (admin UI, 127.0.0.1 bound)
+# API:     http://localhost:9000 (S3 API, 127.0.0.1 bound)
+#
+# After first deploy, create buckets:
+#   bash scripts/deploy.sh minio-buckets
+#   -- or manually --
+#   podman exec minio mc alias set local http://localhost:9000 $ROOT_USER $ROOT_PW
+#   podman exec minio mc mb local/documents local/outputs local/research local/libraries
+[Unit]
+Description=AI Stack MinIO object storage
+After=ai-stack-network.service
+Requires=ai-stack-network.service
+
+[Container]
+Image=docker.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+ContainerName=minio
+Label=com.docker.compose.project=ai-stack
+Label=ai-stack.service=minio
+Network=ai-stack-net:alias=minio.ai-stack
+PublishPort=127.0.0.1:9000:9000
+PublishPort=127.0.0.1:9001:9001
+Secret=minio_root_user,type=env,target=MINIO_ROOT_USER
+Secret=minio_root_password,type=env,target=MINIO_ROOT_PASSWORD
+Volume=${AI_STACK_DIR}/minio:/data:Z
+Exec=server /data --console-address :9001
+HealthCmd=bash -c 'curl -sf http://localhost:9000/minio/health/live'
+HealthInterval=30s
+HealthRetries=5
+HealthTimeout=5s
+PodmanArgs=--cpus=1 --memory=1g
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target
