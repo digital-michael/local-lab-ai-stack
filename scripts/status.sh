@@ -37,6 +37,7 @@ _get_node_profile() {
 
 QUIET=false
 CHECK_ONLY=false
+VERBOSE=0  # 0=default, 1=-v (add PORT column), 2=-vv (add PORT + URL columns)
 
 usage() {
     cat <<'EOF'
@@ -49,6 +50,8 @@ Purpose:
 Options:
   --quiet       Suppress all output; rely on exit code only
   --check       Only check if stack is deployed (skips service state queries)
+  -v            Add PORT column showing expected host port from config.json
+  -vv           Add PORT and URL columns (full http://localhost:PORT URL)
   -h, --help    Show this message
 
 Exit codes:
@@ -66,6 +69,8 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --quiet)  QUIET=true ;;
         --check)  CHECK_ONLY=true ;;
+        -vv)      VERBOSE=2 ;;
+        -v)       VERBOSE=1 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown option: $1" >&2; usage >&2; exit 3 ;;
     esac
@@ -97,6 +102,12 @@ _svc_state() {
             echo "inactive"
         fi
     fi
+}
+
+# Returns the host-side port for a service from config.json, or empty if none.
+_svc_port() {
+    local svc="$1"
+    jq -r --arg s "$svc" '.services[$s].ports[0].host // empty' "$CONFIG_FILE" 2>/dev/null
 }
 
 # Returns container health (only for quadlet-managed active containers)
@@ -237,8 +248,19 @@ if ! $QUIET; then
     fi
 
     echo ""
-    printf "  %-${col}s %-10s %s\n" "SERVICE" "STATE" "HEALTH"
-    printf "  %s\n" "$(printf '─%.0s' $(seq 1 $((col + 22))))"
+    # sep_width tracks the visual width of the separator line (excludes 2-space indent)
+    sep_width=0
+    if [[ $VERBOSE -ge 2 ]]; then
+        sep_width=$((col + 56))
+        printf "  %-${col}s %-10s %-12s %-9s %s\n" "SERVICE" "STATE" "HEALTH" "PORT" "URL"
+    elif [[ $VERBOSE -eq 1 ]]; then
+        sep_width=$((col + 32))
+        printf "  %-${col}s %-10s %-12s %s\n" "SERVICE" "STATE" "HEALTH" "PORT"
+    else
+        sep_width=$((col + 22))
+        printf "  %-${col}s %-10s %s\n" "SERVICE" "STATE" "HEALTH"
+    fi
+    printf "  %s\n" "$(printf '─%.0s' $(seq 1 $sep_width))"
 
     for svc in "${services[@]}"; do
         display="${svc_states[$svc]}"
@@ -246,7 +268,16 @@ if ! $QUIET; then
         health_display="${svc_health[$svc]:-}"
         [[ "$display" != "active" ]] && health_display="-"
         [[ -z "$health_display" ]] && health_display="-"
-        printf "  %-${col}s %-10s %s\n" "$svc" "$display" "$health_display"
+        if [[ $VERBOSE -ge 2 ]]; then
+            _port_val=$(_svc_port "$svc")
+            _url_val="${_port_val:+http://localhost:${_port_val}}"
+            printf "  %-${col}s %-10s %-12s %-9s %s\n" "$svc" "$display" "$health_display" "${_port_val:--}" "${_url_val:--}"
+        elif [[ $VERBOSE -eq 1 ]]; then
+            _port_val=$(_svc_port "$svc")
+            printf "  %-${col}s %-10s %-12s %s\n" "$svc" "$display" "$health_display" "${_port_val:--}"
+        else
+            printf "  %-${col}s %-10s %s\n" "$svc" "$display" "$health_display"
+        fi
     done
 
     echo ""
