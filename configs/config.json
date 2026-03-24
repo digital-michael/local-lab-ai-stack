@@ -706,12 +706,12 @@
       "depends_on": [],
       "ports": [
         {
-          "host": 9000,
+          "host": 9100,
           "container": 9000,
           "bind": "127.0.0.1"
         },
         {
-          "host": 9001,
+          "host": 9101,
           "container": 9001,
           "bind": "127.0.0.1"
         }

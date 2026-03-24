@@ -31,7 +31,7 @@ setup_file() {
 # T-001 — Quadlet .container files exist for all configured services
 # ---------------------------------------------------------------------------
 
-@test "T-001: quadlet .container files exist for all 14 services" {
+@test "T-001: quadlet .container files exist for all 15 services" {
     local quadlet_dir="$HOME/.config/containers/systemd"
     local missing=()
 
