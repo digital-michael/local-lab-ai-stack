@@ -153,16 +153,19 @@ else
         '.services | keys[] | select(. as $k | $svcs | index($k) != null)' "$CONFIG_FILE")
 fi
 
-# Determine deploy mode: per-service, check whether a quadlet file exists
+# Determine deploy mode: Darwin cannot run systemd quadlets — always bare metal.
+# On Linux, check per-service quadlet files to detect podman vs bare-metal vs mixed.
 _quadlet_svc_count=0
 _bare_svc_count=0
-for svc in "${services[@]}"; do
-    if [[ -f "$QUADLET_DIR/${svc}.container" ]]; then
-        _quadlet_svc_count=$((_quadlet_svc_count + 1))
-    else
-        _bare_svc_count=$((_bare_svc_count + 1))
-    fi
-done
+if [[ "$(uname -s)" != "Darwin" ]]; then
+    for svc in "${services[@]}"; do
+        if [[ -f "$QUADLET_DIR/${svc}.container" ]]; then
+            _quadlet_svc_count=$((_quadlet_svc_count + 1))
+        else
+            _bare_svc_count=$((_bare_svc_count + 1))
+        fi
+    done
+fi
 if [[ $_quadlet_svc_count -gt 0 && $_bare_svc_count -gt 0 ]]; then
     _deploy_mode="mixed (podman + bare metal)"
 elif [[ $_quadlet_svc_count -gt 0 ]]; then
