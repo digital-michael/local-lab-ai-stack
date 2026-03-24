@@ -932,7 +932,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
-## Phase 14 — Config-Driven Test Infrastructure + MinIO Smoke Test ✅ COMPLETE (commit `fd6da76` → pending)
+## Phase 14 — Config-Driven Test Infrastructure + MinIO Smoke Test ✅ COMPLETE (commit `77cb8f6`)
 
 **Goal:** Eliminate all hardcoded port literals from the BATS test suite. All host ports are read from `configs/config.json` at suite load time via a single Python call in `testing/helpers.bash`, exported as named variables, and referenced by all test files. Also adds the missing MinIO smoke test (T-021), closing two Phase 13 deferrable TODOs.
 
@@ -1059,8 +1059,8 @@ These collapse into the configuration system above. Tracked individually for vis
 - [ ] **Implement dynamic node registration** — workers register with controller LiteLLM on startup; heartbeat; static fallback (see Phase 9)
 - [ ] **Set up macOS M1 inference worker** — Podman Machine, Ollama container, `register-node.sh` (see Phase 9)
 - [ ] **Implement library custody sync** — `POST /v1/libraries` endpoint on controller KI; `configure.sh sync-libraries` subcommand on workers; provenance in PostgreSQL (see Phase 10, D-023)
-- [ ] **Drive smoke tests from `config.json`** — all port literals in `testing/layer1_smoke.bats` (and other BATS tests) are currently hardcoded; `testing/helpers.bash` should expose port variables read from `config.json` via `jq` (e.g. `LITELLM_PORT`, `MINIO_PORT`, `PROMETHEUS_PORT`, ...) so that a port remap in config automatically flows through to the tests without manual grep-and-update. This was exposed when MinIO was remapped to 9100/9101.
-- [ ] **Add MinIO smoke test (T-021a)** — `testing/layer1_smoke.bats` has no MinIO entry; add `T-021a: minio S3 API /minio/health/live returns 200` at `http://localhost:${MINIO_PORT}/minio/health/live` (port driven by the config-driven variable above). Uses `T-021a` rather than `T-021` because T-021–T-024 are reserved for `layer2_traefik.bats`.
+- [x] **Drive smoke tests from `config.json`** — `testing/helpers.bash` `_port_exports` block reads all host ports from `config.json` via Python at suite load time; exports 14 named variables; all `testing/*.bats` files reference `${VAR_NAME}` — zero hardcoded port literals remain. Closed Phase 14 (`77cb8f6`).
+- [x] **Add MinIO smoke test (T-021a)** — `testing/layer1_smoke.bats` T-021a: `assert_http_status "200" "http://localhost:${MINIO_PORT}/minio/health/live"`. Closed Phase 14 (`77cb8f6`).
 - [ ] **License inventory** — Enumerate and publish licenses for all components used in this solution: container images (Ollama, LiteLLM, MinIO, Flowise, Qdrant, Authentik, PostgreSQL, Traefik, Grafana, Loki, Prometheus, OpenWebUI), Python packages (`services/knowledge-index/requirements.txt`, `.venv/`), and LLM model weights (Llama 3.1, Llama 3.2, Qwen 2.5). Create `docs/licenses/THIRD_PARTY.md` with SPDX identifiers and source links. Add `pip-licenses` or `trivy` scan to CI. Note: Llama 3.x uses Meta's custom license (commercial use allowed above certain thresholds).
 
 ---
