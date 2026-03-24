@@ -355,3 +355,39 @@ This file records architecture decisions made during work on this project. Each 
 | **Driver** | Human-initiated vision; joint design |
 | **Trigger** | Phase 10 architecture discussion — framing libraries as digital artifacts with lifecycle value, not just distributed state. |
 | **Commit** | *(Phase 10)* |
+
+---
+
+### D-026 — Node Registry: Phase A — Per-Node Config Files, Status, and Alias (Supersedes D-020)
+
+| Field | Value |
+|---|---|
+| **Decision** | Extract `nodes[]` out of `config.json` into individual per-node JSON files under `configs/nodes/<alias>.json`. Add `status` and `alias` fields to each node record. Scripts discover nodes by globbing `configs/nodes/*.json` and filtering on `status`. `config.json` retains topology-level fields (network, services, models) but no longer contains the node list. |
+| **Context** | D-020 committed to a flat `nodes[]` array inside `config.json` as a minimum-viable solution for Phase 9. The array now has three entries (workstation, macbook-m1, alienware) and already requires edits whenever a node's address, status, or models change. The monolithic file mixes two distinct concerns: stack topology (stable, operator-maintained) and node registry (dynamic, per-machine). They have different change rates and different owners. Additionally, the current schema exposes physical hostnames (`TC25`, `SOL`) in status output, log labels, and Grafana panels — making it brittle when hardware changes. |
+| **Options Considered** | (1) Keep `nodes[]` in `config.json`; add status/alias fields inline. Easy but perpetuates the mixed-concern problem. (2) Extract to `configs/nodes/<alias>.json` per node. Atomic isolation, free per-node gitignore or encryption, path-stable identity (alias never changes even if hardware does). (3) Extract to a single `configs/nodes.json`. Separate file but same array problem at smaller scale. |
+| **Rationale** | Option 2 gives true atomic isolation: adding a node never touches other node files. The alias becomes the stable identity used everywhere — status output, log labels, LiteLLM routing, Grafana panels. Hostnames (`TC25.mynetworksettings.com`) remain in the file as `address` but are never surfaced to users or tools. The file layout is also the correct Phase B foundation: a registration service can write a new `<alias>.json` on first contact using the same schema, and scripts require no changes. |
+| **Status Fields** | `active` — fully participating (deploy, register, route); `inactive` — known but suspended (graceful shutdown, excluded from routing, deploy no-ops cleanly); `unhealthy` — registered but missing heartbeat or failing health checks (set automatically by monitoring, not by the node itself); `prohibited` — administratively blocked (deploy and registration rejected at the gate; record preserved for audit purposes); `pending` — self-registered but not yet approved by controller (Phase B only) |
+| **Alias Design** | `alias` is the stable public identity — used in status display, log labels, Grafana, and LiteLLM routing. `name` remains as the hardware/DNS truth. `address` holds the DNS hostname. If hardware is replaced, the new machine gets the same alias — dashboards are unaffected. Reserved alias prefixes: `controller-`, `inference-worker-`, `knowledge-worker-`, `peer-` (matches existing node profiles). |
+| **Phase A Node Schema** | `{ "schema_version": "1.1", "alias": "inference-worker-1", "name": "macbook-m1", "address": "TC25.mynetworksettings.com", "address_fallback": "10.19.208.118", "status": "active", "profile": "inference-worker", "os": "darwin", "deployment": "bare_metal", "registered_at": "2026-03-24T00:00:00Z", "models": ["llama3.1:8b-instruct-q4_K_M"] }` |
+| **Migration** | (1) Create `configs/nodes/` directory. (2) Write one `<alias>.json` per existing node. (3) Remove `nodes[]` from `config.json` and bump `schema_version` to `1.1`. (4) Update all scripts that read `.nodes[]` to glob `configs/nodes/*.json` via `jq` or direct file reads. (5) Update `status.sh`, `deploy.sh`, `configure.sh` to read alias for display/labeling. |
+| **Driver** | Human-initiated, joint design |
+| **Trigger** | Observation that `config.json` mixes stack topology with node registry at a point where node topology is growing and dynamic registration is on the roadmap. |
+| **Commit** | *(pending Phase A implementation)* |
+
+---
+
+### D-027 — Node Registry: Phase B — Dynamic Registration (Deferred)
+
+| Field | Value |
+|---|---|
+| **Decision** | Defer dynamic node registration to a future phase. The Phase A file layout is designed as the on-disk representation Phase B will write to. When Phase B is implemented, a registration service hosted on the controller will accept node self-registration, write `configs/nodes/<alias>.json`, manage heartbeat-driven status transitions, and enforce admission control. |
+| **Context** | Phase A establishes the schema contract and file layout. Phase B adds the network layer: nodes POST to the controller on startup/shutdown, the controller manages status transitions automatically, and scripts continue to read node files without modification (the registry service maintains the files). |
+| **Registry Host** | The controller node (SERVICES) hosts the registration service, either as a new microservice or as an extension to the Knowledge Index Service. The controller is the authority for the node registry — workers and peers push to it, not to each other. Non-peer nodes (inference-workers without a full controller stack) interact with it via HTTPS only; they do not need the registry service installed locally. |
+| **Lifecycle Transitions** | Node starts → `POST /registry/register` → status: `active`. Node shuts down cleanly → `POST /registry/deregister` → status: `inactive`. Heartbeat missing for TTL duration → controller sets status: `unhealthy`. Admin action → status: `prohibited` (not settable by nodes themselves). LiteLLM routing excludes all nodes where `status != active`. |
+| **Trust Model** | Registration requires a pre-shared token (initially) — a secret provisioned during `deploy.sh` and stored as a Podman secret or environment variable. mTLS is the Phase B+ upgrade path (deferred until more than ~5 nodes). The `prohibited` status functions as the enforcement gate: a node without a valid token cannot register; an admin-prohibited node is rejected even with a valid token. |
+| **Backward Compatibility** | Not a constraint — the project is pre-release. The Phase A file layout is the bridge; once Phase B is implemented, the manual file writes become registration API calls. Shell scripts remain valid during the transition. |
+| **Script Language Note** | Shell scripts are acknowledged as a scaling limit for heavier registration logic. Phase B implementation may use a lightweight Python service (consistent with the Knowledge Index Service pattern) rather than bash, with scripts calling the service via `curl` for the few integration points needed. |
+| **Deferred Items** | Heartbeat protocol and TTL configuration; `pending` status and admin approval workflow; certificate-based node identity (mTLS); multi-region or WAN node federation; load-balancing across `active` nodes of the same profile. |
+| **Driver** | Human-initiated, joint design |
+| **Trigger** | Phase A/B separation discussion; Phase A prioritized due to low risk and high immediate value; Phase B deferred pending controller service design. |
+| **Commit** | *(deferred — Phase B)* |
