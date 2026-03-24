@@ -981,6 +981,53 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
+## Phase 15 — Localhost Discovery Profile + Library Manifest Schema
+
+**Goal:** Enable the controller (and knowledge-workers) to auto-discover `.ai-library` packages placed directly on the filesystem and register+ingest them into the knowledge index — without requiring the custody-push workflow. Define the formal `manifest.yaml` JSON Schema.
+
+**Decisions referenced:** D-013 (manifest spec), D-014 (localhost profile: filesystem scan, implicit trust, checksums only)
+
+**Inputs:** Phase 14 complete. `app.py` implements `/v1/libraries` (custody push) and `/v1/catalog`. `libraries` DB table exists with `path` column that was defined but never populated.
+
+**Not in scope:** local/WAN profiles (mDNS, registry), volume ingestion pipeline (building `.ai-library` FROM raw docs — separate item), library custody sync.
+
+### Steps
+
+15.1. **Define `manifest.yaml` JSON Schema (`configs/library-manifest-schema.json`)**
+   - Required fields: `name` (slug string), `version` (semver string)
+   - Optional fields: `author`, `license` (SPDX), `description`, `profiles` (list, default `["localhost"]`), `language`, `created_at`
+   - Document format of `checksums.txt` (sha256sum-compatible: `<hex>  <rel-path>` per line)
+   - Document package directory layout
+
+15.2. **Add `LIBRARIES_DIR` env var to knowledge-index service**
+   - Env var: `LIBRARIES_DIR` (default `""` — disabled)
+   - Add `PyYAML>=6.0` to `services/knowledge-index/requirements.txt`
+
+15.3. **Implement `POST /v1/scan` endpoint in `app.py`**
+   - Scans `LIBRARIES_DIR` (or `path` override in request body) for subdirectories containing `manifest.yaml`
+   - For each package: parse `manifest.yaml`, verify `checksums.txt` (warn-only for localhost — absent is non-fatal), read `documents/`, ingest into Qdrant, register in `libraries` table with `path` set and `origin_node="localhost"`
+   - `force: bool = false` — skip libraries already in catalog unless forced
+   - Returns: `{path, scanned, ingested, skipped, errors[], results[]}`
+   - Reuses existing `_ingest_chunks`, `_delete_doc_points`, `_db_set_doc` helpers
+
+15.4. **Add pytest coverage**
+   - `test_rag_pipeline.py` or new test file: create a minimal `.ai-library` in `tmp_path`, call `POST /v1/scan`, assert catalog entry returned by `GET /v1/catalog`
+
+### Outputs
+- `configs/library-manifest-schema.json` — formal JSON Schema for the manifest format
+- `services/knowledge-index/app.py` — `LIBRARIES_DIR` config, `_parse_manifest()`, `_verify_checksums()`, `_scan_library_package()`, `POST /v1/scan` endpoint
+- `services/knowledge-index/requirements.txt` — adds `PyYAML>=6.0`
+- Two deferrable §3 items closed: "Define library manifest YAML schema" and "Implement localhost discovery profile"
+
+### Verification
+- [ ] `POST /v1/scan` with a minimal test package returns `{"ingested": 1, "errors": []}`
+- [ ] `GET /v1/catalog` shows the scanned library with `origin_node = "localhost"` and `path` set
+- [ ] `POST /v1/scan` on same package (no `force`) returns `{"skipped": 1, "ingested": 0}`
+- [ ] `POST /v1/scan` with non-existent path returns HTTP 400
+- [ ] `make test-rag` passes
+
+---
+
 ## Execution Notes
 
 - **Phases 1–3 are documentation and configuration.** They can be executed in a single session with no external dependencies.
@@ -1040,7 +1087,7 @@ These collapse into the configuration system above. Tracked individually for vis
 - [x] **Add health checks and readiness probes** — all deployed services now have HealthCmd in config.json; ollama, flowise, prometheus, promtail, authentik health checks confirmed 2026-03-09
 - [x] **Configure GPU passthrough / CDI** — procedure documented in Implementation §4; `nvidia-ctk cdi generate` + `AddDevice=` quadlet directive
 - [x] **Authentik OIDC integration** — forward-auth already deployed (middlewares.yaml); per-service OIDC config (Grafana, OpenWebUI) documented in Implementation §5
-- [ ] **Define library manifest YAML schema** — JSON Schema for .ai-library packages (Implementation §6)
+- [x] **Define library manifest YAML schema** — `configs/library-manifest-schema.json` JSON Schema 2020-12; required: name (kebab-case), version (semver); optional: author, license, description, profiles, language, created_at (Phase 15, commit TBD)
 - [x] **Create Prometheus alerting rules** — `configs/prometheus/rules/ai_stack_alerts.yml` created; 11 rules across 5 groups; prometheus.yml updated with rule_files stanza
 - [x] **Document backup and restore procedures** — `scripts/backup.sh` created; full restore procedure in Implementation §8; daily systemd timer included
 - [x] **Build troubleshooting guide** — Implementation §9 expanded with diagnostic commands, 13 common issues, reset and health-check oneliners
@@ -1049,7 +1096,7 @@ These collapse into the configuration system above. Tracked individually for vis
 - [x] **Define log retention/rotation policy** — Loki configured with `retention_period: 168h` (7 days) and compactor enabled in `configs/loki/local-config.yaml`
 - [x] **Decide Flowise database backend** — **Decision: SQLite (local `DATABASE_PATH`)** for MVP. Rationale: Flowise stores flow definitions and API keys only — low-volume metadata unsuitable for shared PostgreSQL without added complexity. Migrate to PostgreSQL if multi-instance Flowise or shared workflow DB becomes a requirement. (Resolves Consideration #25)
 - [x] **Build Knowledge Index Service** — `services/knowledge-index/` Python/FastAPI microservice; embeddings via ollama llama3.1:8b; Qdrant storage; T-062–T-065, T-067–T-068 passing (commit `fb08f2c`, 2026-03-10)
-- [ ] **Implement localhost discovery profile** — filesystem scan of volumes directory, manifest parsing (see D-013)
+- [x] **Implement localhost discovery profile** — `POST /v1/scan` endpoint in knowledge-index; scans LIBRARIES_DIR for .ai-library packages; parses manifest.yaml (PyYAML), verifies checksums.txt (warn-only), ingests documents/ into Qdrant, registers with origin_node=localhost; ScanRequest {path, force}; T-070–T-074 (Phase 15, commit TBD)
 - [ ] **Specify local and WAN discovery profiles** — mDNS/DNS-SD for local, registry/federation for WAN (see D-013)
 - [ ] **Build volume ingestion pipeline** — process raw documents into `.ai-library` manifest structure; handle embedding, vector storage, and checksum generation (see D-013)
 - [x] **Integrate MCP server into Knowledge Index Service** — implemented in Phase 7 (`app.py` lines 607+): `search_knowledge` and `ingest_document` MCP tools over HTTP/SSE transport at `/mcp/sse`; auth guard on `API_KEY`; cross-node routing in `search_knowledge` mirrors REST `/query` behaviour. Deferrable entry was a stale duplicate of Phase 7 (already ✅ COMPLETE).

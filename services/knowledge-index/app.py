@@ -10,6 +10,7 @@
 #   GET  /health             — readiness probe (used by pytest module-level skip guard)
 #   POST /v1/libraries       — custody ingest: receive .ai-library package from a worker
 #   GET  /v1/catalog         — list all libraries with provenance metadata
+#   POST /v1/scan            — localhost discovery: scan LIBRARIES_DIR for .ai-library packages
 #
 # Cross-node query routing (D-023 revised, 10.5):
 #   On the controller (NODE_PROFILE=controller):
@@ -34,6 +35,7 @@ import asyncio
 import hashlib
 import json
 import os
+import pathlib
 import re
 import uuid
 from typing import Any
@@ -66,6 +68,7 @@ NODE_NAME     = os.environ.get("NODE_NAME", "")            # this node's name (f
 KI_API_KEY    = os.environ.get("KI_API_KEY", API_KEY)      # API key used when proxying to origin workers
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")      # web search; capability flag — 501 when unset
 CONTROLLER_KI_URL = os.environ.get("CONTROLLER_KI_URL", "")  # custody push target on enhanced-workers
+LIBRARIES_DIR = os.environ.get("LIBRARIES_DIR", "")        # localhost discovery: path to scan for .ai-library packages
 
 # ---------------------------------------------------------------------------
 # HTTP clients (module-level singletons; closed on shutdown if needed)
@@ -268,6 +271,11 @@ class LibraryIngestRequest(BaseModel):
     metadata: dict[str, Any] = {}
     checksum: str = ""             # sha256 of content; verified if non-empty
     signature: str = ""            # GPG signature from signature.asc (stored, not verified here)
+
+
+class ScanRequest(BaseModel):
+    path: str = ""      # override LIBRARIES_DIR; defaults to env var when empty
+    force: bool = False  # re-ingest libraries already in catalog
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -490,6 +498,196 @@ def list_catalog(request: Request) -> dict:
         for r in rows
     ]
     return {"count": len(libraries), "libraries": libraries}
+
+
+# ---------------------------------------------------------------------------
+# localhost discovery profile helpers (D-013, D-014)
+# ---------------------------------------------------------------------------
+
+def _parse_manifest(pkg_dir: pathlib.Path) -> dict[str, Any]:
+    """Parse manifest.yaml from a .ai-library package directory.
+    Returns a dict with validated fields and defaults.
+    Raises ValueError if required fields are missing."""
+    import yaml  # deferred: not always installed in minimal worker images
+
+    manifest_path = pkg_dir / "manifest.yaml"
+    if not manifest_path.exists():
+        raise ValueError("manifest.yaml not found")
+    with manifest_path.open() as f:
+        data = yaml.safe_load(f) or {}
+    if not data.get("name"):
+        raise ValueError("manifest.yaml missing required field: name")
+    if not data.get("version"):
+        raise ValueError("manifest.yaml missing required field: version")
+    return {
+        "name": str(data["name"]),
+        "version": str(data["version"]),
+        "author": str(data.get("author", "")),
+        "license": str(data.get("license", "")),
+        "description": str(data.get("description", "")),
+        "profiles": data.get("profiles", ["localhost"]),
+    }
+
+
+def _verify_checksums(pkg_dir: pathlib.Path) -> list[str]:
+    """Verify checksums.txt against package contents (sha256sum format).
+    Returns a list of error strings.  An empty list means all OK.
+    If checksums.txt is absent, returns [] — per D-014 localhost profile
+    checksums are strongly recommended but non-fatal when missing."""
+    checksums_path = pkg_dir / "checksums.txt"
+    if not checksums_path.exists():
+        return []
+    errors: list[str] = []
+    with checksums_path.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(None, 1)
+            if len(parts) != 2:
+                continue
+            expected_hex, rel_path = parts[0], parts[1].strip()
+            target = pkg_dir / rel_path
+            if not target.exists():
+                errors.append(f"missing: {rel_path}")
+                continue
+            actual_hex = hashlib.sha256(target.read_bytes()).hexdigest()
+            if actual_hex != expected_hex:
+                errors.append(f"checksum mismatch: {rel_path}")
+    return errors
+
+
+def _scan_library_package(pkg_dir: pathlib.Path, force: bool) -> dict[str, Any]:
+    """Scan one .ai-library package directory, validate, and ingest.
+    Returns a result dict with keys: name, version, status, detail, (chunks)."""
+    try:
+        manifest = _parse_manifest(pkg_dir)
+    except Exception as exc:
+        return {"package": str(pkg_dir.name), "status": "error", "detail": str(exc)}
+
+    name, version = manifest["name"], manifest["version"]
+
+    if not force:
+        with _db.connect() as conn:
+            row = conn.execute(
+                text("SELECT 1 FROM libraries WHERE name = :n AND version = :v"),
+                {"n": name, "v": version},
+            ).fetchone()
+        if row:
+            return {"name": name, "version": version, "status": "skipped",
+                    "detail": "already in catalog (use force=true to re-ingest)"}
+
+    checksum_warnings = _verify_checksums(pkg_dir)
+
+    # Concatenate all document files from documents/
+    docs_dir = pkg_dir / "documents"
+    content_parts: list[str] = []
+    if docs_dir.is_dir():
+        for doc_file in sorted(docs_dir.iterdir()):
+            if doc_file.is_file() and doc_file.suffix in (
+                ".txt", ".md", ".rst", ".json", ".yaml", ".yml", ".html"
+            ):
+                try:
+                    content_parts.append(doc_file.read_text(errors="replace"))
+                except Exception:
+                    pass
+    content = "\n\n---\n\n".join(content_parts)
+    if not content:
+        content = manifest.get("description") or f"Library: {name} v{version}"
+
+    # Read optional metadata.json
+    meta: dict[str, Any] = {}
+    metadata_path = pkg_dir / "metadata.json"
+    if metadata_path.exists():
+        try:
+            meta = json.loads(metadata_path.read_text())
+        except Exception:
+            pass
+
+    collection = (
+        f"lib_{name}_{version}"
+        .replace(":", "_").replace(".", "_").replace("-", "_")
+    )
+    doc_id = f"lib:{name}:{version}"
+    checksum_hash = hashlib.sha256(content.encode()).hexdigest()
+
+    with _db.connect() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO libraries"
+                " (name, version, path, author, origin_node, visibility, checksum_hash, synced_at)"
+                " VALUES (:name, :ver, :path, :author, :origin, :vis, :cksum, CURRENT_TIMESTAMP)"
+                " ON CONFLICT(name, version) DO UPDATE SET"
+                " path = excluded.path,"
+                " author = excluded.author,"
+                " origin_node = excluded.origin_node,"
+                " checksum_hash = excluded.checksum_hash,"
+                " synced_at = CURRENT_TIMESTAMP"
+            ),
+            {
+                "name": name, "ver": version, "path": str(pkg_dir),
+                "author": manifest["author"], "origin": "localhost",
+                "vis": "public", "cksum": checksum_hash,
+            },
+        )
+        conn.commit()
+
+    _delete_doc_points(collection, doc_id)
+    _db_set_doc(doc_id, collection, {**meta, "collection": collection, "source": "localhost"})
+    try:
+        n = _ingest_chunks(doc_id, content, {**meta, "collection": collection, "source": "localhost"}, collection)
+    except Exception as exc:
+        return {"name": name, "version": version, "status": "error", "detail": str(exc)}
+
+    detail = f"{n} chunks ingested"
+    if checksum_warnings:
+        detail += f"; checksum warnings: {checksum_warnings}"
+    return {"name": name, "version": version, "status": "ingested", "chunks": n, "detail": detail}
+
+
+@app.post("/v1/scan")
+def scan_libraries(req: ScanRequest, request: Request) -> dict:
+    """Localhost discovery profile (D-014): scan a directory for .ai-library packages.
+
+    For each subdirectory containing a manifest.yaml the scanner will:
+    - Parse and validate manifest.yaml (name + version required)
+    - Verify checksums.txt if present (mismatch is reported but non-fatal)
+    - Read all supported document files from documents/
+    - Ingest document content into Qdrant and register in the libraries catalog
+
+    Libraries already in the catalog are skipped unless force=true.
+    """
+    _check_api_key(request)
+    scan_path = req.path or LIBRARIES_DIR
+    if not scan_path:
+        raise HTTPException(
+            status_code=400,
+            detail="No LIBRARIES_DIR configured and no path provided in request body",
+        )
+    root = pathlib.Path(scan_path)
+    if not root.is_dir():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Path does not exist or is not a directory: {scan_path}",
+        )
+
+    results: list[dict[str, Any]] = []
+    for candidate in sorted(root.iterdir()):
+        if candidate.is_dir() and (candidate / "manifest.yaml").exists():
+            results.append(_scan_library_package(candidate, req.force))
+
+    ingested = sum(1 for r in results if r.get("status") == "ingested")
+    skipped  = sum(1 for r in results if r.get("status") == "skipped")
+    errors   = [r for r in results if r.get("status") == "error"]
+
+    return {
+        "path": scan_path,
+        "scanned": len(results),
+        "ingested": ingested,
+        "skipped": skipped,
+        "errors": errors,
+        "results": results,
+    }
 
 
 # ---------------------------------------------------------------------------
