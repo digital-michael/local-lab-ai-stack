@@ -1,6 +1,6 @@
 # AI Stack — Feature Status
 
-**Last Updated:** 2026-03-21
+**Last Updated:** 2026-03-24
 
 A human-readable summary of what this stack provides, ordered from most to least foundational. Intended for communicating capabilities to a non-technical audience and tracking progress toward a complete platform.
 
@@ -36,9 +36,10 @@ The stack is designed to grow: new inference nodes can be added to increase capa
 - [Centralized Log Aggregation](#x-centralized-log-aggregation)
 - [Secure Reverse Proxy with TLS](#x-secure-reverse-proxy-with-tls)
 - [Automated Backup](#x-automated-backup)
+- [MCP Tool Integration](#x-mcp-tool-integration)
+- [Localhost Library Discovery](#x-localhost-library-discovery)
 
 **Partially Available**
-- [MCP Tool Integration](#--mcp-tool-integration)
 - [Local GPU Acceleration](#--local-gpu-acceleration-controller)
 - [Inference Node Security](#--inference-node-security)
 
@@ -143,15 +144,26 @@ The full stack state — databases, vector store, model files, configs — can b
 - Restore procedure documented
 - _Script: [scripts/backup.sh](../scripts/backup.sh)_
 
+### `[X]` MCP Tool Integration
+AI agents can call external tools during a conversation by following the Model Context Protocol standard.
+- REST API for knowledge search and document ingestion: **available**
+- MCP SSE/HTTP transport for agent tool-calling over `/mcp/sse`: **available**
+- `search_knowledge` and `ingest_document` MCP tools; auth guard on `API_KEY`
+- Cross-node routing in `search_knowledge` mirrors REST `/query` behaviour
+- _Powered by: [Knowledge Index Service](../services/knowledge-index/app.py)_ · _Delivered: [Phase 7](ai_stack_blueprint/ai_stack_checklist.md#phase-7--knowledge-index-mcp-integration)_
+
+### `[X]` Localhost Library Discovery
+The knowledge base can be populated by scanning a local filesystem directory for pre-packaged `.ai-library` bundles — no manual upload required.
+- Scans `LIBRARIES_DIR` for subdirectories containing a `manifest.yaml` (name + version required)
+- Verifies `checksums.txt` if present; missing checksum file is a warning, not a failure
+- Ingests all document files from the package's `documents/` folder into Qdrant
+- Already-cataloged packages are skipped unless `force=true` is passed
+- Packages appear in `/v1/catalog` with `origin_node=localhost` and their filesystem path recorded
+- _Powered by: [Knowledge Index Service](../services/knowledge-index/app.py)_ · _Schema: [configs/library-manifest-schema.json](../configs/library-manifest-schema.json)_ · _Delivered: [Phase 15](ai_stack_blueprint/ai_stack_checklist.md#phase-15)_
+
 ---
 
 ## Partially Available Features
-
-### `[-]` MCP Tool Integration
-AI agents can call external tools (web search, file read, API calls) during a conversation by following the Model Context Protocol standard.
-- REST API for knowledge search and document ingestion: **available**
-- MCP SSE/HTTP transport for agent tool-calling: **pending**
-- _Powered by: [Knowledge Index Service](../services/knowledge-index/app.py)_ · _Planned: [Phase 7](ai_stack_blueprint/ai_stack_checklist.md#phase-7--knowledge-index-mcp-integration)_
 
 ### `[-]` Local GPU Acceleration (Controller)
 The controller node's GPU can be used for high-speed inference, enabling larger or faster models to run locally.
