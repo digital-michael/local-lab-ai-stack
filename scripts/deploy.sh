@@ -41,8 +41,13 @@ _get_node_profile() {
     jq -r '.node_profile // "controller"' "$CONFIG_FILE" 2>/dev/null || echo "controller"
 }
 
-# Returns "podman" if podman is installed and functional, otherwise "bare_metal"
+# Returns "podman" or "bare_metal".
+# Darwin (macOS) cannot run systemd quadlets — always bare_metal regardless of Podman.
 _detect_deploy_mode() {
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        echo "bare_metal"
+        return
+    fi
     if command -v podman &>/dev/null && podman info &>/dev/null 2>&1; then
         echo "podman"
     else
