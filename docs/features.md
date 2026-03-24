@@ -38,6 +38,7 @@ The stack is designed to grow: new inference nodes can be added to increase capa
 - [Automated Backup](#x-automated-backup)
 - [MCP Tool Integration](#x-mcp-tool-integration)
 - [Localhost Library Discovery](#x-localhost-library-discovery)
+- [Volume Ingestion Pipeline](#x-volume-ingestion-pipeline)
 
 **Partially Available**
 - [Local GPU Acceleration](#--local-gpu-acceleration-controller)
@@ -160,6 +161,14 @@ The knowledge base can be populated by scanning a local filesystem directory for
 - Already-cataloged packages are skipped unless `force=true` is passed
 - Packages appear in `/v1/catalog` with `origin_node=localhost` and their filesystem path recorded
 - _Powered by: [Knowledge Index Service](../services/knowledge-index/app.py)_ · _Schema: [configs/library-manifest-schema.json](../configs/library-manifest-schema.json)_ · _Delivered: [Phase 15](ai_stack_blueprint/ai_stack_checklist.md#phase-15)_
+
+### `[X]` Volume Ingestion Pipeline
+Raw document directories can be packaged into `.ai-library` bundles with a single command, ready for local scanning or pushing to the controller.
+- `configure.sh build-library --source <dir> --name <slug> --version <semver>` — no running services required
+- Copies all supported file types (`.md`, `.txt`, `.rst`, `.yaml`, `.json`, `.html`) into `documents/`
+- Generates `manifest.yaml`, `metadata.json`, and `checksums.txt` automatically
+- Produced packages are immediately consumable by `POST /v1/scan` and `configure.sh sync-libraries`
+- _Powered by: [scripts/configure.sh](../scripts/configure.sh)_ · _Format: D-013_ · _Delivered: [Phase 16](ai_stack_blueprint/ai_stack_checklist.md#phase-16)
 
 ---
 

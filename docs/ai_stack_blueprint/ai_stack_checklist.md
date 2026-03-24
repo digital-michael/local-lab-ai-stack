@@ -1028,6 +1028,37 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
+## Phase 16 — Volume Ingestion Pipeline
+
+**Goal:** Convert a directory of raw documents into a valid `.ai-library` package that `POST /v1/scan` and `configure.sh sync-libraries` can consume. The pipeline is implemented as `configure.sh build-library` — a standalone shell command, no running services required.
+
+**Decisions:** D-013 (package format and file layout)
+
+**NOT in scope:** Pre-computing `vectors/` (requires embedding model), generating `topics.json` (requires LLM), signing `signature.asc` (requires GPG key). These are Phase 17+ additions.
+
+### Tasks
+- [x] 16.1 Close stale `[ ]` deferrable item: "Implement library custody sync" (already built)
+- [x] 16.2 Define Phase 16 in checklist
+- [x] 16.3 Implement `configure.sh build-library` subcommand
+  - Flags: `--source <dir>` (required), `--name <slug>`, `--version <semver>`, `--author`, `--license`, `--description`, `--output <dir>`
+  - Produces: `manifest.yaml`, `documents/` (copies supported files), `metadata.json` (auto), `checksums.txt` (sha256)
+  - Output default: `$AI_STACK_DIR/libraries/<name>/`
+- [x] 16.4 Add bats test coverage (T-075–T-077)
+
+### Outputs
+- Updated `scripts/configure.sh` (new `build-library` subcommand)
+- New `testing/layer0_preflight.bats`-style test in `testing/layer0_preflight.bats` or new bats file
+
+### Verification
+- [ ] `configure.sh build-library --source <dir> --name test-library --version 1.0.0` exits 0
+- [ ] Output directory contains `manifest.yaml`, `documents/`, `metadata.json`, `checksums.txt`
+- [ ] `manifest.yaml` has correct `name`, `version`, `profiles: [localhost]`
+- [ ] `checksums.txt` verifies clean with `sha256sum -c`
+- [ ] `POST /v1/scan` on the output directory returns `{"ingested": 1, "errors": []}`
+- [ ] T-075–T-077 pass
+
+---
+
 ## Execution Notes
 
 - **Phases 1–3 are documentation and configuration.** They can be executed in a single session with no external dependencies.
@@ -1105,7 +1136,7 @@ These collapse into the configuration system above. Tracked individually for vis
 - [ ] **Add node profile support** — `controller`, `inference-worker`, `peer` profiles; `configure.sh` selects services per profile (see Phase 9)
 - [ ] **Implement dynamic node registration** — workers register with controller LiteLLM on startup; heartbeat; static fallback (see Phase 9)
 - [ ] **Set up macOS M1 inference worker** — Podman Machine, Ollama container, `register-node.sh` (see Phase 9)
-- [ ] **Implement library custody sync** — `POST /v1/libraries` endpoint on controller KI; `configure.sh sync-libraries` subcommand on workers; provenance in PostgreSQL (see Phase 10, D-023)
+- [x] **Implement library custody sync** — `POST /v1/libraries` fully implemented in `app.py` (custody ingest with checksum verification, Qdrant ingestion, PostgreSQL provenance); `configure.sh sync-libraries` subcommand fully implemented (reads `libraries/`, POSTs to controller `/v1/libraries` with auth, reports per-library status). Both were built alongside Phase 12 infrastructure and pre-existed Phase 15. Stale `[ ]` entry.
 - [x] **Drive smoke tests from `config.json`** — `testing/helpers.bash` `_port_exports` block reads all host ports from `config.json` via Python at suite load time; exports 14 named variables; all `testing/*.bats` files reference `${VAR_NAME}` — zero hardcoded port literals remain. Closed Phase 14 (`77cb8f6`).
 - [x] **Add MinIO smoke test (T-021a)** — `testing/layer1_smoke.bats` T-021a: `assert_http_status "200" "http://localhost:${MINIO_PORT}/minio/health/live"`. Closed Phase 14 (`77cb8f6`).
 - [x] **License inventory** — `docs/licenses/THIRD_PARTY.md` created with SPDX-style entries for all 15 container images, 8 knowledge-index Python packages, 42 dev/test venv packages (via `pip-licenses`), 4 LLM model weights, and 4 hosted API providers. Key notices: AGPLv3 applies to Grafana/Loki/Promtail/MinIO (internal deployment unaffected); Meta Llama 3.x Community License (commercial OK below 700M MAU); Qwen 2.5 Apache-2.0. `make license-check` target added to refresh the venv snapshot.
