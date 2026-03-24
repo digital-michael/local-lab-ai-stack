@@ -136,3 +136,98 @@ if [[ "$failures" -gt 0 ]]; then
 fi
 
 echo "All models registered successfully."
+
+# ---------------------------------------------------------------------------
+# Per-node alias routes from configs/nodes/*.json
+# Registers ollama/<model>@<alias> routes with api_base pointing to each
+# active inference worker's Ollama endpoint. The alias route is what the
+# Layer 5 distributed tests use to target a specific node directly.
+# ---------------------------------------------------------------------------
+NODES_DIR="$PROJECT_ROOT/configs/nodes"
+node_alias_failures=0
+
+for node_file in "$NODES_DIR"/*.json; do
+    [[ -f "$node_file" ]] || continue
+
+    node_alias=$(jq -r '.alias // empty' "$node_file")
+    node_profile=$(jq -r '.profile // empty' "$node_file")
+    node_status=$(jq -r '.status // empty' "$node_file")
+    node_address=$(jq -r '.address // .address_fallback // empty' "$node_file")
+
+    # Only active, non-controller nodes with an address
+    [[ "$node_profile" == "controller" ]] && continue
+    [[ "$node_status" != "active" ]] && continue
+    [[ -z "$node_address" ]] && continue
+
+    model_count_node=$(jq '.models | length' "$node_file")
+    [[ "$model_count_node" -eq 0 ]] && continue
+
+    echo "Registering per-node alias routes for ${node_alias} (${node_address}) ..."
+
+    for i in $(seq 0 $((model_count_node - 1))); do
+        model_name=$(jq -r ".models[$i]" "$node_file")
+        alias_id="ollama/${model_name}@${node_alias}"
+
+        # Delete any existing entry with this alias_id (idempotent)
+        alias_id_normalized="${alias_id//:/-}"
+        existing_ids="$(curl -s -H "Authorization: Bearer $MASTER_KEY" \
+            "$LITELLM_URL/model/info" 2>/dev/null \
+            | jq -r --arg name "$alias_id" --arg norm "$alias_id_normalized" \
+                '.data[]? | select(.model_name == $name or .model_name == $norm) | .model_info.id' \
+                2>/dev/null || true)"
+        for existing_id in $existing_ids; do
+            curl -s -X POST \
+                -H "Authorization: Bearer $MASTER_KEY" \
+                -H "Content-Type: application/json" \
+                -d "{\"id\": \"$existing_id\"}" \
+                "$LITELLM_URL/model/delete" >/dev/null 2>&1 || true
+        done
+
+        payload="$(jq -nc \
+            --arg name "$alias_id" \
+            --arg model "ollama_chat/${model_name}" \
+            --arg api_base "http://${node_address}:11434" \
+            '{
+                "model_name": $name,
+                "litellm_params": {
+                    "model": $model,
+                    "api_base": $api_base,
+                    "api_key": "none",
+                    "max_tokens": 4096
+                },
+                "model_info": {
+                    "mode": "chat",
+                    "input_cost_per_token": 0,
+                    "output_cost_per_token": 0
+                }
+            }')"
+
+        echo -n "  Registering '${alias_id}' ... "
+
+        http_code="$(curl -s -o /tmp/pull-models-resp.json -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer $MASTER_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$payload" \
+            "$LITELLM_URL/model/new")"
+
+        if [[ "$http_code" == "200" ]] || [[ "$http_code" == "201" ]]; then
+            echo "OK (HTTP $http_code)"
+        else
+            echo "FAILED (HTTP $http_code)"
+            cat /tmp/pull-models-resp.json >&2
+            echo >&2
+            node_alias_failures=$((node_alias_failures + 1))
+        fi
+    done
+done
+
+rm -f /tmp/pull-models-resp.json
+
+if [[ "$node_alias_failures" -gt 0 ]]; then
+    echo "ERROR: $node_alias_failures per-node alias route(s) failed to register." >&2
+    exit 2
+fi
+
+echo "All per-node alias routes registered."
+

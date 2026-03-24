@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.1",
+  "alias": "inference-worker-1",
+  "name": "macbook-m1",
+  "address": "TC25.mynetworksettings.com",
+  "address_fallback": "10.19.208.118",
+  "status": "active",
+  "profile": "inference-worker",
+  "os": "darwin",
+  "deployment": "bare_metal",
+  "registered_at": "2026-03-24T00:00:00Z",
+  "models": [
+    "llama3.1:8b-instruct-q4_K_M"
+  ],
+  "capabilities": []
+}

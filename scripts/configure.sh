@@ -521,7 +521,13 @@ entries = json.loads(sys.argv[2])
 with open(config_file) as f:
     config = json.load(f)
 
-nodes_map = {n['name']: n for n in config.get('nodes', [])}
+import glob as _glob, os as _os
+_nodes_dir = _os.path.join(_os.path.dirname(_os.path.abspath(config_file)), 'nodes')
+nodes_map = {}
+for _nf in sorted(_glob.glob(_os.path.join(_nodes_dir, '*.json'))):
+    with open(_nf) as _fh:
+        _n = json.load(_fh)
+    nodes_map[_n['name']] = _n
 
 for model in config.get('models', []):
     if 'host' not in model:
@@ -530,7 +536,7 @@ for model in config.get('models', []):
     model_name = model['name']
     node = nodes_map.get(host_name)
     if not node:
-        print(f"WARN: Node '{host_name}' not in nodes[] — skipping {model_name}", file=sys.stderr)
+        print(f"WARN: Node '{host_name}' not found in configs/nodes/ — skipping {model_name}", file=sys.stderr)
         continue
     addr = node.get('address') or ''
     fallback = node.get('address_fallback') or ''
@@ -1021,14 +1027,15 @@ cmd_sync_libraries() {
     ai_stack_dir=$(jq -r '.ai_stack_dir' "$CONFIG_FILE")
     ai_stack_dir="${ai_stack_dir//\$HOME/$HOME}"
 
-    # Resolve controller address from nodes[]
-    local controller_address controller_fallback
-    controller_address=$(jq -r '(.nodes[] | select(.profile=="controller") | .address) // ""' "$CONFIG_FILE")
-    controller_fallback=$(jq -r '(.nodes[] | select(.profile=="controller") | .address_fallback) // ""' "$CONFIG_FILE")
+    # Resolve controller address from configs/nodes/
+    local controller_address controller_fallback _nodes_dir
+    _nodes_dir="$(dirname "$CONFIG_FILE")/nodes"
+    controller_address=$(for _f in "$_nodes_dir"/*.json; do [[ -f "$_f" ]] && jq -r 'select(.profile == "controller") | .address // empty' "$_f"; done 2>/dev/null | head -1 || true)
+    controller_fallback=$(for _f in "$_nodes_dir"/*.json; do [[ -f "$_f" ]] && jq -r 'select(.profile == "controller") | .address_fallback // empty' "$_f"; done 2>/dev/null | head -1 || true)
     local controller_host="${controller_address:-$controller_fallback}"
 
     if [[ -z "$controller_host" || "$controller_host" == "null" ]]; then
-        echo "ERROR: No controller address found in config.json nodes[] — set .address or .address_fallback" >&2
+        echo "ERROR: No controller node found in configs/nodes/ — set .address or .address_fallback" >&2
         exit 1
     fi
 
@@ -1045,7 +1052,7 @@ cmd_sync_libraries() {
     fi
 
     local origin_node
-    origin_node=$(jq -r '.nodes[] | select(.profile != "controller") | .name' "$CONFIG_FILE" 2>/dev/null | head -1)
+    origin_node=$(for _f in "$_nodes_dir"/*.json; do [[ -f "$_f" ]] && jq -r 'select(.profile != "controller") | .name // empty' "$_f"; done 2>/dev/null | head -1 || true)
     origin_node="${origin_node:-$(hostname)}"
 
     local lib_dir="${ai_stack_dir}/libraries"
