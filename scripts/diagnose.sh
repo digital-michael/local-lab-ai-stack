@@ -720,12 +720,17 @@ _check_library_custody() {
         return 0
     fi
 
-    local ki_port catalog_url response
+    local ki_port catalog_url response ki_api_key
     ki_port=$(jq -r '.services["knowledge-index"].ports[0] // "8100"' "$CONFIG_FILE" 2>/dev/null \
         | grep -oP '^\d+' || echo "8100")
     catalog_url="http://localhost:${ki_port}/v1/catalog"
+    ki_api_key=$(podman secret inspect knowledge_index_api_key --showsecret \
+        2>/dev/null | jq -r '.[].SecretData' || true)
 
-    response=$(curl -sf --max-time 5 "$catalog_url" 2>/dev/null) || {
+    local _curl_auth=()
+    [[ -n "$ki_api_key" ]] && _curl_auth=(-H "Authorization: Bearer ${ki_api_key}")
+
+    response=$(curl -sf --max-time 5 "${_curl_auth[@]}" "$catalog_url" 2>/dev/null) || {
         printf "  [FAIL] %-20s /v1/catalog unreachable at %s\n" "library-custody" "$catalog_url"
         return 1
     }
@@ -751,7 +756,9 @@ _check_library_custody() {
     # Warn if any known worker node has contributed zero libraries
     local worker_nodes _nodes_dir
     _nodes_dir="$(dirname "$CONFIG_FILE")/nodes"
-    worker_nodes=$(for _f in "$_nodes_dir"/*.json; do [[ -f "$_f" ]] && jq -r 'select(.profile == "inference-worker") | .name // empty' "$_f"; done 2>/dev/null || true)
+    worker_nodes=$(for _f in "$_nodes_dir"/*.json; do
+        [[ -f "$_f" ]] && jq -r 'select(.profile == "inference-worker" or .profile == "enhanced-worker" or .profile == "knowledge-worker") | .name // empty' "$_f"
+    done 2>/dev/null || true)
     while IFS= read -r node; do
         [[ -z "$node" ]] && continue
         local node_count
@@ -761,6 +768,102 @@ _check_library_custody() {
             warn=$((warn + 1))
         fi
     done <<< "$worker_nodes"
+
+    return 0
+}
+
+# ── Full check: knowledge-index node capabilities ────────────────────────────
+# Reports KI service health, web-search capability (TAVILY_API_KEY presence),
+# and CONTROLLER_KI_URL connectivity on enhanced-worker nodes.
+
+_check_ki_capabilities() {
+    echo ""
+    echo "  KI Capabilities"
+
+    local ki_state
+    ki_state=$(systemctl --user is-active knowledge-index.service 2>/dev/null || true)
+    if [[ "$ki_state" != "active" ]]; then
+        printf "  [SKIP] %-28s knowledge-index not active\n" "ki-capabilities"
+        return 0
+    fi
+
+    local ki_port ki_url
+    ki_port=$(jq -r '.services["knowledge-index"].ports[0] // "8100"' "$CONFIG_FILE" 2>/dev/null \
+        | grep -oP '^\d+' || echo "8100")
+    ki_url="http://localhost:${ki_port}"
+
+    # Health probe
+    local health_rc=0
+    curl -sf --max-time 5 "${ki_url}/health" &>/dev/null || health_rc=$?
+    if [[ $health_rc -ne 0 ]]; then
+        printf "  [FAIL] %-28s /health unreachable at %s\n" "ki/health" "$ki_url"
+        return 1
+    fi
+    printf "  [PASS] %-28s /health OK\n" "ki/health"
+
+    # Resolve API key for authenticated probes
+    local ki_api_key _auth=()
+    ki_api_key=$(podman secret inspect knowledge_index_api_key --showsecret \
+        2>/dev/null | jq -r '.[].SecretData' || true)
+    [[ -n "$ki_api_key" ]] && _auth=(-H "Authorization: Bearer ${ki_api_key}")
+
+    # Web-search capability: probe /v1/search, categorise by HTTP status
+    local http_code
+    http_code=$(curl -so /dev/null -w '%{http_code}' --max-time 5 "${_auth[@]}" \
+        -X POST -H 'Content-Type: application/json' \
+        -d '{"query":"diagnose-probe","max_results":1}' \
+        "${ki_url}/v1/search" 2>/dev/null || echo "000")
+
+    case "$http_code" in
+        200|422)
+            printf "  [PASS] %-28s web-search enabled (HTTP %s)\n" "ki/web-search" "$http_code"
+            ;;
+        501)
+            local tavily_key
+            tavily_key=$(podman exec knowledge-index env 2>/dev/null \
+                | grep '^TAVILY_API_KEY=' | cut -d= -f2- || true)
+            if [[ -n "$tavily_key" ]]; then
+                printf "  [WARN] %-28s TAVILY_API_KEY in env but /v1/search returned 501\n" "ki/web-search"
+                warn=$((warn + 1))
+            else
+                printf "  [PASS] %-28s web-search disabled (no TAVILY_API_KEY) — 501 confirmed\n" "ki/web-search"
+            fi
+            ;;
+        401|403)
+            printf "  [WARN] %-28s /v1/search returned HTTP %s — API key issue\n" "ki/web-search" "$http_code"
+            warn=$((warn + 1))
+            ;;
+        000)
+            printf "  [WARN] %-28s /v1/search probe timed out or connection refused\n" "ki/web-search"
+            warn=$((warn + 1))
+            ;;
+        *)
+            printf "  [WARN] %-28s /v1/search probe returned unexpected HTTP %s\n" "ki/web-search" "$http_code"
+            warn=$((warn + 1))
+            ;;
+    esac
+
+    # CONTROLLER_KI_URL connectivity check (enhanced-worker nodes only)
+    local node_profile
+    node_profile=$(_get_node_profile)
+    if [[ "$node_profile" == "enhanced-worker" ]]; then
+        local ctrl_url
+        ctrl_url=$(podman exec knowledge-index env 2>/dev/null \
+            | grep '^CONTROLLER_KI_URL=' | cut -d= -f2- || true)
+        if [[ -z "$ctrl_url" ]]; then
+            printf "  [WARN] %-28s CONTROLLER_KI_URL not set — custody push disabled\n" "ki/controller-url"
+            warn=$((warn + 1))
+        else
+            local ctrl_rc=0
+            curl -sf --max-time 5 "${ctrl_url}/health" &>/dev/null || ctrl_rc=$?
+            if [[ $ctrl_rc -eq 0 ]]; then
+                printf "  [PASS] %-28s CONTROLLER_KI_URL=%s reachable\n" "ki/controller-url" "$ctrl_url"
+            else
+                printf "  [WARN] %-28s CONTROLLER_KI_URL=%s unreachable\n" "ki/controller-url" "$ctrl_url"
+                warn=$((warn + 1))
+            fi
+        fi
+    fi
 
     return 0
 }
@@ -888,6 +991,11 @@ if [[ "$PROFILE" == "full" ]]; then
     custody_fail=0
     _check_library_custody || custody_fail=$?
     fail=$((fail + custody_fail))
+
+    # Knowledge-index node capabilities (all profiles)
+    ki_cap_fail=0
+    _check_ki_capabilities || ki_cap_fail=$?
+    [[ $ki_cap_fail -ne 0 ]] && fail=$((fail + 1))
 fi
 
 echo ""
