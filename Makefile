@@ -3,7 +3,8 @@
         test-authentik test-flowise test-grafana test-litellm test-loki \
         test-postgres test-prometheus test-promtail test-qdrant test-traefik \
         test-lifecycle test-localhost \
-        test-model test-baseline test-higher-order test-availability test-rag test-security
+        test-model test-baseline test-higher-order test-availability test-rag test-security \
+        license-check
 
 BATS := bats
 PYTEST := python -m pytest
@@ -184,3 +185,14 @@ test-rag:
 # Security & auth enforcement
 test-security:
 	$(PYTEST) -v testing/security/
+
+# ── License check ────────────────────────────────────────────────────────────
+
+# Scan the dev/test venv and emit a markdown table to docs/licenses/venv-snapshot.md.
+# Requires pip-licenses: pip install pip-licenses
+license-check:
+	@echo "Scanning .venv with pip-licenses..."
+	@.venv/bin/pip-licenses --format=markdown --with-urls \
+	    --output-file=docs/licenses/venv-snapshot.md 2>/dev/null && \
+	    echo "Written: docs/licenses/venv-snapshot.md" || \
+	    (echo "pip-licenses not found — run: pip install pip-licenses" && exit 1)
