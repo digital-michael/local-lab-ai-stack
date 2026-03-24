@@ -232,6 +232,10 @@
         {
           "name": "qdrant_api_key",
           "target": "QDRANT_API_KEY"
+        },
+        {
+          "name": "knowledge_index_api_key",
+          "target": "API_KEY"
         }
       ],
       "health_check": {

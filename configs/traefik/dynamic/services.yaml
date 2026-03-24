@@ -59,8 +59,20 @@ http:
         - secure-headers
       tls: {}
 
-    knowledge-index:
-      rule: "PathPrefix(`/mcp`) || PathPrefix(`/v1/knowledge`)"
+    # MCP endpoint — no Authentik (incompatible with MCP clients that send Bearer tokens).
+    # App-level API key auth via knowledge_index_api_key Podman secret handles access control.
+    knowledge-index-mcp:
+      rule: "PathPrefix(`/mcp`)"
+      entryPoints:
+        - websecure
+      service: knowledge-index
+      middlewares:
+        - secure-headers
+      tls: {}
+
+    # REST API — browser-accessible, protected by Authentik SSO.
+    knowledge-index-api:
+      rule: "PathPrefix(`/v1`)"
       entryPoints:
         - websecure
       service: knowledge-index
