@@ -1,5 +1,5 @@
 # Project Decisions — llm-agent-local-2
-**Last Updated:** 2026-03-22 UTC
+**Last Updated:** 2026-03-24 UTC
 **Target Audience:** LLM Agents
 
 ---
@@ -411,3 +411,95 @@ This file records architecture decisions made during work on this project. Each 
 | **Driver** | Human-initiated, joint design |
 | **Trigger** | Distributed LLM cluster (Phase 9) now operational; need a way to verify distributed functionality and establish a performance baseline before evaluating alternative hardware/software configurations. |
 | **Commit** | *(pending Phase A implementation — after D-026 Phase A)* |
+
+---
+
+### D-029 — Node Profile Refinement: inference-worker + enhanced-worker (Supersedes D-018 knowledge-worker, D-024)
+
+| Field | Value |
+|---|---|
+| **Decision** | Replace the `knowledge-worker` profile with a single `enhanced-worker` profile. The previously proposed three-tier separation (inference-only, platform knowledge worker, full knowledge worker) collapses to two non-controller profiles: `inference-worker` (inference only) and `enhanced-worker` (inference + context + optional web). Capability differences between enhanced-worker tiers are policy-controlled by the controller at dispatch time via a `capabilities[]` field in the node schema — not enforced by deploying different service sets. |
+| **Context** | D-018 defined four profiles including `knowledge-worker`. D-024 specified its service set and hardware floor. Architecture analysis showed that `knowledge-worker` is a half-design: it deploys KI + Qdrant on the node but provides neither a content creation path (no web search, no Flowise) nor a local RAG path (inference prompt does not pass through local KI). The service would sit idle. Separately, a design conversation established that a 3-tier worker split adds unnecessary operational complexity — the capability differences are controller-granted at dispatch time, not resident on the node. |
+| **inference-worker services** | Ollama + Promtail. No KI, no Qdrant, no web search. Current TC25 and SOL deployment profile. |
+| **enhanced-worker services** | Ollama + Promtail + Knowledge Index Service (SQLite) + local Qdrant. Web search capability activated by presence of `TAVILY_API_KEY` env var. |
+| **capabilities[] field** | Added to D-026 node schema. Values: `web_search`, `file_checkout`, `ki_checkout`, `write_back`. The controller reads this field when assembling task packages and delegating work. An `inference-worker` will have an empty or absent `capabilities[]`; an `enhanced-worker` declares what it can do. |
+| **Updated node schema** | `{ "schema_version": "1.1", "alias": "...", ..., "profile": "inference-worker\|enhanced-worker", "capabilities": ["web_search", "ki_checkout", "write_back"] }` |
+| **Current node assignments** | TC25 → `inference-worker` (bare-metal, memory constrained). SOL → `inference-worker` (pending Phase B reassessment). SERVICES → `controller`. |
+| **Phase B** | Reassign SOL to `enhanced-worker` once Task Receiver (D-032 Phase B) is implemented and `/v1/search` endpoint in `app.py` is deployed. |
+| **Supersedes** | D-018 (knowledge-worker profile definition), D-024 (knowledge-worker service set and hardware floor) |
+| **Driver** | Joint — architecture analysis |
+| **Trigger** | Discovery that knowledge-worker profile has no content creation path and no local RAG path — it is a half-design that would deploy services that sit idle. |
+| **Commit** | *(pending)* |
+
+---
+
+### D-030 — RAG Pipeline: LiteLLM pre_call_hook for Controller-Side Context Injection
+
+| Field | Value |
+|---|---|
+| **Decision** | Implement RAG as a LiteLLM `async_pre_call_hook` on the controller. The hook queries the controller's Knowledge Index Service (`POST /query`) to retrieve relevant context for the incoming prompt, optionally fetches referenced file content from MinIO via pre-signed URL, and injects the assembled context into the system message before the request is routed to any inference node. Worker nodes remain pure inference endpoints — they receive a pre-stuffed prompt and have no knowledge that a RAG step occurred. |
+| **Context** | RAG in the existing architecture runs via Flowise workflows, which requires explicit workflow authoring per use case. A hook-based approach makes RAG ambient — every inference request passing through LiteLLM gets context injection automatically (or opt-in by tag), with no per-workflow configuration. |
+| **Hook behaviour** | `async_pre_call_hook(user_api_key_dict, cache, data, call_type)` — fires before routing. Hook extracts the user's last message as the search query, calls controller KI `/query`, takes the top-k results, and prepends them as a `system` message addition. The hook is a no-op if KI returns empty results. |
+| **File content injection** | If KI results reference a MinIO file (via `source_url` metadata), the hook fetches the pre-signed URL and injects the file text alongside the vector results. File content is truncated to fit the model's context window. |
+| **Tool-calling flag** | Only inject context for models where `tool_calling` or `rag_enabled` is set in the LiteLLM model config. Prevents wasted context on models that cannot use structured context. |
+| **Phase A** | Hook implementation on controller only. Workers remain `inference-worker` — no local RAG path. |
+| **Phase B** | Local RAG path on `enhanced-worker` nodes: Task Receiver service queries local Qdrant before forwarding to local Ollama. Deferred. |
+| **Driver** | Architecture analysis — LiteLLM hooks are the right integration point for ambient RAG without per-workflow authoring |
+| **Trigger** | D-029 profile redesign confirmed workers are pure inference endpoints; all context assembly belongs on the controller. |
+| **Commit** | *(pending)* |
+
+---
+
+### D-031 — Web Research Pipeline: Controller-Orchestrated, Worker-Executed
+
+| Field | Value |
+|---|---|
+| **Decision** | Web research is orchestrated by the controller's Flowise (deciding what to research and which node should execute) but executed at the worker node level (worker's own internet connection, worker's local KI). A new `POST /v1/search` endpoint in `app.py` accepts a `{ "query": "...", "collection": "..." }` request, performs a Tavily API search locally, ingests the results into the worker's local Qdrant, and triggers a custody push to the controller KI. The controller's Flowise Supervisor flow targets a specific enhanced-worker node by calling its KI `/v1/search` endpoint. |
+| **Context** | All-controller-side web research (Flowise calling Tavily on SERVICES) centralizes all internet bandwidth through the controller, which is a bottleneck as the cluster scales. Distributing search execution to enhanced-worker nodes lets each node use its own internet connection for tasks delegated to it. |
+| **Web search provider** | **Tavily** as the production provider for all deployments. LLM-optimized structured output minimizes downstream processing before ingestion. Free tier: 1,000 req/month. Paid: $20/month → 10,000 req. **DuckDuckGo** permitted for local development only — unofficial, no SLA, fragile. |
+| **TAVILY_API_KEY** | Injected as a Podman secret on enhanced-worker nodes. Absence of this env var means `/v1/search` returns HTTP 501 Not Implemented. This is the capability flag that distinguishes enhanced-workers from inference-workers at the application level. |
+| **Controller fallback** | If no enhanced-worker nodes have `web_search` in capabilities, the controller's Flowise calls Tavily directly and ingests to the controller KI. This maintains research capability even before any enhanced-workers are deployed. |
+| **Ingest target** | Worker-executed search: results ingest to worker's local Qdrant first, then custody push to controller KI via `POST /v1/libraries`. Controller-fallback search: results ingest directly to controller KI. |
+| **app.py changes** | New endpoint `POST /v1/search`. New dependency: `tavily-python`. New env var: `TAVILY_API_KEY`. Endpoint is a no-op (501) when `TAVILY_API_KEY` is unset. |
+| **Phase A** | Controller fallback path only (Flowise + Tavily + controller KI). `/v1/search` endpoint added to `app.py` but not deployed on any worker until Phase B. |
+| **Phase B** | Deploy enhanced-worker profile on SOL. Flowise delegates search to worker `/v1/search`. |
+| **Driver** | Joint — internet traffic distribution concern |
+| **Trigger** | Recognition that all-controller web search centralizes all internet bandwidth and does not scale; worker-executed search with custody push is the cleaner distributed model. |
+| **Commit** | *(pending)* |
+
+---
+
+### D-032 — File Repository Service: MinIO on Controller
+
+| Field | Value |
+|---|---|
+| **Decision** | Deploy MinIO as the internal file repository on the controller node. MinIO provides S3-compatible object storage with native pre-signed URL support, using URL TTL as the checkout/expiry mechanism. No separate checkout state service is required. File access is internal-only — MinIO is not exposed through Traefik to external networks. |
+| **Context** | Profiles 2/3 (now `enhanced-worker`) require the ability to receive document context from the controller for RAG tasks. The controller needs a way to distribute files to nodes for task-scoped use without permanent replication. Pre-signed URLs with TTL are the simplest checkout model: the URL is the credential, and expiry enforces the checkout window. |
+| **Buckets** | `documents` (operator-uploaded reference documents), `libraries` (`.ai-library` packages in transit), `research` (web research artifacts before custody push), `outputs` (write-back results from enhanced-workers). |
+| **Checkout model** | Controller Flowise or LiteLLM hook generates a pre-signed GET URL (TTL = task duration estimate, default 1 hour). URL is passed to the node as part of the task context. Node fetches directly from MinIO using the URL. No separate checkout record. URL expiry = checkout expiry. |
+| **Write-back model** | Controller generates a pre-signed PUT URL for the `outputs` bucket. Enhanced-worker POSTs its result file. Controller Flowise polls or webhooks on bucket event to ingest. |
+| **Internal access** | MinIO container on `ai-stack-net` at `minio.ai-stack:9000` (S3 API) and `minio.ai-stack:9001` (console, admin only). No Traefik route. Remote nodes access MinIO via pre-signed URLs that embed the controller's public DNS. Pre-signed URL host must match the controller's externally reachable address. |
+| **Auth** | MinIO root credentials via Podman secrets. LiteLLM hook and Flowise use a dedicated MinIO service account (least-privilege: read `documents`, read/write `research` and `outputs`, read `libraries`). |
+| **config.json** | New `minio` service entry. `schema_version` bumped to `1.2`. |
+| **Phase A** | Deploy MinIO. Wire Flowise to generate pre-signed URLs. Wire LiteLLM hook to fetch file content via pre-signed URLs. Buckets: `documents`, `outputs`. |
+| **Phase B** | `research` and `libraries` buckets wired into custody push pipeline. Write-back from enhanced-workers. |
+| **Driver** | Joint — file distribution mechanism for task-scoped context |
+| **Trigger** | Enhanced-worker profile requires a file checkout mechanism; MinIO pre-signed URLs solve checkout lifecycle with no additional state management. |
+| **Commit** | *(pending)* |
+
+---
+
+### D-033 — MCP Scope: External Developer Tools Only; In-Stack Uses LiteLLM + Flowise
+
+| Field | Value |
+|---|---|
+| **Decision** | The MCP server in `knowledge-index/app.py` is scoped exclusively to external developer tools (Claude Desktop, Cursor, VS Code Copilot). In-stack RAG is handled by the LiteLLM `pre_call_hook` (D-030); in-stack web research and write-back are handled by Flowise REST calls (D-031). MCP is not an inter-service integration pattern within this stack. |
+| **Context** | D-015 specified MCP with HTTP/SSE transport. The original intent was developer tool access to `search_knowledge` and `ingest_document`. A design question was raised about making MCP available to all users and nodes. Architecture analysis (D-029 through D-032) showed that in-stack workflows are better served by LiteLLM hooks (ambient RAG) and Flowise REST (research orchestration) — MCP adds no value for the in-stack case and introduces M2M auth complexity. |
+| **API_KEY gap** | `API_KEY` must be set as a Podman secret in the knowledge-index container. Absence makes the MCP endpoint unauthenticated if port 8100 is reachable on the container network. Add `knowledge_index_api_key` to the `secrets[]` block in config.json knowledge-index service definition. |
+| **Traefik auth for /mcp/** | Replace Authentik forward-auth middleware on `/mcp/*` Traefik route with an API key header middleware. Authentik forward-auth requires a browser SSO session — incompatible with developer MCP clients (Claude Desktop, Cursor) which send a Bearer token, not a session cookie. The `/v1/*` REST routes retain Authentik forward-auth for browser-based access. |
+| **In-stack tool access** | OpenWebUI users access knowledge via LiteLLM RAG injection (transparent). LiteLLM hook calls KI REST internally using `KI_API_KEY`. Flowise calls KI REST internally. No MCP client wiring in any stack service. |
+| **Phase A** | Set `API_KEY` secret. Update Traefik `/mcp/*` route to use API key middleware. Document MCP client configuration for external tools. |
+| **Deferred** | MCP `tool_calling` integration via OpenWebUI (if OpenWebUI gains native MCP client support in a future version — evaluate at that point). |
+| **Driver** | Architecture analysis — LiteLLM hooks + Flowise REST supersede MCP for in-stack use cases |
+| **Trigger** | MCP availability question revealed that the in-stack use case is solved better by existing hook mechanisms; MCP scope narrows back to its original intent. |
+| **Commit** | *(pending)* |
