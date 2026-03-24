@@ -1,5 +1,5 @@
 # Project Decisions — llm-agent-local-2
-**Last Updated:** 2026-03-24 UTC
+**Last Updated:** 2026-03-24 UTC (D-034 added)
 **Target Audience:** LLM Agents
 
 ---
@@ -502,4 +502,17 @@ This file records architecture decisions made during work on this project. Each 
 | **Deferred** | MCP `tool_calling` integration via OpenWebUI (if OpenWebUI gains native MCP client support in a future version — evaluate at that point). |
 | **Driver** | Architecture analysis — LiteLLM hooks + Flowise REST supersede MCP for in-stack use cases |
 | **Trigger** | MCP availability question revealed that the in-stack use case is solved better by existing hook mechanisms; MCP scope narrows back to its original intent. |
+| **Commit** | *(pending)* |
+
+---
+
+### D-034 — API-Level and Terminal Access to the Stack *(PENDING DISCUSSION)*
+| Field | Value |
+|---|---|
+| **Status** | **Pending** — question raised, not yet resolved |
+| **Question** | What programmatic and terminal access surfaces should the stack expose, to whom, and at what privilege level? The stack currently offers: (a) OpenWebUI browser interface for end users, (b) LiteLLM `/v1/*` for API callers (Authentik-protected), (c) MCP server for external developer tools (D-033), (d) Flowise REST for workflow automation. The gap: no defined access surface for operators, automation scripts, or remote management that doesn't require a browser session. |
+| **Scope options** | **(1) Management REST API** — a dedicated admin endpoint (e.g., `POST /admin/v1/` in app.py or a separate service) for stack-level operations: node registration, model catalog queries, job status, health rollup. **(2) CLI wrapper** — a `stack-cli` script or extension of existing `scripts/` that can be invoked over SSH or in CI/CD pipelines against a running stack. **(3) Terminal access policy** — formalize which nodes allow SSH, which keys, and whether direct container exec is permitted for break-glass scenarios. **(4) API gateway entry point** — whether Traefik should expose a dedicated admin router with stricter auth (mTLS or IP allowlist) separate from user-facing routes. |
+| **Interactions** | D-026 (node registry — management API is the natural write surface for node registration). D-028 (L5 tests — CI/CD needs a stable API to poll distributed health/results). D-033 (MCP is *not* this — MCP is for developer tools, not operator automation). Phase 12 (task dispatch, `/v1/search`, `/v1/catalog` — operator observability of pipelines implies a query surface). |
+| **Deferred** | Full resolution deferred. Captured before Phase 11 implementation begins so scaffolding in Phases 11–12 doesn't foreclose a clean management API surface. |
+| **Driver** | User-raised question before Phase 11 implementation |
 | **Commit** | *(pending)* |
