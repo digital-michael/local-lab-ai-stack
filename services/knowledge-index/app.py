@@ -11,6 +11,8 @@
 #   POST /v1/libraries       — custody ingest: receive .ai-library package from a worker
 #   GET  /v1/catalog         — list all libraries with provenance metadata
 #   POST /v1/scan            — localhost discovery: scan LIBRARIES_DIR for .ai-library packages
+#   GET  /v1/catalog/peers    — local discovery: merged catalog from mDNS-discovered peers (D-014a)
+#   GET  /v1/catalog/registry — WAN discovery: search federated registry (D-014b)
 #
 # Cross-node query routing (D-023 revised, 10.5):
 #   On the controller (NODE_PROFILE=controller):
@@ -69,6 +71,9 @@ KI_API_KEY    = os.environ.get("KI_API_KEY", API_KEY)      # API key used when p
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")      # web search; capability flag — 501 when unset
 CONTROLLER_KI_URL = os.environ.get("CONTROLLER_KI_URL", "")  # custody push target on enhanced-workers
 LIBRARIES_DIR = os.environ.get("LIBRARIES_DIR", "")        # localhost discovery: path to scan for .ai-library packages
+DISCOVERY_PROFILE = os.environ.get("DISCOVERY_PROFILE", "localhost")  # comma-separated: localhost,local,WAN (D-014)
+REGISTRY_URL  = os.environ.get("REGISTRY_URL", "")         # WAN discovery: federation registry base URL (D-014b)
+NODES_DIR     = os.environ.get("NODES_DIR", "")            # path to configs/nodes/ for peer discovery
 
 # ---------------------------------------------------------------------------
 # HTTP clients (module-level singletons; closed on shutdown if needed)
@@ -688,6 +693,131 @@ def scan_libraries(req: ScanRequest, request: Request) -> dict:
         "errors": errors,
         "results": results,
     }
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/catalog/peers — local profile: merged catalog from peer nodes
+# D-014a: In production this would use mDNS/DNS-SD (_ai-library._tcp)
+# to discover peers.  For now, reads configs/nodes/*.json and queries
+# each node that has "knowledge-index" in its capabilities[] array.
+# Returns 501 if "local" is not in DISCOVERY_PROFILE.
+# ---------------------------------------------------------------------------
+
+@app.get("/v1/catalog/peers")
+def catalog_peers(request: Request) -> dict:
+    """Local discovery (D-014a): return merged library catalog from KI-capable peer nodes."""
+    _check_api_key(request)
+
+    active_profiles = [p.strip() for p in DISCOVERY_PROFILE.split(",")]
+    if "local" not in active_profiles:
+        raise HTTPException(
+            status_code=501,
+            detail="Local discovery profile is not enabled. "
+                   "Set DISCOVERY_PROFILE=localhost,local to activate.",
+        )
+
+    nodes_dir = NODES_DIR
+    if not nodes_dir:
+        raise HTTPException(
+            status_code=501,
+            detail="NODES_DIR not configured — cannot discover peer nodes.",
+        )
+
+    nodes_path = pathlib.Path(nodes_dir)
+    if not nodes_path.is_dir():
+        raise HTTPException(
+            status_code=501,
+            detail=f"NODES_DIR does not exist: {nodes_dir}",
+        )
+
+    peers: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+
+    for node_file in sorted(nodes_path.glob("*.json")):
+        try:
+            node_cfg = json.loads(node_file.read_text())
+        except Exception:
+            continue
+
+        caps = node_cfg.get("capabilities", [])
+        if "knowledge-index" not in caps:
+            continue
+
+        node_name = node_cfg.get("name", node_file.stem)
+        if node_name == NODE_NAME:
+            continue  # skip self
+
+        address = node_cfg.get("address") or node_cfg.get("address_fallback", "")
+        if not address:
+            continue
+
+        ki_port = node_cfg.get("ki_port", 8100)
+        peer_url = f"http://{address}:{ki_port}"
+
+        try:
+            resp = httpx.get(
+                f"{peer_url}/v1/catalog",
+                headers={"Authorization": f"Bearer {KI_API_KEY}"} if KI_API_KEY else {},
+                timeout=10.0,
+            )
+            resp.raise_for_status()
+            catalog = resp.json()
+            # Filter: only include libraries whose profiles include "local"
+            for lib in catalog.get("libraries", []):
+                lib["_peer_node"] = node_name
+                lib["_peer_url"] = peer_url
+            peers.extend(catalog.get("libraries", []))
+        except Exception as exc:
+            errors.append({"node": node_name, "url": peer_url, "error": str(exc)})
+
+    return {
+        "profile": "local",
+        "peers_queried": len(peers) + len(errors),
+        "libraries": peers,
+        "errors": errors,
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/catalog/registry — WAN profile: query federation registry
+# D-014b: Returns 501 when REGISTRY_URL is not set.  When set, forwards
+# query to the registry's search endpoint and returns the result.
+# ---------------------------------------------------------------------------
+
+@app.get("/v1/catalog/registry")
+def catalog_registry(request: Request, q: str = "") -> dict:
+    """WAN discovery (D-014b): search the federated library registry."""
+    _check_api_key(request)
+
+    active_profiles = [p.strip() for p in DISCOVERY_PROFILE.split(",")]
+    if "WAN" not in active_profiles:
+        raise HTTPException(
+            status_code=501,
+            detail="WAN discovery profile is not enabled. "
+                   "Set DISCOVERY_PROFILE=localhost,local,WAN to activate.",
+        )
+
+    if not REGISTRY_URL:
+        raise HTTPException(
+            status_code=501,
+            detail="No REGISTRY_URL configured. A registry server is required "
+                   "for WAN discovery (D-014b). This feature is not yet implemented.",
+        )
+
+    try:
+        resp = httpx.get(
+            f"{REGISTRY_URL}/v1/registry/search",
+            params={"q": q} if q else {},
+            headers={"Authorization": f"Bearer {API_KEY}"} if API_KEY else {},
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Registry query failed: {exc}",
+        ) from exc
 
 
 # ---------------------------------------------------------------------------

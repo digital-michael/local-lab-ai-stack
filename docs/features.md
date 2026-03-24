@@ -43,6 +43,7 @@ The stack is designed to grow: new inference nodes can be added to increase capa
 **Partially Available**
 - [Local GPU Acceleration](#--local-gpu-acceleration-controller)
 - [Inference Node Security](#--inference-node-security)
+- [Local/WAN Discovery Profiles](#--localwan-discovery-profiles)
 
 **Pending**
 - [Security Audit Tool](#-security-audit-tool)
@@ -187,6 +188,17 @@ Registered inference nodes are functional but not independently hardened — the
 - The inference port on each node is reachable by any host on the same network segment
 - Per-node API key enforcement and firewall rules: **pending**
 - _Tracked: [Inference Node Hardening](#-inference-node-hardening)_ · _Future: [Security Audit Tool](#-security-audit-tool)_
+
+### `[-]` Local/WAN Discovery Profiles
+Protocol specifications and stub endpoints for discovering knowledge libraries on peer nodes (local mDNS/DNS-SD) and federated registries (WAN).
+- D-014a local profile specification (mDNS/DNS-SD `_ai-library._tcp`): **done**
+- D-014b WAN profile specification (registry federation): **done**
+- Node config `capabilities[]` populated: **done**
+- `GET /v1/catalog/peers` stub endpoint: **done** (returns 501 — no peers run KI yet)
+- `GET /v1/catalog/registry` stub endpoint: **done** (returns 501 — no registry server)
+- Live mDNS broadcast/listen: **pending** (requires `zeroconf` + real peers)
+- WAN registry server: **pending** (not yet built)
+- _Delivered: [Phase 17](ai_stack_blueprint/ai_stack_checklist.md#phase-17) · Spec: D-014a, D-014b_
 
 ---
 
