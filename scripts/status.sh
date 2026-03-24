@@ -77,7 +77,9 @@ done
 # Uses systemctl when a quadlet file exists; falls back to HTTP probe otherwise.
 _svc_state() {
     local svc="$1"
-    if [[ -f "$QUADLET_DIR/${svc}.container" ]]; then
+    # On Darwin, systemd quadlets cannot run — always use HTTP probe regardless
+    # of whether stale .container files are present.
+    if [[ "$(uname -s)" != "Darwin" && -f "$QUADLET_DIR/${svc}.container" ]]; then
         local s; s=$(systemctl --user is-active "${svc}.service" 2>/dev/null || true)
         echo "${s:-unknown}"
     else
