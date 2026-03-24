@@ -1,0 +1,14 @@
+# configs/litellm/proxy_config.yaml
+#
+# LiteLLM proxy configuration — mounted at /app/proxy_config.yaml in the container.
+# Settings here supplement environment variable configuration (secrets, DATABASE_URL, etc.).
+#
+# Callback: AsyncRAGHook fires before every inference request and injects
+# relevant knowledge index context into the system message.
+# Controlled by KI_BASE_URL env var — no-op when unset or empty.
+#
+# Reference: https://docs.litellm.ai/docs/proxy/config_settings
+
+general_settings:
+  callbacks:
+    - hooks.AsyncRAGHook

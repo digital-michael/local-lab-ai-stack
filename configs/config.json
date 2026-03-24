@@ -314,9 +314,22 @@
           "bind": "127.0.0.1"
         }
       ],
-      "volumes": [],
+      "volumes": [
+        {
+          "host": "$AI_STACK_DIR/configs/litellm/proxy_config.yaml",
+          "container": "/app/proxy_config.yaml",
+          "mode": "ro"
+        },
+        {
+          "host": "$AI_STACK_DIR/configs/litellm/hooks.py",
+          "container": "/app/hooks.py",
+          "mode": "ro"
+        }
+      ],
+      "command": "--config /app/proxy_config.yaml",
       "environment": {
-        "DATABASE_URL": "postgresql://aistack:@postgres.ai-stack:5432/aistack"
+        "DATABASE_URL": "postgresql://aistack:@postgres.ai-stack:5432/aistack",
+        "KI_BASE_URL": "http://knowledge-index.ai-stack:8100"
       },
       "secrets": [
         {
@@ -326,6 +339,10 @@
         {
           "name": "postgres_password",
           "target": "POSTGRES_PASSWORD"
+        },
+        {
+          "name": "knowledge_index_api_key",
+          "target": "KI_API_KEY"
         },
         {
           "name": "openai_api_key",
@@ -717,7 +734,7 @@
           "target": "MINIO_ROOT_PASSWORD"
         }
       ],
-      "command": ["server", "/data", "--console-address", ":9001"],
+      "command": "server /data --console-address :9001",
       "buckets": ["documents", "outputs", "research", "libraries"],
       "health_check": {
         "command": "bash -c 'curl -sf http://localhost:9000/minio/health/live'",
