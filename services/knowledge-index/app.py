@@ -64,6 +64,8 @@ DATABASE_URL  = os.environ.get("DATABASE_URL", "sqlite:///ki.db")  # sqlite (wor
 NODE_PROFILE  = os.environ.get("NODE_PROFILE", "knowledge-worker")  # controller enables cross-node routing
 NODE_NAME     = os.environ.get("NODE_NAME", "")            # this node's name (for proxy auth header)
 KI_API_KEY    = os.environ.get("KI_API_KEY", API_KEY)      # API key used when proxying to origin workers
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")      # web search; capability flag — 501 when unset
+CONTROLLER_KI_URL = os.environ.get("CONTROLLER_KI_URL", "")  # custody push target on enhanced-workers
 
 # ---------------------------------------------------------------------------
 # HTTP clients (module-level singletons; closed on shutdown if needed)
@@ -488,6 +490,117 @@ def list_catalog(request: Request) -> dict:
         for r in rows
     ]
     return {"count": len(libraries), "libraries": libraries}
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/search — web research endpoint (D-031)
+# Capability flag: TAVILY_API_KEY env var. Returns HTTP 501 when unset.
+# When set: search Tavily → ingest results into local Qdrant → push custody
+# to controller (CONTROLLER_KI_URL) if configured.
+# Intended for enhanced-worker nodes only; inference-workers return 501.
+# ---------------------------------------------------------------------------
+
+class SearchRequest(BaseModel):
+    query: str
+    max_results: int = 5
+    collection: str = "web_research"
+
+
+@app.post("/v1/search", status_code=200)
+async def web_search(req: SearchRequest, request: Request) -> dict:
+    """Execute a web search and ingest results into the local knowledge index."""
+    _check_api_key(request)
+
+    tavily_key = os.environ.get("TAVILY_API_KEY", "")
+    if not tavily_key:
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                "Web search is not available on this node: "
+                "TAVILY_API_KEY is not configured. "
+                "Set this env var to enable the enhanced-worker web_search capability."
+            ),
+        )
+
+    try:
+        from tavily import TavilyClient  # type: ignore[import-untyped]
+    except ImportError:
+        raise HTTPException(
+            status_code=501,
+            detail="tavily-python is not installed. Add it to requirements.txt and rebuild.",
+        )
+
+    tavily = TavilyClient(api_key=tavily_key)
+    search_response = tavily.search(
+        query=req.query,
+        max_results=req.max_results,
+        search_depth="advanced",
+        include_raw_content=True,
+    )
+
+    results = search_response.get("results", [])
+    ingested_ids: list[str] = []
+
+    for result in results:
+        content = result.get("raw_content") or result.get("content") or ""
+        if not content.strip():
+            continue
+
+        doc_id = str(uuid.uuid4())
+        metadata = {
+            "source": "tavily_web_search",
+            "url": result.get("url", ""),
+            "title": result.get("title", ""),
+            "query": req.query,
+            "node": NODE_NAME or "unknown",
+        }
+        chunk_count = _ingest_chunks(
+            doc_id=doc_id,
+            content=content,
+            metadata=metadata,
+            collection=req.collection,
+        )
+        if chunk_count > 0:
+            _db_set_doc(doc_id, req.collection, metadata)
+            ingested_ids.append(doc_id)
+
+    # Custody push to controller if configured (D-031 distributed pattern)
+    controller_url = os.environ.get("CONTROLLER_KI_URL", "").rstrip("/")
+    custody_pushed = False
+    if controller_url and ingested_ids:
+        push_headers: dict[str, str] = {"Content-Type": "application/json"}
+        if KI_API_KEY:
+            push_headers["Authorization"] = f"Bearer {KI_API_KEY}"
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                for doc_id in ingested_ids:
+                    metadata_entry = {
+                        "source": "tavily_web_search",
+                        "query": req.query,
+                        "node": NODE_NAME or "unknown",
+                        "collection": req.collection,
+                    }
+                    await client.post(
+                        f"{controller_url}/v1/libraries",
+                        json={
+                            "name": f"web_research:{req.query[:40]}",
+                            "version": doc_id,
+                            "origin_node": NODE_NAME or "unknown",
+                            "metadata": metadata_entry,
+                        },
+                        headers=push_headers,
+                    )
+            custody_pushed = True
+        except Exception:
+            custody_pushed = False
+
+    return {
+        "query": req.query,
+        "results_found": len(results),
+        "documents_ingested": len(ingested_ids),
+        "collection": req.collection,
+        "custody_pushed": custody_pushed,
+    }
 
 
 # ---------------------------------------------------------------------------
