@@ -48,7 +48,7 @@ setup_file() {
 @test "T-031: litellm GET /models returns valid JSON when authenticated" {
     run curl -s --max-time 15 \
         -H "Authorization: Bearer $LITELLM_KEY" \
-        "http://localhost:9000/models"
+        "http://localhost:${LITELLM_PORT}/models"
 
     [[ "$status" -eq 0 ]] || {
         echo "curl failed connecting to LiteLLM (exit $status)" >&3
@@ -86,7 +86,7 @@ setup_file() {
         -X POST \
         -H "Content-Type: application/json" \
         -d '{"model":"test-model","messages":[{"role":"user","content":"test"}]}' \
-        "http://localhost:9000/chat/completions"
+        "http://localhost:${LITELLM_PORT}/chat/completions"
 
     [[ "$status" -eq 0 ]] || {
         echo "curl failed connecting to LiteLLM (exit $status)" >&3

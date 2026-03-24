@@ -31,7 +31,7 @@ setup_file() {
 # ---------------------------------------------------------------------------
 
 @test "T-021: traefik router list shows routes for all user-facing services" {
-    run curl -sf --max-time 10 "http://localhost:8080/api/http/routers"
+    run curl -sf --max-time 10 "http://localhost:${TRAEFIK_API_PORT}/api/http/routers"
     if [[ "$status" -ne 0 ]]; then
         echo "Traefik API returned error — is Traefik running?" >&3
         return 1
@@ -86,12 +86,12 @@ setup_file() {
 
 @test "T-023: TLS certificate on port 443 references localhost in SAN or CN" {
     local cert_text
-    cert_text=$(echo | openssl s_client -connect localhost:443 \
+    cert_text=$(echo | openssl s_client -connect localhost:${TRAEFIK_HTTPS_PORT} \
         -servername localhost 2>/dev/null \
         | openssl x509 -noout -text 2>/dev/null)
 
     if [[ -z "$cert_text" ]]; then
-        echo "Could not retrieve TLS certificate from localhost:443" >&3
+        echo "Could not retrieve TLS certificate from localhost:${TRAEFIK_HTTPS_PORT}" >&3
         echo "Ensure Traefik is running and a certificate exists at" >&3
         echo "$AI_STACK_DIR/configs/tls/cert.pem" >&3
         return 1
@@ -115,7 +115,7 @@ setup_file() {
 # ---------------------------------------------------------------------------
 
 @test "T-024: forward-auth middleware is attached to all user-facing routers" {
-    run curl -sf --max-time 10 "http://localhost:8080/api/http/routers"
+    run curl -sf --max-time 10 "http://localhost:${TRAEFIK_API_PORT}/api/http/routers"
     if [[ "$status" -ne 0 ]]; then
         echo "Traefik API returned error" >&3
         return 1

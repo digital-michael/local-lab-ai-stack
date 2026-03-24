@@ -926,9 +926,58 @@ This section defines the reproducible, sequenced implementation plan across all 
 - [ ] `curl -H "Authorization: Bearer <key>" http://127.0.0.1:8100/v1/catalog` → JSON response
 - [ ] `curl -X POST ... http://127.0.0.1:8100/v1/search` → 501 (no TAVILY_API_KEY)
 - [ ] MinIO console reachable; buckets `documents` and `outputs` exist
-- [ ] `pytest testing/layer5_distributed/ -v` — L1 + L2 pass for reachable nodes
-- [ ] `pytest testing/security/ -v` — all pass
-- [ ] `bash scripts/diagnose.sh --profile full` — 0 failures
+- [x] `pytest testing/layer5_distributed/ -v` — L1 + L2 pass for reachable nodes (12/12, commit `fd6da76`)
+- [x] `pytest testing/security/ -v` — all pass (7/7, commit `fd6da76`)
+- [x] `bash scripts/diagnose.sh --profile full` — 0 failures (commit `fd6da76`)
+
+---
+
+## Phase 14 — Config-Driven Test Infrastructure + MinIO Smoke Test ✅ COMPLETE (commit `fd6da76` → pending)
+
+**Goal:** Eliminate all hardcoded port literals from the BATS test suite. All host ports are read from `configs/config.json` at suite load time via a single Python call in `testing/helpers.bash`, exported as named variables, and referenced by all test files. Also adds the missing MinIO smoke test (T-021), closing two Phase 13 deferrable TODOs.
+
+**Motivation:** Phase 13 deployment found a MinIO port conflict (9000→9100/9101) that would have broken any existing MinIO smoke test. No mechanism existed to propagate port changes from config.json to tests. Identified as a systemic gap.
+
+**Inputs:** Phase 13 complete. All services active. `configs/config.json` is the authoritative source of all host port bindings.
+
+### Steps
+
+14.1. **Add `_port_exports` block to `testing/helpers.bash`**
+   - Single `python3` call reads all service `ports[].host` values from `$CONFIG_FILE`
+   - Outputs `export VAR=VALUE` lines; result is `eval`'d at helpers.bash load time
+   - Variables exported: `TRAEFIK_HTTP_PORT`, `TRAEFIK_HTTPS_PORT`, `TRAEFIK_API_PORT`, `POSTGRES_PORT`, `QDRANT_PORT`, `KNOWLEDGE_INDEX_PORT`, `LITELLM_PORT`, `FLOWISE_PORT`, `OPENWEBUI_PORT`, `PROMETHEUS_PORT`, `GRAFANA_PORT`, `LOKI_PORT`, `MINIO_PORT`, `MINIO_CONSOLE_PORT`
+
+14.2. **Migrate `testing/layer1_smoke.bats` to port variables**
+   - Replace all 10 hardcoded `localhost:PORT` literals with `localhost:${VAR_NAME}`
+   - T-020 (postgres): `localhost:5432` → `localhost:${POSTGRES_PORT}`
+
+14.3. **Add T-021a MinIO smoke test to `testing/layer1_smoke.bats`**
+   - `assert_http_status "200" "http://localhost:${MINIO_PORT}/minio/health/live"`
+   - Numbered `T-021a` (not T-021) because T-021–T-024 are reserved for `layer2_traefik.bats`
+
+14.4. **Migrate all `testing/layer2_*.bats` files**
+   - `layer2_grafana.bats`: `GRAFANA_URL` var
+   - `layer2_prometheus.bats`: `PROM_URL` var
+   - `layer2_loki.bats` + `layer2_promtail.bats`: `LOKI_URL` var
+   - `layer2_flowise.bats`: `FLOWISE_URL` var
+   - `layer2_litellm.bats`: two inline `localhost:9000` literals
+   - `layer2_qdrant.bats`: three inline `localhost:6333` literals
+   - `layer2_traefik.bats`: Traefik API port + HTTPS port
+
+14.5. **Run full BATS suite; verify 0 regressions**
+
+### Outputs
+- `testing/helpers.bash` exports 14 port variables from `config.json`
+- All BATS files reference `${VAR_NAME}` — zero hardcoded port literals remain
+- T-021 MinIO smoke test added; suite count: 13 (was 12 in layer1)
+- Two Phase 13 deferrable TODOs closed
+
+### Verification
+- [ ] `make test-preflight` 8/8
+- [ ] `make test-smoke` 13/13 (includes T-021a MinIO)
+- [ ] `make test-litellm && make test-lifecycle` pass
+- [ ] `grep -rn "localhost:[0-9]" testing/*.bats` — zero port literals remain
+- [ ] Manual port remap sanity: change a port in `config.json` → helpers.bash re-derives variable, test URL updates automatically
 
 ---
 
@@ -1011,7 +1060,7 @@ These collapse into the configuration system above. Tracked individually for vis
 - [ ] **Set up macOS M1 inference worker** — Podman Machine, Ollama container, `register-node.sh` (see Phase 9)
 - [ ] **Implement library custody sync** — `POST /v1/libraries` endpoint on controller KI; `configure.sh sync-libraries` subcommand on workers; provenance in PostgreSQL (see Phase 10, D-023)
 - [ ] **Drive smoke tests from `config.json`** — all port literals in `testing/layer1_smoke.bats` (and other BATS tests) are currently hardcoded; `testing/helpers.bash` should expose port variables read from `config.json` via `jq` (e.g. `LITELLM_PORT`, `MINIO_PORT`, `PROMETHEUS_PORT`, ...) so that a port remap in config automatically flows through to the tests without manual grep-and-update. This was exposed when MinIO was remapped to 9100/9101.
-- [ ] **Add MinIO smoke test (T-021)** — `testing/layer1_smoke.bats` has no MinIO entry; add `T-021: minio S3 API /minio/health/live returns 200` at `http://localhost:${MINIO_PORT}/minio/health/live` (port driven by the config-driven variable above).
+- [ ] **Add MinIO smoke test (T-021a)** — `testing/layer1_smoke.bats` has no MinIO entry; add `T-021a: minio S3 API /minio/health/live returns 200` at `http://localhost:${MINIO_PORT}/minio/health/live` (port driven by the config-driven variable above). Uses `T-021a` rather than `T-021` because T-021–T-024 are reserved for `layer2_traefik.bats`.
 - [ ] **License inventory** — Enumerate and publish licenses for all components used in this solution: container images (Ollama, LiteLLM, MinIO, Flowise, Qdrant, Authentik, PostgreSQL, Traefik, Grafana, Loki, Prometheus, OpenWebUI), Python packages (`services/knowledge-index/requirements.txt`, `.venv/`), and LLM model weights (Llama 3.1, Llama 3.2, Qwen 2.5). Create `docs/licenses/THIRD_PARTY.md` with SPDX identifiers and source links. Add `pip-licenses` or `trivy` scan to CI. Note: Llama 3.x uses Meta's custom license (commercial use allowed above certain thresholds).
 
 ---

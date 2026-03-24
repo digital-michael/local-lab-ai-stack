@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # testing/layer1_smoke.bats
 #
-# Layer 1 — Smoke Tests (T-009 through T-020)
+# Layer 1 — Smoke Tests (T-009 through T-020, T-021a)
 # Port-level HTTP/TCP reachability for all services with host-exposed ports.
 # These tests verify that each service is up and responding before any
 # functional testing begins. No authentication is required.
@@ -35,7 +35,7 @@ setup_file() {
 # ---------------------------------------------------------------------------
 
 @test "T-010: traefik API /api/version returns 200" {
-    assert_http_body_contains "http://localhost:8080/api/version" "Version"
+    assert_http_body_contains "http://localhost:${TRAEFIK_API_PORT}/api/version" "Version"
 }
 
 # ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ setup_file() {
 # ---------------------------------------------------------------------------
 
 @test "T-011: traefik /ping returns 200 OK" {
-    assert_http_body_contains "http://localhost:8080/ping" "OK"
+    assert_http_body_contains "http://localhost:${TRAEFIK_API_PORT}/ping" "OK"
 }
 
 # ---------------------------------------------------------------------------
@@ -51,7 +51,7 @@ setup_file() {
 # ---------------------------------------------------------------------------
 
 @test "T-012: prometheus /-/healthy returns 200" {
-    assert_http_status "200" "http://localhost:9091/-/healthy"
+    assert_http_status "200" "http://localhost:${PROMETHEUS_PORT}/-/healthy"
 }
 
 # ---------------------------------------------------------------------------
@@ -59,7 +59,7 @@ setup_file() {
 # ---------------------------------------------------------------------------
 
 @test "T-013: grafana /api/health returns 200 with database ok" {
-    assert_http_body_contains "http://localhost:3000/api/health" '"database": "ok"'
+    assert_http_body_contains "http://localhost:${GRAFANA_PORT}/api/health" '"database": "ok"'
 }
 
 # ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ setup_file() {
 # ---------------------------------------------------------------------------
 
 @test "T-014: loki /ready returns 200 with 'ready'" {
-    assert_http_body_contains "http://localhost:3100/ready" "ready"
+    assert_http_body_contains "http://localhost:${LOKI_PORT}/ready" "ready"
 }
 
 # ---------------------------------------------------------------------------
@@ -75,7 +75,7 @@ setup_file() {
 # ---------------------------------------------------------------------------
 
 @test "T-015: qdrant REST / returns 200 with version info" {
-    assert_http_body_contains "http://localhost:6333/" "version"
+    assert_http_body_contains "http://localhost:${QDRANT_PORT}/" "version"
 }
 
 # ---------------------------------------------------------------------------
@@ -83,7 +83,7 @@ setup_file() {
 # ---------------------------------------------------------------------------
 
 @test "T-016: litellm /health returns 200" {
-    assert_http_status "200" "http://localhost:9000/health/liveliness"
+    assert_http_status "200" "http://localhost:${LITELLM_PORT}/health/liveliness"
 }
 
 # ---------------------------------------------------------------------------
@@ -91,7 +91,7 @@ setup_file() {
 # ---------------------------------------------------------------------------
 
 @test "T-017: openwebui / returns 200" {
-    assert_http_status "200" "http://localhost:9090/"
+    assert_http_status "200" "http://localhost:${OPENWEBUI_PORT}/"
 }
 
 # ---------------------------------------------------------------------------
@@ -99,7 +99,7 @@ setup_file() {
 # ---------------------------------------------------------------------------
 
 @test "T-018: flowise / returns 200" {
-    assert_http_status "200" "http://localhost:3001/"
+    assert_http_status "200" "http://localhost:${FLOWISE_PORT}/"
 }
 
 # ---------------------------------------------------------------------------
@@ -110,14 +110,14 @@ setup_file() {
 
 @test "T-019: authentik is reachable via traefik proxy" {
     # Check whether Traefik has an authentik router registered
-    run curl -sf --max-time 10 "http://localhost:8080/api/http/routers"
+    run curl -sf --max-time 10 "http://localhost:${TRAEFIK_API_PORT}/api/http/routers"
     if [[ "$status" -ne 0 ]] || ! echo "$output" | grep -qi "authentik"; then
         skip "Traefik route for Authentik not yet configured — covered in Layer 2 (T-033)"
     fi
 
     # Route exists — expect 200 or 302 (redirect to login)
     run curl -sk --max-time 10 -o /dev/null -w "%{http_code}" \
-        --resolve "auth.localhost:443:127.0.0.1" \
+        --resolve "auth.localhost:${TRAEFIK_HTTPS_PORT}:127.0.0.1" \
         "https://auth.localhost/"
     [[ "$status" -eq 0 ]]
     [[ "$output" =~ ^(200|302)$ ]] || {
@@ -131,19 +131,27 @@ setup_file() {
 # Uses pg_isready if available; falls back to /dev/tcp.
 # ---------------------------------------------------------------------------
 
-@test "T-020: postgres is accepting connections on port 5432" {
+@test "T-020: postgres is accepting connections on port ${POSTGRES_PORT}" {
     if command -v pg_isready &>/dev/null; then
-        run pg_isready -h localhost -p 5432 -q
+        run pg_isready -h localhost -p "${POSTGRES_PORT}" -q
         if [[ "$status" -ne 0 ]]; then
             echo "pg_isready reported postgres is not accepting connections" >&3
             return 1
         fi
     else
         # Fallback: test TCP reachability via bash built-in
-        run bash -c "echo > /dev/tcp/localhost/5432" 2>/dev/null
+        run bash -c "echo > /dev/tcp/localhost/${POSTGRES_PORT}" 2>/dev/null
         if [[ "$status" -ne 0 ]]; then
-            echo "Port 5432 is not reachable (pg_isready not installed for detailed check)" >&3
+            echo "Port ${POSTGRES_PORT} is not reachable (pg_isready not installed for detailed check)" >&3
             return 1
         fi
     fi
+}
+
+# ---------------------------------------------------------------------------
+# T-021 — MinIO: S3 API health check
+# ---------------------------------------------------------------------------
+
+@test "T-021a: minio S3 API /minio/health/live returns 200" {
+    assert_http_status "200" "http://localhost:${MINIO_PORT}/minio/health/live"
 }

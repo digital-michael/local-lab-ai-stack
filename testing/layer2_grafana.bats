@@ -10,7 +10,7 @@
 
 load 'helpers'
 
-GRAFANA_URL="http://localhost:3000"
+GRAFANA_URL="http://localhost:${GRAFANA_PORT}"
 
 # ---------------------------------------------------------------------------
 # File-level setup: resolve auth token once for the whole file

@@ -9,7 +9,7 @@
 
 load 'helpers'
 
-LOKI_URL="http://localhost:3100"
+LOKI_URL="http://localhost:${LOKI_PORT}"
 
 # Label set used for pushed test entries — unique enough to avoid colliding
 # with real log streams.

@@ -9,7 +9,7 @@
 
 load 'helpers'
 
-FLOWISE_URL="http://localhost:3001"
+FLOWISE_URL="http://localhost:${FLOWISE_PORT}"
 
 setup_file() {
     local missing=()
