@@ -7,12 +7,32 @@
 #   --hard       Remove services, data, network, and Podman secrets
 #   --purge      Alias for --hard
 
+# macOS ships bash 3.2; this script requires bash 4+ (mapfile, declare -A).
+if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+    for _b in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+        if [[ -x "$_b" ]] && [[ "$("$_b" -c 'echo ${BASH_VERSINFO[0]}')" -ge 4 ]]; then
+            exec "$_b" "$0" "$@"
+        fi
+    done
+    echo "ERROR: bash 4+ required (found $BASH_VERSION)." >&2
+    echo "  Install: brew install bash" >&2
+    exit 1
+fi
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="${CONFIG_FILE:-$PROJECT_ROOT/configs/config.json}"
 QUADLET_DIR="${QUADLET_DIR:-$HOME/.config/containers/systemd}"
+
+_detect_deploy_mode() {
+    if command -v podman &>/dev/null && podman info &>/dev/null 2>&1; then
+        echo "podman"
+    else
+        echo "bare_metal"
+    fi
+}
 
 MODE_SERVICES=false
 MODE_DATA=false
@@ -138,22 +158,49 @@ if $MODE_SERVICES; then
     deploy_check=0
     "$SCRIPT_DIR/status.sh" --check --quiet 2>/dev/null || deploy_check=$?
 
-    if [[ $deploy_check -ne 2 ]]; then
-        echo "Stopping services..."
-        mapfile -t services < <(jq -r '.services | keys[]' "$CONFIG_FILE")
-        for svc in "${services[@]}"; do
-            systemctl --user stop "${svc}.service" 2>/dev/null || true
-        done
-        echo "Services stopped."
-    else
-        echo "No running services found — skipping stop."
-    fi
+    _deploy_mode=$(_detect_deploy_mode)
 
-    echo "Removing quadlet files from $QUADLET_DIR ..."
-    find "$QUADLET_DIR" -maxdepth 1 \( -name "*.container" -o -name "ai-stack.network" \) \
-        -delete 2>/dev/null || true
-    systemctl --user daemon-reload
-    echo "Quadlets removed and systemd reloaded."
+    if [[ "$_deploy_mode" == "podman" ]]; then
+        if [[ $deploy_check -ne 2 ]]; then
+            echo "Stopping services..."
+            mapfile -t services < <(jq -r '.services | keys[]' "$CONFIG_FILE")
+            for svc in "${services[@]}"; do
+                systemctl --user stop "${svc}.service" 2>/dev/null || true
+            done
+            echo "Services stopped."
+        else
+            echo "No running services found — skipping stop."
+        fi
+        echo "Removing quadlet files from $QUADLET_DIR ..."
+        find "$QUADLET_DIR" -maxdepth 1 \( -name "*.container" -o -name "ai-stack.network" \) \
+            -delete 2>/dev/null || true
+        systemctl --user daemon-reload
+        echo "Quadlets removed and systemd reloaded."
+    else
+        # Bare-metal: unload and remove native service files
+        _os=$(uname -s)
+        if [[ "$_os" == "Darwin" ]]; then
+            _plist="$HOME/Library/LaunchAgents/com.ai-stack.promtail.plist"
+            if [[ -f "$_plist" ]]; then
+                launchctl unload "$_plist" 2>/dev/null || true
+                rm -f "$_plist"
+                echo "  Removed launchd plist: $_plist"
+            else
+                echo "  No promtail plist found — skipping."
+            fi
+        else
+            _unit="$HOME/.config/systemd/user/promtail.service"
+            if [[ -f "$_unit" ]]; then
+                systemctl --user stop promtail.service 2>/dev/null || true
+                systemctl --user disable promtail.service 2>/dev/null || true
+                rm -f "$_unit"
+                systemctl --user daemon-reload
+                echo "  Removed systemd unit: $_unit"
+            else
+                echo "  No promtail unit found — skipping."
+            fi
+        fi
+    fi
 fi
 
 # ── Wipe data volumes ─────────────────────────────────────────────────────────
@@ -177,23 +224,27 @@ fi
 # ── Hard: network + secrets ───────────────────────────────────────────────────
 
 if $MODE_HARD; then
-    echo "Removing Podman network '$NET_NAME' ..."
-    if podman network rm "$NET_NAME" 2>/dev/null; then
-        echo "  Network removed."
-    else
-        echo "  Network not found — skipping."
-    fi
-
-    echo "Removing Podman secrets ..."
-    mapfile -t secrets < <(jq -r '[.services[].secrets[]?.name] | unique[]' "$CONFIG_FILE" 2>/dev/null || true)
-    for secret in "${secrets[@]}"; do
-        if [[ -z "$secret" ]]; then continue; fi
-        if podman secret rm "$secret" 2>/dev/null; then
-            echo "  Removed secret: $secret"
+    if [[ "$(_detect_deploy_mode)" == "podman" ]]; then
+        echo "Removing Podman network '$NET_NAME' ..."
+        if podman network rm "$NET_NAME" 2>/dev/null; then
+            echo "  Network removed."
         else
-            echo "  Not found: $secret — skipping"
+            echo "  Network not found — skipping."
         fi
-    done
+
+        echo "Removing Podman secrets ..."
+        mapfile -t secrets < <(jq -r '[.services[].secrets[]?.name] | unique[]' "$CONFIG_FILE" 2>/dev/null || true)
+        for secret in "${secrets[@]}"; do
+            if [[ -z "$secret" ]]; then continue; fi
+            if podman secret rm "$secret" 2>/dev/null; then
+                echo "  Removed secret: $secret"
+            else
+                echo "  Not found: $secret — skipping"
+            fi
+        done
+    else
+        echo "Bare-metal node — no Podman network or secrets to remove."
+    fi
 fi
 
 echo ""
