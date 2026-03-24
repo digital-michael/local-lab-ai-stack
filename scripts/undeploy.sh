@@ -26,7 +26,13 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_FILE="${CONFIG_FILE:-$PROJECT_ROOT/configs/config.json}"
 QUADLET_DIR="${QUADLET_DIR:-$HOME/.config/containers/systemd}"
 
+# Returns "podman" or "bare_metal".
+# Darwin (macOS) cannot run systemd quadlets — always bare_metal regardless of Podman.
 _detect_deploy_mode() {
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        echo "bare_metal"
+        return
+    fi
     if command -v podman &>/dev/null && podman info &>/dev/null 2>&1; then
         echo "podman"
     else
