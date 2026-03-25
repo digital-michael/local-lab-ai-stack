@@ -74,6 +74,7 @@ LIBRARIES_DIR = os.environ.get("LIBRARIES_DIR", "")        # localhost discovery
 DISCOVERY_PROFILE = os.environ.get("DISCOVERY_PROFILE", "localhost")  # comma-separated: localhost,local,WAN (D-014)
 REGISTRY_URL  = os.environ.get("REGISTRY_URL", "")         # WAN discovery: federation registry base URL (D-014b)
 NODES_DIR     = os.environ.get("NODES_DIR", "")            # path to configs/nodes/ for peer discovery
+KI_ADMIN_KEY  = os.environ.get("KI_ADMIN_KEY", "")         # admin bearer token; enables unvetted catalog view (D-035)
 
 # ---------------------------------------------------------------------------
 # HTTP clients (module-level singletons; closed on shutdown if needed)
@@ -111,17 +112,44 @@ def _init_db() -> None:
                 path           TEXT,
                 author         TEXT,
                 origin_node    TEXT,
-                visibility     TEXT NOT NULL DEFAULT 'public',
+                visibility     TEXT NOT NULL DEFAULT 'private'
+                                   CHECK (visibility IN ('public','shared','private','licensed')),
                 checksum_hash  TEXT,
                 signature_hash TEXT,
+                status         TEXT NOT NULL DEFAULT 'unvetted'
+                                   CHECK (status IN ('active','unvetted','prohibited')),
                 synced_at      TIMESTAMP,
                 PRIMARY KEY (name, version)
             )
         """))
+        # Migration: add status column to existing databases (new DBs already have it above)
+        try:
+            conn.execute(text(
+                "ALTER TABLE libraries ADD COLUMN"
+                " status TEXT NOT NULL DEFAULT 'unvetted'"
+                " CHECK (status IN ('active','unvetted','prohibited'))"
+            ))
+        except Exception:
+            pass  # column already exists
         conn.commit()
 
 
 _init_db()
+
+# ---------------------------------------------------------------------------
+# Validation constants and admin auth helper (D-035)
+# ---------------------------------------------------------------------------
+
+_VALID_VISIBILITY = frozenset({"public", "shared", "private", "licensed"})
+_VALID_STATUS     = frozenset({"active", "unvetted", "prohibited"})
+
+
+def _is_admin(request: Request) -> bool:
+    """Return True if the request carries the KI_ADMIN_KEY bearer token (D-035)."""
+    if not KI_ADMIN_KEY:
+        return False
+    auth = request.headers.get("Authorization", "")
+    return auth.startswith("Bearer ") and auth[7:].strip() == KI_ADMIN_KEY
 
 
 def _db_set_doc(doc_id: str, collection: str, metadata: dict | None = None) -> None:
@@ -271,7 +299,8 @@ class LibraryIngestRequest(BaseModel):
     version: str = "0.1.0"
     author: str = ""
     origin_node: str = ""
-    visibility: str = "public"
+    visibility: str = "private"    # D-035: access policy (public|shared|private|licensed)
+    status: str = "unvetted"       # D-035: lifecycle state (active|unvetted|prohibited)
     content: str                   # full text to chunk, embed, and store
     metadata: dict[str, Any] = {}
     checksum: str = ""             # sha256 of content; verified if non-empty
@@ -442,6 +471,17 @@ def ingest_library(req: LibraryIngestRequest, request: Request) -> dict:
     """Receive a .ai-library package from a worker and store it in custody."""
     _check_api_key(request)
 
+    if req.visibility not in _VALID_VISIBILITY:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid visibility '{req.visibility}'. Must be one of: {sorted(_VALID_VISIBILITY)}",
+        )
+    if req.status not in _VALID_STATUS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid status '{req.status}'. Must be one of: {sorted(_VALID_STATUS)}",
+        )
+
     if req.checksum:
         computed = hashlib.sha256(req.content.encode()).hexdigest()
         if computed != req.checksum:
@@ -454,12 +494,13 @@ def ingest_library(req: LibraryIngestRequest, request: Request) -> dict:
         conn.execute(
             text(
                 "INSERT INTO libraries"
-                " (name, version, author, origin_node, visibility, checksum_hash, signature_hash, synced_at)"
-                " VALUES (:name, :ver, :author, :origin, :vis, :cksum, :sig, CURRENT_TIMESTAMP)"
+                " (name, version, author, origin_node, visibility, status, checksum_hash, signature_hash, synced_at)"
+                " VALUES (:name, :ver, :author, :origin, :vis, :status, :cksum, :sig, CURRENT_TIMESTAMP)"
                 " ON CONFLICT(name, version) DO UPDATE SET"
                 " author = excluded.author,"
                 " origin_node = excluded.origin_node,"
                 " visibility = excluded.visibility,"
+                " status = excluded.status,"
                 " checksum_hash = excluded.checksum_hash,"
                 " signature_hash = excluded.signature_hash,"
                 " synced_at = CURRENT_TIMESTAMP"
@@ -467,7 +508,7 @@ def ingest_library(req: LibraryIngestRequest, request: Request) -> dict:
             {
                 "name": req.name, "ver": req.version, "author": req.author,
                 "origin": req.origin_node, "vis": req.visibility,
-                "cksum": checksum_hash, "sig": signature_hash,
+                "status": req.status, "cksum": checksum_hash, "sig": signature_hash,
             },
         )
         conn.commit()
@@ -486,22 +527,33 @@ def ingest_library(req: LibraryIngestRequest, request: Request) -> dict:
 
 @app.get("/v1/catalog")
 def list_catalog(request: Request) -> dict:
-    """List all libraries held in custody with provenance metadata."""
+    """List all libraries held in custody with provenance metadata.
+
+    Filtering (D-035):
+    - prohibited: never returned to any caller
+    - unvetted: returned only to admin callers (KI_ADMIN_KEY bearer token)
+    """
     _check_api_key(request)
+    admin = _is_admin(request)
     with _db.connect() as conn:
         rows = conn.execute(
             text(
-                "SELECT name, version, author, origin_node, visibility, synced_at"
+                "SELECT name, version, author, origin_node, visibility, status, synced_at"
                 " FROM libraries ORDER BY name, version"
             )
         ).fetchall()
-    libraries = [
-        {
+    libraries = []
+    for r in rows:
+        lib_status = r[5]
+        if lib_status == "prohibited":
+            continue                          # never expose prohibited
+        if lib_status == "unvetted" and not admin:
+            continue                          # unvetted visible to admins only
+        libraries.append({
             "name": r[0], "version": r[1], "author": r[2],
-            "origin_node": r[3], "visibility": r[4], "synced_at": str(r[5]) if r[5] else None,
-        }
-        for r in rows
-    ]
+            "origin_node": r[3], "visibility": r[4], "status": lib_status,
+            "synced_at": str(r[6]) if r[6] else None,
+        })
     return {"count": len(libraries), "libraries": libraries}
 
 
@@ -616,23 +668,30 @@ def _scan_library_package(pkg_dir: pathlib.Path, force: bool) -> dict[str, Any]:
     doc_id = f"lib:{name}:{version}"
     checksum_hash = hashlib.sha256(content.encode()).hexdigest()
 
+    # D-035: read visibility from manifest; default private; clamp to valid values
+    vis = manifest.get("visibility", "private")
+    if vis not in _VALID_VISIBILITY:
+        vis = "private"
+
     with _db.connect() as conn:
         conn.execute(
             text(
                 "INSERT INTO libraries"
-                " (name, version, path, author, origin_node, visibility, checksum_hash, synced_at)"
-                " VALUES (:name, :ver, :path, :author, :origin, :vis, :cksum, CURRENT_TIMESTAMP)"
+                " (name, version, path, author, origin_node, visibility, status, checksum_hash, synced_at)"
+                " VALUES (:name, :ver, :path, :author, :origin, :vis, :status, :cksum, CURRENT_TIMESTAMP)"
                 " ON CONFLICT(name, version) DO UPDATE SET"
                 " path = excluded.path,"
                 " author = excluded.author,"
                 " origin_node = excluded.origin_node,"
+                " visibility = excluded.visibility,"
+                " status = excluded.status,"
                 " checksum_hash = excluded.checksum_hash,"
                 " synced_at = CURRENT_TIMESTAMP"
             ),
             {
                 "name": name, "ver": version, "path": str(pkg_dir),
-                "author": manifest["author"], "origin": "localhost",
-                "vis": "public", "cksum": checksum_hash,
+                "author": manifest.get("author", ""), "origin": "localhost",
+                "vis": vis, "status": "active", "cksum": checksum_hash,
             },
         )
         conn.commit()
