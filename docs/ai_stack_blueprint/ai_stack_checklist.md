@@ -857,7 +857,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
-## Phase 13 — Deployment Verification + Layer 5 Test Execution
+## Phase 13 — Deployment Verification + Layer 5 Test Execution ✅ COMPLETE (commit `7486066`)
 
 **Goal:** Deploy all Phase 12 changes to the running controller stack, run the full test suite end-to-end, and verify the live system matches the implementation contracts. First real execution of L5 distributed tests against live nodes.
 
@@ -920,12 +920,12 @@ This section defines the reproducible, sequenced implementation plan across all 
 - diagnose.sh --full clean run
 
 ### Verification
-- [ ] `bash scripts/configure.sh validate` exits 0
-- [ ] `bash scripts/status.sh` shows all expected services active
-- [ ] `curl -s http://127.0.0.1:8100/health` → `{"status": "ok"}`
-- [ ] `curl -H "Authorization: Bearer <key>" http://127.0.0.1:8100/v1/catalog` → JSON response
-- [ ] `curl -X POST ... http://127.0.0.1:8100/v1/search` → 501 (no TAVILY_API_KEY)
-- [ ] MinIO console reachable; buckets `documents` and `outputs` exist
+- [x] `bash scripts/configure.sh validate` exits 0
+- [x] `bash scripts/status.sh` shows all expected services active (ollama stopped — expected on controller)
+- [x] `curl -s http://127.0.0.1:8100/health` → `{"status": "ok"}`
+- [x] `curl -H "Authorization: Bearer <key>" http://127.0.0.1:8100/v1/catalog` → `{"count":0,"libraries":[]}`
+- [x] `curl -X POST ... http://127.0.0.1:8100/v1/search` → TAVILY_API_KEY not configured error (expected)
+- [x] MinIO console reachable at :9101; all 4 buckets exist (`documents`, `outputs`, `research`, `libraries`)
 - [x] `pytest testing/layer5_distributed/ -v` — L1 + L2 pass for reachable nodes (12/12, commit `fd6da76`)
 - [x] `pytest testing/security/ -v` — all pass (7/7, commit `fd6da76`)
 - [x] `bash scripts/diagnose.sh --profile full` — 0 failures (commit `fd6da76`)
