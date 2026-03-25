@@ -1100,9 +1100,9 @@ cmd_sync_libraries() {
         local version author visibility
         version=$(grep '^version:' "$manifest" | awk '{print $2}' | tr -d '"' || echo "0.1.0")
         author=$(grep '^author:' "$manifest" | awk '{print $2}' | tr -d '"' || echo "")
-        visibility=$(grep '^visibility:' "$manifest" | awk '{print $2}' | tr -d '"' || echo "public")
+        visibility=$(grep '^visibility:' "$manifest" | awk '{print $2}' | tr -d '"' || echo "private")
         version="${version:-0.1.0}"
-        visibility="${visibility:-public}"
+        visibility="${visibility:-private}"
 
         # Accumulate content from all .md and .txt files in the library
         local content=""
@@ -1203,6 +1203,12 @@ cmd_build_library() {
         echo "ERROR: --version must be semver (e.g. 1.0.0)" >&2
         exit 1
     fi
+    # Validate visibility value (D-035)
+    case "$lib_visibility" in
+        public|shared|private|licensed) ;;
+        *) echo "ERROR: --visibility must be one of: public shared private licensed" >&2
+           exit 1 ;;
+    esac
 
     if [[ ! -d "$source_dir" ]]; then
         echo "ERROR: source directory does not exist: $source_dir" >&2
@@ -1266,6 +1272,7 @@ cmd_build_library() {
         [[ -n "$lib_description" ]] && echo "description: \"${lib_description}\""
         echo "profiles:"
         echo "  - localhost"
+        echo "visibility: \"${lib_visibility}\""
         echo "created_at: \"${created_at}\""
     } > "${output_dir}/manifest.yaml"
 

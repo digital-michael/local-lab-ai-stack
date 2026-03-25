@@ -1180,15 +1180,14 @@ These collapse into the configuration system above. Tracked individually for vis
 - [x] **Drive smoke tests from `config.json`** — `testing/helpers.bash` `_port_exports` block reads all host ports from `config.json` via Python at suite load time; exports 14 named variables; all `testing/*.bats` files reference `${VAR_NAME}` — zero hardcoded port literals remain. Closed Phase 14 (`77cb8f6`).
 - [x] **Add MinIO smoke test (T-021a)** — `testing/layer1_smoke.bats` T-021a: `assert_http_status "200" "http://localhost:${MINIO_PORT}/minio/health/live"`. Closed Phase 14 (`77cb8f6`).
 - [x] **License inventory** — `docs/licenses/THIRD_PARTY.md` created with SPDX-style entries for all 15 container images, 8 knowledge-index Python packages, 42 dev/test venv packages (via `pip-licenses`), 4 LLM model weights, and 4 hosted API providers. Key notices: AGPLv3 applies to Grafana/Loki/Promtail/MinIO (internal deployment unaffected); Meta Llama 3.x Community License (commercial OK below 700M MAU); Qwen 2.5 Apache-2.0. `make license-check` target added to refresh the venv snapshot.
-- [ ] **Harden library visibility and status (D-035)** — enforce the two-field access model in app.py and the manifest schema:
-  - Add `visibility` and `status` fields to `configs/library-manifest-schema.json` (done in Phase 18 prep — schema updated)
-  - Add `status TEXT NOT NULL DEFAULT 'unvetted' CHECK (status IN ('active','unvetted','prohibited'))` column to `libraries` DB table
-  - Add `CHECK (visibility IN ('public','shared','private','licensed'))` constraint to existing `visibility` column
-  - Update `POST /v1/scan` to read `visibility` from `manifest.yaml` (default `private`); set `status = 'active'`
-  - Update `POST /v1/libraries` custody push to default `status = 'unvetted'`
-  - Filter `GET /v1/catalog` response: always exclude `prohibited`; exclude `unvetted` for non-admin callers (caller with `admin` scope or a separate `KI_ADMIN_KEY` env var)
-  - Update `configure.sh build-library` to accept `--visibility` flag (default `private`)
-  - Add pytest tests for visibility filtering and status enforcement
+- [x] **Harden library visibility and status (D-035)** — two-field access model fully enforced (Phase 18):
+  - `configs/library-manifest-schema.json`: `visibility` (public|shared|private|licensed, default private) and `status` (active|unvetted|prohibited) fields added
+  - `libraries` DDL: `status TEXT NOT NULL DEFAULT 'unvetted' CHECK (...)` column added; `visibility` CHECK constraint added; `ALTER TABLE` migration for existing DBs
+  - `POST /v1/scan`: reads `visibility` from `manifest.yaml` (clamped to valid values, default `private`); sets `status = 'active'`; fixes latent `manifest["author"]` KeyError
+  - `POST /v1/libraries`: validates `visibility` and `status` against enum (422 on invalid); defaults `visibility = private`, `status = unvetted`
+  - `GET /v1/catalog`: always excludes `prohibited`; excludes `unvetted` for non-admin; includes `status` in response; admin identified by `KI_ADMIN_KEY` bearer token
+  - `configure.sh build-library`: `--visibility` flag added (default `private`); written to `manifest.yaml`; `sync-libraries` default updated from `public` → `private`
+  - T-103–T-112 pytest coverage: 10 tests across validation, filtering, and admin gating
 
 ---
 
