@@ -445,7 +445,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
-## Phase 8 — Local GPU Enablement and Model Routing
+## Phase 8 — Local GPU Enablement and Model Routing ✅ COMPLETE (commit `63764f1`)
 
 **Goal:** Enable vLLM on the local GPU (RTX 3070 Ti, 8 GB VRAM), pin Ollama to CPU, and introduce a `models[]` config section so LiteLLM routes each model to the correct backend and device.
 
@@ -509,14 +509,14 @@ This section defines the reproducible, sequenced implementation plan across all 
 - LiteLLM config auto-generated from `models[]`
 
 ### Verification
-- `nvidia-smi` shows vLLM process using GPU
-- `podman exec ollama env | grep CUDA` returns `CUDA_VISIBLE_DEVICES=`
-- `curl -H "Authorization: Bearer $KEY" http://litellm.ai-stack:4000/v1/models` lists both models
-- `diagnose.sh --profile full` passes with both models reported
+- [x] `nvidia-smi` shows vLLM process using GPU
+- [x] `podman exec ollama env | grep CUDA` returns `CUDA_VISIBLE_DEVICES=`
+- [x] `curl -H "Authorization: Bearer $KEY" http://litellm.ai-stack:4000/v1/models` lists both models
+- [x] `diagnose.sh --profile full` passes with both models reported
 
 ---
 
-## Phase 9 — Remote Inference Nodes
+## Phase 9 — Remote Inference Nodes ✅ COMPLETE (commit `f62fd44`)
 
 **Goal:** Enable remote machines to contribute inference capacity to the controller's LiteLLM. Phase 9 is subdivided into four tracked sub-phases: 9a (controller-side config, no hardware access required), 9b (M1 bare-metal setup), 9c (Alienware Podman worker), 9d (tests). Each sub-phase is committed separately once all steps within it are completed, compiled, tested, and verified.
 
@@ -737,7 +737,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
-## Phase 11 — Node Registry Phase A: Per-Node Files + LiteLLM Aliases + L5 Tests
+## Phase 11 — Node Registry Phase A: Per-Node Files + LiteLLM Aliases + L5 Tests ✅ COMPLETE (commit `e3ed2cd`)
 
 **Goal:** Extract `nodes[]` from config.json into per-node files under `configs/nodes/`. Update all scripts to glob node files. Register per-node LiteLLM model aliases. Implement Layer 5 distributed smoke tests (L1 + L2).
 
@@ -777,10 +777,10 @@ This section defines the reproducible, sequenced implementation plan across all 
 - L5 test suite passes: L1 all nodes reachable, L2 routing confirmed
 
 ### Verification
-- [ ] `jq '.nodes' configs/config.json` returns `null`
-- [ ] `ls configs/nodes/` shows 3 `.json` files
-- [ ] `bash scripts/configure.sh generate-litellm-config` succeeds
-- [ ] `pytest testing/layer5_distributed/ -v` — L1 all pass; L2 all pass with `results/<timestamp>.json` written
+- [x] `jq '.nodes' configs/config.json` returns `null`
+- [x] `ls configs/nodes/` shows 3 `.json` files
+- [x] `bash scripts/configure.sh generate-litellm-config` succeeds
+- [x] `pytest testing/layer5_distributed/ -v` — L1 all pass; L2 all pass with `results/<timestamp>.json` written
 
 ---
 
@@ -973,15 +973,15 @@ This section defines the reproducible, sequenced implementation plan across all 
 - Two Phase 13 deferrable TODOs closed
 
 ### Verification
-- [ ] `make test-preflight` 8/8
-- [ ] `make test-smoke` 13/13 (includes T-021a MinIO)
-- [ ] `make test-litellm && make test-lifecycle` pass
-- [ ] `grep -rn "localhost:[0-9]" testing/*.bats` — zero port literals remain
-- [ ] Manual port remap sanity: change a port in `config.json` → helpers.bash re-derives variable, test URL updates automatically
+- [x] `make test-preflight` 8/8
+- [x] `make test-smoke` 13/13 (includes T-021a MinIO)
+- [x] `make test-litellm && make test-lifecycle` pass
+- [x] `grep -rn "localhost:[0-9]" testing/*.bats` — zero port literals remain
+- [x] Manual port remap sanity: change a port in `config.json` → helpers.bash re-derives variable, test URL updates automatically
 
 ---
 
-## Phase 15 — Localhost Discovery Profile + Library Manifest Schema
+## Phase 15 — Localhost Discovery Profile + Library Manifest Schema ✅ COMPLETE (commit `171054a`)
 
 **Goal:** Enable the controller (and knowledge-workers) to auto-discover `.ai-library` packages placed directly on the filesystem and register+ingest them into the knowledge index — without requiring the custody-push workflow. Define the formal `manifest.yaml` JSON Schema.
 
@@ -1020,15 +1020,15 @@ This section defines the reproducible, sequenced implementation plan across all 
 - Two deferrable §3 items closed: "Define library manifest YAML schema" and "Implement localhost discovery profile"
 
 ### Verification
-- [ ] `POST /v1/scan` with a minimal test package returns `{"ingested": 1, "errors": []}`
-- [ ] `GET /v1/catalog` shows the scanned library with `origin_node = "localhost"` and `path` set
-- [ ] `POST /v1/scan` on same package (no `force`) returns `{"skipped": 1, "ingested": 0}`
-- [ ] `POST /v1/scan` with non-existent path returns HTTP 400
-- [ ] `make test-rag` passes
+- [x] `POST /v1/scan` with a minimal test package returns `{"ingested": 1, "errors": []}`
+- [x] `GET /v1/catalog` shows the scanned library with `origin_node = "localhost"` and `path` set
+- [x] `POST /v1/scan` on same package (no `force`) returns `{"skipped": 1, "ingested": 0}`
+- [x] `POST /v1/scan` with non-existent path returns HTTP 400
+- [x] `make test-rag` passes
 
 ---
 
-## Phase 16 — Volume Ingestion Pipeline
+## Phase 16 — Volume Ingestion Pipeline ✅ COMPLETE (commit `2eaeb8d`)
 
 **Goal:** Convert a directory of raw documents into a valid `.ai-library` package that `POST /v1/scan` and `configure.sh sync-libraries` can consume. The pipeline is implemented as `configure.sh build-library` — a standalone shell command, no running services required.
 
@@ -1050,16 +1050,16 @@ This section defines the reproducible, sequenced implementation plan across all 
 - New `testing/layer0_preflight.bats`-style test in `testing/layer0_preflight.bats` or new bats file
 
 ### Verification
-- [ ] `configure.sh build-library --source <dir> --name test-library --version 1.0.0` exits 0
-- [ ] Output directory contains `manifest.yaml`, `documents/`, `metadata.json`, `checksums.txt`
-- [ ] `manifest.yaml` has correct `name`, `version`, `profiles: [localhost]`
-- [ ] `checksums.txt` verifies clean with `sha256sum -c`
-- [ ] `POST /v1/scan` on the output directory returns `{"ingested": 1, "errors": []}`
-- [ ] T-075–T-077 pass
+- [x] `configure.sh build-library --source <dir> --name test-library --version 1.0.0` exits 0
+- [x] Output directory contains `manifest.yaml`, `documents/`, `metadata.json`, `checksums.txt`
+- [x] `manifest.yaml` has correct `name`, `version`, `profiles: [localhost]`
+- [x] `checksums.txt` verifies clean with `sha256sum -c`
+- [x] `POST /v1/scan` on the output directory returns `{"ingested": 1, "errors": []}`
+- [x] T-075–T-077 pass
 
 ---
 
-## Phase 17 — Local/WAN Discovery Profile Specification + Foundation
+## Phase 17 — Local/WAN Discovery Profile Specification + Foundation ✅ COMPLETE (commit `f60d531`)
 
 **Goal:** Formalize the local (mDNS/DNS-SD) and WAN (registry federation) discovery protocols from D-014 into concrete specifications, populate node configs with capability metadata, and add stub endpoints that compile and test but require peers/registry to function.
 
@@ -1091,11 +1091,11 @@ This section defines the reproducible, sequenced implementation plan across all 
 - Updated `docs/features.md`
 
 ### Verification
-- [ ] `python3 -c "import ast; ast.parse(...)"` on app.py passes
-- [ ] `GET /v1/catalog/peers` returns 501 when `DISCOVERY_PROFILE=localhost`
-- [ ] `GET /v1/catalog/registry` returns 501 when `REGISTRY_URL` is empty
-- [ ] All 3 node config files parse as valid JSON
-- [ ] Pytest tests for stubs pass
+- [x] `python3 -c "import ast; ast.parse(...)"` on app.py passes
+- [x] `GET /v1/catalog/peers` returns 501 when `DISCOVERY_PROFILE=localhost`
+- [x] `GET /v1/catalog/registry` returns 501 when `REGISTRY_URL` is empty
+- [x] All 3 node config files parse as valid JSON
+- [x] Pytest tests for stubs pass
 
 ---
 
