@@ -1099,6 +1099,60 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
+## Phase 18 — Library Visibility and Status Enforcement ✅ COMPLETE (commit `5cb3679`)
+
+**Goal:** Implement D-035 two-field access model for library records: `visibility` (public|shared|private|licensed) and `status` (active|unvetted|prohibited). Enforce at ingestion, sync, and catalog endpoints.
+
+**Decision:** D-035 (library visibility and status taxonomy)
+
+### Tasks
+- [x] 18.1 Update `configs/library-manifest-schema.json` with `visibility` and `status` fields
+- [x] 18.2 Add `status` column to `libraries` DDL with CHECK constraint + `ALTER TABLE` migration
+- [x] 18.3 Add `visibility` CHECK constraint to existing column
+- [x] 18.4 Update `POST /v1/scan` to read `visibility` from manifest.yaml (default `private`), set `status = 'active'`
+- [x] 18.5 Update `POST /v1/libraries` to validate `visibility` and `status` enums (422 on invalid), default `private`/`unvetted`
+- [x] 18.6 Update `GET /v1/catalog` to exclude `prohibited`, exclude `unvetted` for non-admin, include `status` in response; gate admin access on `KI_ADMIN_KEY`
+- [x] 18.7 Add `--visibility` flag to `configure.sh build-library`; update `sync-libraries` default from `public` → `private`
+- [x] 18.8 Add T-103–T-112 pytest coverage (layer3_model/test_visibility_status.py)
+
+### Outputs
+- Updated `configs/library-manifest-schema.json`
+- Updated `services/knowledge-index/app.py`
+- Updated `scripts/configure.sh` (build-library, sync-libraries)
+- New `testing/layer3_model/test_visibility_status.py`
+
+---
+
+## Phase 19 — Security Audit Tool ✅ COMPLETE (commit TBD)
+
+**Goal:** Add `configure.sh security-audit` subcommand that performs an automated security posture scan of the controller node and registered inference-worker nodes. No external service dependencies required at tool-build time.
+
+**Scope:** CLI tool only. Dashboard surface deferred (tracked separately in §4 Future Features).
+
+### Tasks
+- [x] 19.1 Implement `cmd_security_audit()` in `scripts/configure.sh`
+  - Check A: Port exposure — read `config.json` `.services[].ports[].bind`; flag sensitive services (postgres, qdrant, litellm, flowise, etc.) on 0.0.0.0 as CRITICAL; other wide-bind as WARNING
+  - Check B: Auth probing — probe LiteLLM `/models`, Qdrant `/collections`, KI `/v1/catalog`, Ollama `/api/tags` without credentials; 200 → CRITICAL or WARNING; 401/403 → OK; unreachable → INFO
+  - Check C: TLS check — `openssl s_client` cert expiry on traefik HTTPS; <7d → WARNING; expired → CRITICAL
+  - Check D: Secret hygiene — scan `config.json` string values; paths matching `password|api_key|master_key|secret|token|private_key|passphrase` with non-empty value >6 chars → CRITICAL
+  - Check E: Worker hardening — read `configs/nodes/*.json` inference-worker nodes; probe `GET http://<address>:11434/api/tags`; 200 → CRITICAL; unreachable → OK
+  - Flags: `--json` (JSON array output), `--skip-network` (offline mode for port + secret checks only)
+  - Exit codes: 0 (clean), 1 (warnings), 2 (critical)
+- [x] 19.2 Add usage entry and dispatch case to `configure.sh`
+- [x] 19.3 Add T-113–T-116 bats tests (`testing/layer0_security_audit.bats`)
+
+### Outputs
+- Updated `scripts/configure.sh` (new `cmd_security_audit`, usage, dispatch)
+- New `testing/layer0_security_audit.bats`
+
+### Verification
+- [x] `configure.sh security-audit --help` exits 0
+- [x] `--json` emits valid JSON array
+- [x] Config with plaintext `admin_api_key` value triggers CRITICAL + exit 2
+- [x] Clean config (all 127.0.0.1 ports, no secrets) exits 0
+
+---
+
 ## Execution Notes
 
 - **Phases 1–3 are documentation and configuration.** They can be executed in a single session with no external dependencies.
@@ -1188,18 +1242,21 @@ These collapse into the configuration system above. Tracked individually for vis
   - `GET /v1/catalog`: always excludes `prohibited`; excludes `unvetted` for non-admin; includes `status` in response; admin identified by `KI_ADMIN_KEY` bearer token
   - `configure.sh build-library`: `--visibility` flag added (default `private`); written to `manifest.yaml`; `sync-libraries` default updated from `public` → `private`
   - T-103–T-112 pytest coverage: 10 tests across validation, filtering, and admin gating
+- [x] **Harden security posture via security audit tool (Phase 19)** — `configure.sh security-audit` subcommand:
+  - Port exposure: reads `config.json` port bindings; flags sensitive services (postgres, qdrant, litellm, flowise, etc.) bound to 0.0.0.0 as CRITICAL; non-sensitive wide-bind as WARNING
+  - Auth probing: probes LiteLLM `/models`, Qdrant `/collections`, Knowledge-Index `/v1/catalog`, and Ollama `/api/tags` without credentials; 200 → CRITICAL; 401/403 → OK; unreachable → INFO
+  - TLS check: `openssl s_client` cert expiry on traefik HTTPS endpoint; >7d OK; <7d WARNING; expired CRITICAL
+  - Secret hygiene: scans all string values in `config.json` for paths containing `password|api_key|master_key|secret|token|private_key|passphrase`; flags non-empty values >6 chars as CRITICAL
+  - Worker node hardening: reads `configs/nodes/*.json` for `inference-worker` nodes; attempts `GET http://<address>:11434/api/tags`; unauthenticated 200 → CRITICAL; unreachable → OK
+  - Flags: `--json` (machine-readable JSON array), `--skip-network` (offline mode)
+  - Exit codes: 0 = clean, 1 = warnings, 2 = critical findings
+  - T-113–T-116 bats coverage (layer0_security_audit.bats): --help, --json validity, plaintext secret detection, clean-config no-critical
 
 ---
 
 # 4 Future Features (architecture roadmap)
 
-- [ ] **Security audit tool** — automated scan of all ports, API keys, TLS configs, and auth enforcement across controller and all registered nodes; exposed as a script, a `configure.sh` subcommand, and surfaced in the Admin tab of the operator dashboard:
-  - Port exposure: verify only expected ports are open on each node (e.g. 11434 not open to LAN without auth)
-  - API key enforcement: confirm all service endpoints reject unauthenticated requests
-  - TLS: check certificate validity, expiry, and chain on all HTTPS endpoints
-  - Secret hygiene: verify no secrets in env vars, quadlet files, or config.json plaintext
-  - Worker node hardening: detect unauthenticated Ollama endpoints on inference-worker nodes
-  - Output: machine-readable JSON + human-readable summary; exit 1 on any critical finding
+- [ ] **Security audit tool (operator dashboard surface)** — surface `configure.sh security-audit` results in the Admin tab of the operator dashboard (Phase 19 implements the CLI layer; dashboard is a separate future item)
 
 - [ ] **Operator dashboard** — web UI with tab-based navigation across User, Team, System, and Admin contexts:
   - **User tab**

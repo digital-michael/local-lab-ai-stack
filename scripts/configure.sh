@@ -42,6 +42,7 @@ Commands:
   recommend                 Interactive node profile recommender (writes to config.json)
   sync-libraries            Push local .ai-library packages to the controller KI service
   build-library             Package a directory of raw documents into a .ai-library bundle
+  security-audit            Scan ports, API key enforcement, TLS, and secret hygiene
   help                      Show this message
 
 Environment:
@@ -1312,6 +1313,358 @@ cmd_build_library() {
 }
 
 # ---------------------------------------------------------------------------
+# security-audit — Security posture scan (D-035 / Tier 2 hardening)
+#
+# Checks performed:
+#   A. Port exposure   — identify services bound to 0.0.0.0 vs 127.0.0.1
+#   B. Auth probing    — confirm key endpoints reject unauthenticated HTTP calls
+#   C. TLS check       — verify HTTPS endpoints return a valid certificate
+#   D. Secret hygiene  — verify no secrets appear as plaintext in config.json
+#   E. Worker hardening — detect unauthenticated Ollama on inference-worker nodes
+#
+# Output: machine-readable JSON (--json) or human-readable table (default)
+# Exit:   0 = clean, 1 = warnings present, 2 = critical findings
+# ---------------------------------------------------------------------------
+
+cmd_security_audit() {
+    local json_mode=false
+    local skip_network=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --json)         json_mode=true;    shift ;;
+            --skip-network) skip_network=true; shift ;;
+            -h|--help)
+                echo "Usage: configure.sh security-audit [--json] [--skip-network]"
+                echo ""
+                echo "Options:"
+                echo "  --json           Emit machine-readable JSON instead of human table"
+                echo "  --skip-network   Skip checks that require outbound HTTP connections"
+                return 0 ;;
+            *) echo "ERROR: unknown flag: $1" >&2; return 1 ;;
+        esac
+    done
+
+    require_config
+
+    # -----------------------------------------------------------------------
+    # Helpers
+    # -----------------------------------------------------------------------
+
+    local -i _crit=0 _warn=0
+    local _findings=()
+
+    _finding() {
+        # _finding SEVERITY CHECK_ID MESSAGE
+        # SEVERITY: CRITICAL | WARNING | OK | INFO
+        local sev="$1" id="$2" msg="$3"
+        _findings+=("${sev}|${id}|${msg}")
+        case "$sev" in
+            CRITICAL) (( _crit++ )) || true ;;
+            WARNING)  (( _warn++ )) || true ;;
+        esac
+    }
+
+    _http_check() {
+        # Returns HTTP status code, or 'ERR' on connection failure
+        local url="$1" extra_args=("${@:2}")
+        local code
+        code=$(curl -sk --max-time 4 --write-out "%{http_code}" --output /dev/null \
+               "${extra_args[@]}" "$url" 2>/dev/null) || echo "ERR"
+        echo "$code"
+    }
+
+    _tls_check() {
+        # Returns 'OK:<expiry>', 'EXPIRED', 'SELF_SIGNED', or 'ERR'
+        local host="$1" port="$2"
+        local out
+        out=$(echo | timeout 4 openssl s_client -connect "${host}:${port}" \
+              -servername "$host" 2>/dev/null | openssl x509 -noout \
+              -checkend 604800 -enddate 2>/dev/null) || { echo "ERR"; return; }
+        if echo "$out" | grep -q 'Certificate will expire'; then
+            echo "EXPIRING_SOON"
+        elif grep -q 'Certificate will NOT expire' <<< "$out"; then
+            local enddate
+            enddate=$(echo "$out" | grep 'notAfter' | cut -d= -f2)
+            echo "OK:${enddate}"
+        else
+            echo "ERR"
+        fi
+    }
+
+    # -----------------------------------------------------------------------
+    # A. Port exposure — read config.json service port bindings
+    # -----------------------------------------------------------------------
+
+    echo "[A] Checking port exposure..."
+
+    local services_json
+    services_json=$(jq -r '.services // {}' "$CONFIG_FILE")
+
+    # Services that SHOULD NOT be 0.0.0.0 bound (sensitive internal services)
+    local -a sensitive_services=("postgres" "qdrant" "knowledge-index" "litellm"
+                                  "flowise" "prometheus" "grafana" "loki"
+                                  "openwebui" "minio")
+
+    local svc k host_port bind
+    while IFS= read -r svc; do
+        [[ -z "$svc" ]] && continue
+        local ports_json
+        ports_json=$(jq -r --arg s "$svc" '.services[$s].ports // []' "$CONFIG_FILE")
+        local port_count
+        port_count=$(echo "$ports_json" | jq 'length')
+        [[ "$port_count" -eq 0 ]] && continue
+
+        local i
+        for (( i=0; i<port_count; i++ )); do
+            host_port=$(echo "$ports_json" | jq -r ".[${i}].host // \"\"")
+            bind=$(echo     "$ports_json" | jq -r ".[${i}].bind // \"0.0.0.0\"")
+            [[ -z "$host_port" ]] && continue
+
+            if [[ "$bind" == "0.0.0.0" ]]; then
+                local is_sensitive=false
+                for s in "${sensitive_services[@]}"; do
+                    [[ "$svc" == "$s" ]] && is_sensitive=true && break
+                done
+                if $is_sensitive; then
+                    _finding CRITICAL "PORT-EXPOSE-${svc^^}" \
+                        "$svc port $host_port is bound to 0.0.0.0 (LAN exposed)"
+                else
+                    _finding WARNING "PORT-WIDE-${svc^^}" \
+                        "$svc port $host_port is bound to 0.0.0.0"
+                fi
+            else
+                _finding OK "PORT-${svc^^}" "$svc port $host_port bound to $bind"
+            fi
+        done
+    done < <(jq -r '.services | keys[]' "$CONFIG_FILE" 2>/dev/null)
+
+    # -----------------------------------------------------------------------
+    # B. Auth probing — attempt unauthenticated requests to key endpoints
+    # -----------------------------------------------------------------------
+
+    if $skip_network; then
+        _finding INFO "AUTH-SKIP" "Auth probing skipped (--skip-network)"
+    else
+        echo "[B] Probing auth enforcement..."
+
+        local litellm_port qdrant_port ki_port
+        litellm_port=$(jq -r '.services.litellm.ports[0].host // "9000"' "$CONFIG_FILE")
+        qdrant_port=$(jq  -r '.services.qdrant.ports[0].host  // "6333"' "$CONFIG_FILE")
+        ki_port=$(jq      -r '.services["knowledge-index"].ports[0].host // "8100"' "$CONFIG_FILE")
+
+        # LiteLLM /models — must require auth
+        local code
+        code=$(_http_check "http://localhost:${litellm_port}/models")
+        if [[ "$code" == "200" ]]; then
+            _finding CRITICAL "AUTH-LITELLM" \
+                "LiteLLM /models returns 200 without auth (port ${litellm_port})"
+        elif [[ "$code" =~ ^(401|403)$ ]]; then
+            _finding OK "AUTH-LITELLM" "LiteLLM requires auth (HTTP $code)"
+        elif [[ "$code" == "ERR" ]]; then
+            _finding INFO "AUTH-LITELLM" "LiteLLM not reachable at localhost:${litellm_port} (offline?)"
+        else
+            _finding WARNING "AUTH-LITELLM" "LiteLLM returned unexpected HTTP $code"
+        fi
+
+        # Qdrant /collections — must require auth (api-key header)
+        code=$(_http_check "http://localhost:${qdrant_port}/collections")
+        if [[ "$code" == "200" ]]; then
+            _finding CRITICAL "AUTH-QDRANT" \
+                "Qdrant /collections returns 200 without auth (port ${qdrant_port}) — set QDRANT_API_KEY"
+        elif [[ "$code" =~ ^(401|403)$ ]]; then
+            _finding OK "AUTH-QDRANT" "Qdrant requires auth (HTTP $code)"
+        elif [[ "$code" == "ERR" ]]; then
+            _finding INFO "AUTH-QDRANT" "Qdrant not reachable at localhost:${qdrant_port} (offline?)"
+        else
+            _finding WARNING "AUTH-QDRANT" "Qdrant returned unexpected HTTP $code"
+        fi
+
+        # Knowledge-Index /v1/catalog — must require auth
+        code=$(_http_check "http://localhost:${ki_port}/v1/catalog")
+        if [[ "$code" == "200" ]]; then
+            _finding CRITICAL "AUTH-KI" \
+                "Knowledge-Index /v1/catalog returns 200 without auth (port ${ki_port})"
+        elif [[ "$code" =~ ^(401|403)$ ]]; then
+            _finding OK "AUTH-KI" "Knowledge-Index requires auth (HTTP $code)"
+        elif [[ "$code" == "ERR" ]]; then
+            _finding INFO "AUTH-KI" "Knowledge-Index not reachable at localhost:${ki_port} (offline?)"
+        else
+            _finding WARNING "AUTH-KI" "Knowledge-Index returned unexpected HTTP $code"
+        fi
+
+        # Ollama /api/tags — should NOT be reachable from LAN without a wrapper
+        local ollama_port
+        ollama_port=$(jq -r '.services.ollama.ports[0].host // "11434"' "$CONFIG_FILE")
+        code=$(_http_check "http://localhost:${ollama_port}/api/tags")
+        if [[ "$code" == "200" ]]; then
+            _finding WARNING "AUTH-OLLAMA" \
+                "Ollama /api/tags returns 200 without auth (port ${ollama_port}) — only safe if bound to 127.0.0.1"
+        elif [[ "$code" == "ERR" ]]; then
+            _finding INFO "AUTH-OLLAMA" "Ollama not reachable at localhost:${ollama_port} (offline?)"
+        fi
+    fi
+
+    # -----------------------------------------------------------------------
+    # C. TLS certificate check
+    # -----------------------------------------------------------------------
+
+    if $skip_network; then
+        _finding INFO "TLS-SKIP" "TLS checks skipped (--skip-network)"
+    else
+        echo "[C] Checking TLS certificates..."
+
+        local traefik_https_port
+        traefik_https_port=$(jq -r '[
+            .services.traefik.ports[] | select(.container == 443)][0].host // "443"' \
+            "$CONFIG_FILE" 2>/dev/null)
+
+        local tls_result
+        tls_result=$(_tls_check "localhost" "${traefik_https_port}")
+        case "$tls_result" in
+            OK:*)
+                local expiry="${tls_result#OK:}"
+                _finding OK "TLS-TRAEFIK" "Traefik TLS cert valid, expires: $expiry" ;;
+            EXPIRING_SOON)
+                _finding WARNING "TLS-TRAEFIK" "Traefik TLS cert expires within 7 days — renew now" ;;
+            ERR)
+                _finding INFO "TLS-TRAEFIK" "Traefik HTTPS not reachable at localhost:${traefik_https_port} (offline?)" ;;
+            *)
+                _finding WARNING "TLS-TRAEFIK" "TLS check returned: $tls_result" ;;
+        esac
+    fi
+
+    # -----------------------------------------------------------------------
+    # D. Secret hygiene — look for plaintext secrets in config.json
+    # -----------------------------------------------------------------------
+
+    echo "[D] Checking secret hygiene..."
+
+    # Known secret field names that should NOT hold real values in config.json
+    local -a secret_fields=("password" "api_key" "master_key" "secret" "token"
+                             "private_key" "passphrase")
+    local secrets_raw
+    secrets_raw=$(jq -r 'paths(scalars) as $p | {path: ($p | join(".")), val: getpath($p)} | select(.val | type == "string") | select(.val | length > 0) | "\(.path)=\(.val)"' "$CONFIG_FILE" 2>/dev/null)
+
+    local leaked=0
+    while IFS= read -r entry; do
+        local path_val
+        path_val="${entry%%=*}"
+        local val="${entry#*=}"
+        local lower_path
+        lower_path=$(echo "$path_val" | tr '[:upper:]' '[:lower:]')
+        for field in "${secret_fields[@]}"; do
+            if [[ "$lower_path" == *"$field"* ]]; then
+                # Heuristic: if value looks like a real secret (>6 chars, not a path/URL)
+                if [[ "${#val}" -gt 6 ]] && ! [[ "$val" =~ ^(https?://|/|\$) ]]; then
+                    _finding CRITICAL "SECRET-PLAIN-${leaked}" \
+                        "Possible plaintext secret at config.json .${path_val}: '${val:0:4}...'"
+                    (( leaked++ )) || true
+                fi
+            fi
+        done
+    done <<< "$secrets_raw"
+
+    if [[ $leaked -eq 0 ]]; then
+        _finding OK "SECRET-HYGIENE" "No plaintext secrets detected in config.json"
+    fi
+
+    # -----------------------------------------------------------------------
+    # E. Worker node hardening — check Ollama ports on inference-worker nodes
+    # -----------------------------------------------------------------------
+
+    if $skip_network; then
+        _finding INFO "WORKER-SKIP" "Worker hardening checks skipped (--skip-network)"
+    else
+        echo "[E] Checking inference-worker node hardening..."
+
+        local nodes_dir
+        nodes_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/configs/nodes"
+
+        if [[ ! -d "$nodes_dir" ]]; then
+            _finding WARNING "WORKER-NODES" "configs/nodes/ directory not found — cannot check worker nodes"
+        else
+            local node_file
+            while IFS= read -r -d '' node_file; do
+                local alias profile address ollama_port_w
+                alias=$(jq -r '.alias // "?"' "$node_file")
+                profile=$(jq -r '.profile // ""' "$node_file")
+                [[ "$profile" != "inference-worker" ]] && continue
+
+                local node_status
+                node_status=$(jq -r '.status // "active"' "$node_file")
+                [[ "$node_status" != "active" ]] && continue
+
+                address=$(jq -r '.address // .address_fallback // ""' "$node_file")
+                [[ -z "$address" ]] && continue
+
+                # Default Ollama port on workers
+                ollama_port_w="11434"
+
+                local worker_code
+                worker_code=$(_http_check "http://${address}:${ollama_port_w}/api/tags")
+                if [[ "$worker_code" == "200" ]]; then
+                    _finding CRITICAL "WORKER-OLLAMA-${alias^^}" \
+                        "Ollama on $alias ($address:${ollama_port_w}) is unauthenticated and reachable — firewall or add auth proxy"
+                elif [[ "$worker_code" == "ERR" ]]; then
+                    _finding OK "WORKER-OLLAMA-${alias^^}" \
+                        "Ollama on $alias ($address) not reachable from this host (expected)"
+                else
+                    _finding WARNING "WORKER-OLLAMA-${alias^^}" \
+                        "Ollama on $alias ($address:${ollama_port_w}) returned HTTP $worker_code"
+                fi
+            done < <(find "$nodes_dir" -maxdepth 1 -name '*.json' -print0 2>/dev/null)
+        fi
+    fi
+
+    # -----------------------------------------------------------------------
+    # Output
+    # -----------------------------------------------------------------------
+
+    local exit_code=0
+    [[ $_warn  -gt 0 ]] && exit_code=1
+    [[ $_crit  -gt 0 ]] && exit_code=2
+
+    if $json_mode; then
+        # Machine-readable JSON output
+        printf '['
+        local first=true entry sev id msg
+        for entry in "${_findings[@]}"; do
+            IFS='|' read -r sev id msg <<< "$entry"
+            $first || printf ','
+            first=false
+            printf '{"severity":%s,"id":%s,"message":%s}' \
+                "$(jq -rn --arg v "$sev" '$v')" \
+                "$(jq -rn --arg v "$id"  '$v')" \
+                "$(jq -rn --arg v "$msg" '$v')"
+        done
+        printf ']\n'
+    else
+        # Human-readable table
+        echo ""
+        echo "Security Audit Report"
+        echo "====================="
+        printf '%-10s  %-35s  %s\n' "SEVERITY" "CHECK ID" "MESSAGE"
+        printf '%-10s  %-35s  %s\n' "--------" "--------" "-------"
+        for entry in "${_findings[@]}"; do
+            IFS='|' read -r sev id msg <<< "$entry"
+            printf '%-10s  %-35s  %s\n' "$sev" "$id" "$msg"
+        done
+        echo ""
+        echo "Summary: ${_crit} critical, ${_warn} warning(s), $((${#_findings[@]} - _crit - _warn)) clean/info"
+        if [[ $exit_code -eq 0 ]]; then
+            echo "Result: PASS"
+        elif [[ $exit_code -eq 1 ]]; then
+            echo "Result: WARN (exit 1)"
+        else
+            echo "Result: FAIL — critical findings present (exit 2)"
+        fi
+    fi
+
+    return $exit_code
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1330,6 +1683,7 @@ case "${1:-help}" in
     recommend)               cmd_recommend ;;
     sync-libraries)          cmd_sync_libraries ;;
     build-library)           cmd_build_library "${@:2}" ;;
+    security-audit)          cmd_security_audit "${@:2}" ;;
     help|--help|-h)          usage ;;
     *)
         echo "Unknown command: $1" >&2

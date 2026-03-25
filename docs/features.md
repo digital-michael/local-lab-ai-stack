@@ -44,9 +44,9 @@ The stack is designed to grow: new inference nodes can be added to increase capa
 - [Local GPU Acceleration](#--local-gpu-acceleration-controller)
 - [Inference Node Security](#--inference-node-security)
 - [Local/WAN Discovery Profiles](#--localwan-discovery-profiles)
+- [Security Audit Tool](#x-security-audit-tool)
 
 **Pending**
-- [Security Audit Tool](#-security-audit-tool)
 - [vLLM GPU Inference](#-vllm-gpu-inference)
 - [Inference Node Hardening](#-inference-node-hardening)
 
@@ -187,7 +187,7 @@ Registered inference nodes are functional but not independently hardened — the
 - The controller's API is fully protected; inference node endpoints are not
 - The inference port on each node is reachable by any host on the same network segment
 - Per-node API key enforcement and firewall rules: **pending**
-- _Tracked: [Inference Node Hardening](#-inference-node-hardening)_ · _Future: [Security Audit Tool](#-security-audit-tool)_
+- _Tracked: [Inference Node Hardening](#-inference-node-hardening)_ · _Delivered: [Security Audit Tool](#x-security-audit-tool)_
 
 ### `[-]` Local/WAN Discovery Profiles
 Protocol specifications and stub endpoints for discovering knowledge libraries on peer nodes (local mDNS/DNS-SD) and federated registries (WAN).
@@ -204,17 +204,20 @@ Protocol specifications and stub endpoints for discovering knowledge libraries o
 
 ## Pending Features
 
-### `[ ]` Security Audit Tool
-A script (and future admin dashboard tool) that checks all ports, API keys, TLS configurations, and auth enforcement across the controller and all registered nodes, and reports any gaps.
-- _Tracked: [checklist Future Features](ai_stack_blueprint/ai_stack_checklist.md#4-future-features-architecture-roadmap)_
+### `[x]` Security Audit Tool
+`configure.sh security-audit` — automated posture scan: port bind exposure, auth enforcement probing, TLS cert expiry, secret hygiene in config.json, and unauthenticated Ollama detection on inference-worker nodes.
+- `--json` for machine-readable output; `--skip-network` for offline/CI use
+- Exit codes: 0 (clean), 1 (warnings), 2 (critical findings)
+- T-113–T-116 bats coverage
+- _Delivered: [Phase 19](ai_stack_blueprint/ai_stack_checklist.md#phase-19) · Checks: port exposure, auth probing, TLS, secret hygiene, worker hardening_
 
 ### `[ ]` vLLM GPU Inference
 Running GPU-optimized large language models on the controller's dedicated GPU for maximum local performance on demanding tasks.
 - _Planned: [Phase 8](ai_stack_blueprint/ai_stack_checklist.md#phase-8--local-gpu-enablement-and-model-routing)_
 
 ### `[ ]` Inference Node Hardening
-Restrict inference node endpoints so that only the controller can reach them — preventing unauthenticated access from other hosts on the network.
-- _Tracked: [checklist Future Features](ai_stack_blueprint/ai_stack_checklist.md#4-future-features-architecture-roadmap)_
+Restrict inference node endpoints so that only the controller can reach them — preventing unauthenticated access from other hosts on the network. Phase 19 detects this condition; enforcement (firewall rules or Ollama auth proxy) is a separate future item.
+- _Detected by: [Security Audit Tool](#x-security-audit-tool) · Enforcement tracked: [checklist Future Features](ai_stack_blueprint/ai_stack_checklist.md#4-future-features-architecture-roadmap)_
 
 ---
 
