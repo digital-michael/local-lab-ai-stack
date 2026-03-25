@@ -1386,7 +1386,17 @@ Items requiring a decision before or during implementation.
     (Note: retrievalQAChain is BaseLLM-only; conversationalRetrievalQAChain required for ChatOllama/BaseChatModel)
   - flowData nodes require full inputParams/inputAnchors arrays from node API definitions
 - pytest: **24 passed, 1 skipped, 0 failed**
-- Remaining skip: T-071 (vLLM hardware-gated only)
+- Remaining skip: T-071 (vLLM hardware-gated only) — **resolved 2026-03-25, see below**
+
+## Session Notes — 2026-03-25
+
+- **CDI fix** — Podman 5.8.1 ships with `cdiSpecDirs: []`; created `~/.config/containers/containers.conf` with `cdi_spec_dirs = ["/etc/cdi", "/run/cdi"]`; vllm.service now starts cleanly (commit `a018e52`)
+- **GPU inference confirmed** — `qwen2.5-1.5b` loaded on RTX 3070 Ti (8 GB VRAM, `gpu_memory_utilization=0.55 --enforce-eager --max-model-len 2048`); LiteLLM `/chat/completions` → `Response: working`
+- **Ollama CPU-pinned** — `config.json` `resources.gpu → null`, `CUDA_VISIBLE_DEVICES=""` added to ollama environment; live quadlet updated (commit `6d91a8b`)
+- **T-071 (failover vLLM→ollama): PASSED** — vLLM stopped, LiteLLM routed to Ollama, response received, vLLM restarted; 22.5s (commit `6d91a8b`)
+- pytest: **25 passed, 0 skipped, 0 failed** — zero skips remain
+- **Open Consideration #33 added** — controller node inference role; formalise as `controller-inference` profile variant in future phase
+- Lesson I-18 recorded in dynamics.md: Podman CDI spec dirs must be configured explicitly
 
 ## Session Notes — 2026-03-19
 
