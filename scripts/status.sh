@@ -154,9 +154,9 @@ net_name=$(jq -r '.network.name' "$CONFIG_FILE")
 
 # Filter services to those expected for this node profile
 case "$(_get_node_profile)" in
-    inference-worker)  _profile_svcs='["ollama","promtail"]' ;;
-    knowledge-worker)  _profile_svcs='["ollama","promtail","knowledge-index","qdrant"]' ;;
-    *)                 _profile_svcs='null' ;;  # controller/peer: all services
+    inference-worker)          _profile_svcs='["ollama","promtail"]' ;;
+    enhanced-worker|knowledge-worker)  _profile_svcs='["ollama","promtail","knowledge-index","qdrant"]' ;;
+    *)                         _profile_svcs='null' ;;  # controller/peer: all services
 esac
 
 if [[ "$_profile_svcs" == "null" ]]; then
@@ -164,6 +164,14 @@ if [[ "$_profile_svcs" == "null" ]]; then
 else
     mapfile -t services < <(jq -r --argjson svcs "$_profile_svcs" \
         '.services | keys[] | select(. as $k | $svcs | index($k) != null)' "$CONFIG_FILE")
+fi
+
+if [[ ${#services[@]} -eq 0 ]]; then
+    echo "ERROR: No services found in $CONFIG_FILE" >&2
+    echo "  jq -r '.services | keys[]' returned nothing." >&2
+    echo "  Verify that CONFIG_FILE points to the correct config and that .services is non-empty." >&2
+    echo "  CONFIG_FILE=$CONFIG_FILE" >&2
+    exit 1
 fi
 
 # Determine deploy mode: Darwin cannot run systemd quadlets — always bare metal.
