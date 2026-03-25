@@ -581,3 +581,21 @@ Concrete protocol specification for the **WAN** discovery profile.
 | **Deferred** | Full resolution deferred. Captured before Phase 11 implementation begins so scaffolding in Phases 11–12 doesn't foreclose a clean management API surface. |
 | **Driver** | User-raised question before Phase 11 implementation |
 | **Commit** | *(pending)* |
+
+---
+
+### D-035 — Library Visibility and Administrative Status
+
+| Field | Value |
+|---|---|
+| **Decision** | Library access uses two orthogonal fields: `visibility` (access policy — who may see and read the library) and `status` (administrative lifecycle state — is the library live). These are separate concerns: a library can be `private` *and* `unvetted`, or `shared` *and* `prohibited`. The two fields together give a complete access model without conflating policy with state. |
+| **Context** | D-025 introduced `visibility` (private/shared/licensed) as a single-field model. A separate conversation identified three additional needs: (1) discovery reach (WAN/public) that D-025 didn't name; (2) an *unvetted* state for libraries that arrive via custody push and need admin review before serving; (3) a *prohibited* state for content that must be blocked but whose record must be preserved for audit. The `profiles` field (D-014) was also being conflated with visibility — it controls *where* a library is discoverable, not *who* may read it. |
+| **`visibility` values** | `private` — origin-node/owner only; never included in catalog responses to any remote caller (safe default for all new ingestions). `shared` — accessible to callers presenting a group/team credential; appears in local/LAN catalog responses. `public` — discoverable and readable by any authenticated caller; default for WAN-profile libraries. `licensed` — discoverable in catalog (metadata visible), but content endpoint requires explicit license-acceptance before serving. |
+| **`status` values** | `active` — live; `visibility` controls apply normally. `unvetted` — ingested but pending admin review; excluded from `/v1/catalog` responses for non-admin callers; content queries return 403 until promoted. `prohibited` — administratively blocked; never served to any caller; record retained for audit (same semantics as D-026 `prohibited` for nodes). |
+| **Default rules** | `POST /v1/scan` (localhost, operator explicitly placed files): `visibility = private`, `status = active`. `POST /v1/libraries` custody push (third-party contributor): `visibility = private`, `status = unvetted` — admin must promote to `active`. Manifest `visibility` field overrides the default at publish time. |
+| **Relationship to other fields** | `profiles[]` (D-014): orthogonal — controls *where* discoverable (localhost/local/WAN), not who may read. `license` (D-013): the SPDX expression; separate from `visibility = licensed`. `author` + `signature_hash` (D-025): provenance; unaffected by visibility/status changes. |
+| **Non-scope** | Team/group membership (who is in "shared") requires a `library_access` table and identity model — deferred to Knowledge Library Governance (§4 Future Features). Monetization and license-acceptance workflow — deferred to the same future phase. |
+| **Implementation items** | (1) Add `visibility` and `status` fields to `configs/library-manifest-schema.json`. (2) Add `CHECK` constraints to the `libraries` DB table. (3) Add `status` column to DB DDL. (4) Update scan path to read `visibility` from manifest; default `private/active`. (5) Update custody push path to default `status = unvetted`. (6) Filter `GET /v1/catalog` to hide `prohibited` always and `unvetted` for non-admin callers. (7) Update `configure.sh build-library` to accept `--visibility` flag. |
+| **Driver** | User-raised discussion; joint design |
+| **Trigger** | Review of D-025 vocabulary during Tier 1 work; user identified need for "unvetted" and "prohibited" states and noted the public/team/private framing was missing "public" and conflating visibility with profiles. |
+| **Commit** | *(pending Phase 18)* |
