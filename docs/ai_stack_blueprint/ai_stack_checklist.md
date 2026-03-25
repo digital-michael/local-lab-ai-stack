@@ -1153,6 +1153,24 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
+## Phase 20a — D-034 Resolution + Stale Close-Outs ✅ COMPLETE (commit TBD)
+
+**Goal:** Resolve the last pending architectural decision (D-034 — API-Level and Terminal Access) and close stale §3 checklist items that were implemented in earlier phases but never checked off.
+
+**Decision:** D-034 resolved. Operator access is two layers: **(A) Infrastructure CLI** (`scripts/` over SSH) for mutations requiring host access (deploy, start/stop, secrets, security-audit). **(B) Application Admin API** (`/admin/v1/*` routes in Knowledge Index, `KI_ADMIN_KEY`-gated) for read-only observability (health rollup, node status, model catalog, audit results). No new service. Traefik gains an admin router with admin-key-only auth. Terminal access: SSH key-based, no shared credentials, `podman exec` for break-glass only.
+
+### Tasks
+- [x] 20a.1 Resolve D-034 in `docs/decisions.md` — replace PENDING entry with full resolution
+- [x] 20a.2 Close stale §3 items: `detect-hardware` (Phase 8/9), `node profile support` (Phase 9/11), `macOS M1 inference worker` (Phase 9b)
+- [x] 20a.3 Update §4 Operator Dashboard entry to reference D-034 as enabling decision
+- [x] 20a.4 Add Phase 20a definition to checklist
+
+### Outputs
+- Updated `docs/decisions.md` (D-034 resolved)
+- Updated `docs/ai_stack_blueprint/ai_stack_checklist.md` (3 stale items closed, §4 updated, Phase 20a defined)
+
+---
+
 ## Execution Notes
 
 - **Phases 1–3 are documentation and configuration.** They can be executed in a single session with no external dependencies.
@@ -1226,10 +1244,10 @@ These collapse into the configuration system above. Tracked individually for vis
 - [x] **Build volume ingestion pipeline** — `configure.sh build-library` subcommand: `--source`, `--name`, `--version`, `--author`, `--license`, `--description`, `--output`; produces `manifest.yaml`, `documents/`, `metadata.json`, `checksums.txt`; T-095–T-097b (Phase 16, commit `2eaeb8d`).
 - [x] **Integrate MCP server into Knowledge Index Service** — implemented in Phase 7 (`app.py` lines 607+): `search_knowledge` and `ingest_document` MCP tools over HTTP/SSE transport at `/mcp/sse`; auth guard on `API_KEY`; cross-node routing in `search_knowledge` mirrors REST `/query` behaviour. Deferrable entry was a stale duplicate of Phase 7 (already ✅ COMPLETE).
 - [ ] **Enable local GPU for vLLM** — CDI setup, pin Ollama to CPU, select quantized model for 8 GB VRAM, add `models[]` config section, auto-generate LiteLLM model_list (see Phase 8)
-- [ ] **Add `configure.sh detect-hardware`** — detect GPU/VRAM/RAM, suggest node profile and viable models (see Phase 8)
-- [ ] **Add node profile support** — `controller`, `inference-worker`, `peer` profiles; `configure.sh` selects services per profile (see Phase 9)
-- [ ] **Implement dynamic node registration** — workers register with controller LiteLLM on startup; heartbeat; static fallback (see Phase 9)
-- [ ] **Set up macOS M1 inference worker** — Podman Machine, Ollama container, `register-node.sh` (see Phase 9)
+- [x] **Add `configure.sh detect-hardware`** — `detect-hardware` and `recommend` subcommands implemented (Phase 8/9); detects GPU/VRAM/RAM, suggests node profile and model tier per D-021. Stale `[ ]` closed Phase 20a.
+- [x] **Add node profile support** — `controller`, `inference-worker`, `peer` profiles implemented; `configure.sh` generates profile-specific quadlets; `status.sh` reads `node_profile`; per-node files in `configs/nodes/` carry profile and capabilities (Phase 9/11). Stale `[ ]` closed Phase 20a.
+- [ ] **Implement dynamic node registration** — workers register with controller LiteLLM on startup; heartbeat; static fallback (see Phase 9, D-027 Phase B)
+- [x] **Set up macOS M1 inference worker** — TC25 (macbook-m1) running Ollama natively, registered in `configs/nodes/inference-worker-1.json`, reachable from controller, LiteLLM alias configured (Phase 9b). Stale `[ ]` closed Phase 20a.
 - [x] **Implement library custody sync** — `POST /v1/libraries` fully implemented in `app.py` (custody ingest with checksum verification, Qdrant ingestion, PostgreSQL provenance); `configure.sh sync-libraries` subcommand fully implemented (reads `libraries/`, POSTs to controller `/v1/libraries` with auth, reports per-library status). Both were built alongside Phase 12 infrastructure and pre-existed Phase 15. Stale `[ ]` entry.
 - [x] **Drive smoke tests from `config.json`** — `testing/helpers.bash` `_port_exports` block reads all host ports from `config.json` via Python at suite load time; exports 14 named variables; all `testing/*.bats` files reference `${VAR_NAME}` — zero hardcoded port literals remain. Closed Phase 14 (`77cb8f6`).
 - [x] **Add MinIO smoke test (T-021a)** — `testing/layer1_smoke.bats` T-021a: `assert_http_status "200" "http://localhost:${MINIO_PORT}/minio/health/live"`. Closed Phase 14 (`77cb8f6`).
@@ -1256,9 +1274,7 @@ These collapse into the configuration system above. Tracked individually for vis
 
 # 4 Future Features (architecture roadmap)
 
-- [ ] **Security audit tool (operator dashboard surface)** — surface `configure.sh security-audit` results in the Admin tab of the operator dashboard (Phase 19 implements the CLI layer; dashboard is a separate future item)
-
-- [ ] **Operator dashboard** — web UI with tab-based navigation across User, Team, System, and Admin contexts:
+- [ ] **Operator dashboard** — web UI with tab-based navigation across User, Team, System, and Admin contexts. **Prerequisite:** D-034 (resolved Phase 20a) defines the Layer B `/admin/v1/*` endpoints that the dashboard consumes. Security audit results surface via `/admin/v1/audit` (Phase 19 CLI → Layer B wrapper):
   - **User tab**
     - Personal contexts (private, user-scoped)
     - Common/publicly-shared contexts (readable by all authenticated users)
