@@ -236,6 +236,14 @@
         {
           "name": "knowledge_index_api_key",
           "target": "API_KEY"
+        },
+        {
+          "name": "minio_ki_access_key",
+          "target": "MINIO_ACCESS_KEY"
+        },
+        {
+          "name": "minio_ki_secret_key",
+          "target": "MINIO_SECRET_KEY"
         }
       ],
       "health_check": {
@@ -736,6 +744,18 @@
       ],
       "command": "server /data --console-address :9001",
       "buckets": ["documents", "outputs", "research", "libraries"],
+      "service_accounts": [
+        {
+          "name": "ki-service",
+          "description": "knowledge-index read/write account",
+          "secret_access_key": "minio_ki_access_key",
+          "secret_secret_key": "minio_ki_secret_key",
+          "policy": {
+            "read":  ["documents", "libraries"],
+            "write": ["outputs", "research"]
+          }
+        }
+      ],
       "health_check": {
         "command": "bash -c 'curl -sf http://localhost:9000/minio/health/live'",
         "interval": "30s",
