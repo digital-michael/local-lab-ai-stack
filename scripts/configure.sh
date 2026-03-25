@@ -1396,7 +1396,7 @@ cmd_security_audit() {
     # A. Port exposure — read config.json service port bindings
     # -----------------------------------------------------------------------
 
-    echo "[A] Checking port exposure..."
+    $json_mode || echo "[A] Checking port exposure..."
 
     local services_json
     services_json=$(jq -r '.services // {}' "$CONFIG_FILE")
@@ -1446,7 +1446,7 @@ cmd_security_audit() {
     if $skip_network; then
         _finding INFO "AUTH-SKIP" "Auth probing skipped (--skip-network)"
     else
-        echo "[B] Probing auth enforcement..."
+        $json_mode || echo "[B] Probing auth enforcement..."
 
         local litellm_port qdrant_port ki_port
         litellm_port=$(jq -r '.services.litellm.ports[0].host // "9000"' "$CONFIG_FILE")
@@ -1512,7 +1512,7 @@ cmd_security_audit() {
     if $skip_network; then
         _finding INFO "TLS-SKIP" "TLS checks skipped (--skip-network)"
     else
-        echo "[C] Checking TLS certificates..."
+        $json_mode || echo "[C] Checking TLS certificates..."
 
         local traefik_https_port
         traefik_https_port=$(jq -r '[
@@ -1538,7 +1538,7 @@ cmd_security_audit() {
     # D. Secret hygiene — look for plaintext secrets in config.json
     # -----------------------------------------------------------------------
 
-    echo "[D] Checking secret hygiene..."
+    $json_mode || echo "[D] Checking secret hygiene..."
 
     # Known secret field names that should NOT hold real values in config.json
     local -a secret_fields=("password" "api_key" "master_key" "secret" "token"
@@ -1576,7 +1576,7 @@ cmd_security_audit() {
     if $skip_network; then
         _finding INFO "WORKER-SKIP" "Worker hardening checks skipped (--skip-network)"
     else
-        echo "[E] Checking inference-worker node hardening..."
+        $json_mode || echo "[E] Checking inference-worker node hardening..."
 
         local nodes_dir
         nodes_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/configs/nodes"
@@ -1634,9 +1634,9 @@ cmd_security_audit() {
             $first || printf ','
             first=false
             printf '{"severity":%s,"id":%s,"message":%s}' \
-                "$(jq -rn --arg v "$sev" '$v')" \
-                "$(jq -rn --arg v "$id"  '$v')" \
-                "$(jq -rn --arg v "$msg" '$v')"
+                "$(jq -n --arg v "$sev" '$v')" \
+                "$(jq -n --arg v "$id"  '$v')" \
+                "$(jq -n --arg v "$msg" '$v')"
         done
         printf ']\n'
     else
