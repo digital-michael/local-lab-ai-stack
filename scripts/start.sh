@@ -60,7 +60,7 @@ if [[ $deploy_check -eq 2 ]]; then
     echo "Stack is not deployed — no quadlet files found in $QUADLET_DIR"
     echo ""
     if $YES; then
-        echo "Running deploy.sh (--yes passed)..."
+        echo "Running bash scripts/deploy.sh (--yes passed)..."
         "$SCRIPT_DIR/deploy.sh"
     else
         read -rp "Run deploy.sh now? [y/N] " answer
@@ -119,8 +119,8 @@ else
     echo "Check with: systemctl --user status <service>.service"
 fi
 echo ""
-echo "Run './scripts/status.sh' for a health summary."
+echo "Run 'bash scripts/status.sh' for a health summary."
 echo ""
 echo "First deployment? Run the following to detect and fix integration issues"
 echo "(OpenWebUI DB Ollama URL, API key alignment, etc.):"
-echo "  ./scripts/diagnose.sh --profile full --fix"
+echo "  bash scripts/diagnose.sh --profile full --fix"
