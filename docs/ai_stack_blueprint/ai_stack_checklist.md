@@ -1123,7 +1123,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
-## Phase 19 — Security Audit Tool ✅ COMPLETE (commit TBD)
+## Phase 19 — Security Audit Tool ✅ COMPLETE (commit `cb477c6`)
 
 **Goal:** Add `configure.sh security-audit` subcommand that performs an automated security posture scan of the controller node and registered inference-worker nodes. No external service dependencies required at tool-build time.
 
@@ -1153,7 +1153,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
-## Phase 20a — D-034 Resolution + Stale Close-Outs ✅ COMPLETE (commit TBD)
+## Phase 20a — D-034 Resolution + Stale Close-Outs ✅ COMPLETE (commit `79e208f`)
 
 **Goal:** Resolve the last pending architectural decision (D-034 — API-Level and Terminal Access) and close stale §3 checklist items that were implemented in earlier phases but never checked off.
 
@@ -1168,6 +1168,24 @@ This section defines the reproducible, sequenced implementation plan across all 
 ### Outputs
 - Updated `docs/decisions.md` (D-034 resolved)
 - Updated `docs/ai_stack_blueprint/ai_stack_checklist.md` (3 stale items closed, §4 updated, Phase 20a defined)
+
+---
+
+## Phase 21 — Getting Started Guide + Operator FAQ ✅ COMPLETE (commit TBD)
+
+**Goal:** Produce user-facing documentation for standing up and operating the stack day-to-day. No code or config changes — documentation only.
+
+**Inputs:** All scripts finalized through Phase 20a. `configure.sh` subcommand set stable.
+
+### Outputs
+- `docs/getting-started.md` — 12-step installation and first-deploy walkthrough; quick-reference command table; links to FAQ and architecture
+- `docs/operator-faq.md` — 8 how-to recipes (add model, add hosted provider, register node, enable GPU, ingest documents, sync library, backup, security audit); 9 FAQ entries covering the most common failure modes with exact remediation commands
+
+### Verification
+- [x] `docs/getting-started.md` exists and covers install → verify path
+- [x] `docs/operator-faq.md` exists with how-to guides and FAQ entries
+- [x] §4 Getting Started checklist item marked complete
+- [x] Phase 19 and Phase 20a commit hashes corrected (were TBD)
 
 ---
 
@@ -1323,11 +1341,10 @@ These collapse into the configuration system above. Tracked individually for vis
   - Ethics alignment: positive/neutral/negative behavior classification with operator-defined context
   - Private/restricted content: opt-in isolated collection storage; excluded from default discovery
   - Prohibited topics list: operator-defined deny-list enforced at query and ingestion boundaries
-- [ ] **Getting Started guide and operator FAQ** — user-facing documentation for standing up and operating the stack day-to-day:
-  - Getting Started: install prerequisites, clone repo, run `configure.sh`, deploy, verify
-  - How-to: add a new model, add a hosted API provider, register an inference node, ingest documents, back up the stack
-  - FAQ: common failure modes and fixes (service not starting, model not routing, auth failures, TLS errors)
-  - To be filled in incrementally as the stack stabilises; finalization pass at end of Phase 10
+- [x] **Getting Started guide and operator FAQ** — `docs/getting-started.md` and `docs/operator-faq.md` (Phase 21, commit TBD):
+  - Getting Started: 12-step install-through-verify walkthrough, quick-reference command table
+  - How-to: add Ollama model, add hosted API provider (OpenAI/Anthropic/etc.), register remote inference node, enable GPU (vLLM), ingest documents, push library from worker, back up, run security audit
+  - FAQ: 9 common failure modes with root-cause explanations and exact fix commands (service failed, WebUI no models, LiteLLM 404/401, TLS errors, Authentik 502, duplicate model entries, remote node not showing, KI 401)
 ---
 
 # 5 Open Considerations
