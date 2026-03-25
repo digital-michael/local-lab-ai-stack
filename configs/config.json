@@ -450,7 +450,9 @@
           "mode": "ro"
         }
       ],
-      "environment": {},
+      "environment": {
+        "CUDA_VISIBLE_DEVICES": ""
+      },
       "secrets": [],
       "health_check": {
         "command": "bash -c 'echo > /dev/tcp/localhost/11434'",
@@ -461,7 +463,7 @@
       "resources": {
         "cpus": 4,
         "memory": "16g",
-        "gpu": "nvidia.com/gpu=all"
+        "gpu": null
       }
     },
     "flowise": {
