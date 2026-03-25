@@ -8,7 +8,7 @@ A human-readable summary of what this stack provides, ordered from most to least
 
 ## Overview
 
-This is a **self-hosted, privacy-first AI platform** that runs entirely on your own hardware — no cloud accounts, no usage fees, no data leaving your network.
+This is a **self-hosted, privacy-first AI platform** that runs on your own hardware — no subscriptions, no per-token usage fees, and no mandatory third-party cloud services.
 
 At its core, the stack gives a team:
 
@@ -18,6 +18,8 @@ At its core, the stack gives a team:
 - **Distributed inference** so that multiple machines contribute GPU compute to the shared model pool
 
 Everything is secured behind a single login, all traffic is encrypted, and the full state of the system can be backed up and restored with a single command.
+
+**Internet access and data sharing:** By default, the stack operates entirely within your local network — no data leaves your machines. However, LiteLLM can optionally route requests to external cloud providers (OpenAI, Anthropic, Mistral, and others) when configured with API keys. When cloud backends are in use, prompts and responses travel to and from those providers under their respective privacy policies. Using only local backends (Ollama, vLLM) ensures no data leaves your network.
 
 The stack is designed to grow: new inference nodes can be added to increase capacity, new models can be hot-swapped, and the architecture extends toward a fully peer-to-peer mesh where each node operates independently while contributing to the shared pool.
 
