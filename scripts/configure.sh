@@ -42,6 +42,7 @@ Commands:
   recommend                 Interactive node profile recommender (writes to config.json)
   sync-libraries            Push local .ai-library packages to the controller KI service
   build-library             Package a directory of raw documents into a .ai-library bundle
+  provision-minio           Create MinIO buckets and service accounts (requires MinIO running)
   security-audit            Scan ports, API key enforcement, TLS, and secret hygiene
   help                      Show this message
 
@@ -1664,6 +1665,153 @@ cmd_security_audit() {
     return $exit_code
 }
 
+cmd_provision_minio() {
+    require_config
+
+    # ── Locate mc ────────────────────────────────────────────────────────────
+    local mc_cmd=""
+    if command -v mc &>/dev/null; then
+        mc_cmd="mc"
+    elif command -v mcli &>/dev/null; then
+        mc_cmd="mcli"
+    else
+        # Fall back to running mc inside the minio container (it ships with the image)
+        if podman inspect minio &>/dev/null 2>&1; then
+            mc_cmd="podman exec minio mc"
+        else
+            echo "ERROR: 'mc' (MinIO Client) not found on PATH and minio container is not running." >&2
+            echo "  Install mc: https://min.io/docs/minio/linux/reference/minio-mc.html" >&2
+            echo "  Or start MinIO first: systemctl --user start minio.service" >&2
+            exit 1
+        fi
+    fi
+
+    # ── Read MinIO config ─────────────────────────────────────────────────────
+    local host_port container_name
+    host_port=$(jq -r '.services.minio.ports[0].host' "$CONFIG_FILE")
+    container_name=$(jq -r '.services.minio.container_name // "minio"' "$CONFIG_FILE")
+
+    # Ensure MinIO is reachable
+    if ! curl -sf "http://127.0.0.1:${host_port}/minio/health/live" &>/dev/null; then
+        echo "ERROR: MinIO health check failed at http://127.0.0.1:${host_port}/minio/health/live" >&2
+        echo "  Start MinIO first: systemctl --user start ${container_name}.service" >&2
+        exit 1
+    fi
+
+    # ── Read root credentials from Podman secrets ─────────────────────────────
+    local root_user root_password
+    root_user=$(podman secret inspect minio_root_user --showsecret 2>/dev/null \
+        | jq -r '.[0].SecretData' || true)
+    root_password=$(podman secret inspect minio_root_password --showsecret 2>/dev/null \
+        | jq -r '.[0].SecretData' || true)
+    if [[ -z "$root_user" || -z "$root_password" ]]; then
+        echo "ERROR: Podman secrets 'minio_root_user' / 'minio_root_password' not found." >&2
+        echo "  Run: configure.sh generate-secrets" >&2
+        exit 1
+    fi
+
+    local endpoint="http://127.0.0.1:${host_port}"
+    local alias="ai-stack-minio"
+
+    echo "Provisioning MinIO at ${endpoint} ..."
+    $mc_cmd alias set "$alias" "$endpoint" "$root_user" "$root_password" --quiet
+
+    # ── Create buckets ────────────────────────────────────────────────────────
+    local buckets
+    buckets=$(jq -r '.services.minio.buckets[]?' "$CONFIG_FILE")
+    if [[ -z "$buckets" ]]; then
+        echo "  No buckets defined in config — skipping bucket creation"
+    else
+        while IFS= read -r bucket; do
+            if $mc_cmd ls "${alias}/${bucket}" &>/dev/null 2>&1; then
+                echo "  bucket '${bucket}': already exists — skipping"
+            else
+                $mc_cmd mb "${alias}/${bucket}" --quiet
+                echo "  bucket '${bucket}': created"
+            fi
+        done <<< "$buckets"
+    fi
+
+    # ── Create service accounts ───────────────────────────────────────────────
+    local n_accounts
+    n_accounts=$(jq '.services.minio.service_accounts | length' "$CONFIG_FILE" 2>/dev/null || echo 0)
+
+    for (( i=0; i<n_accounts; i++ )); do
+        local sa_name sa_desc ak_secret sk_secret read_buckets write_buckets
+        sa_name=$(jq -r ".services.minio.service_accounts[$i].name" "$CONFIG_FILE")
+        sa_desc=$(jq -r ".services.minio.service_accounts[$i].description // \"\"" "$CONFIG_FILE")
+        ak_secret=$(jq -r ".services.minio.service_accounts[$i].secret_access_key" "$CONFIG_FILE")
+        sk_secret=$(jq -r ".services.minio.service_accounts[$i].secret_secret_key" "$CONFIG_FILE")
+        read_buckets=$(jq -r ".services.minio.service_accounts[$i].policy.read[]?" "$CONFIG_FILE")
+        write_buckets=$(jq -r ".services.minio.service_accounts[$i].policy.write[]?" "$CONFIG_FILE")
+
+        echo ""
+        echo "  Service account '${sa_name}' (${sa_desc}):"
+
+        # Check if credentials already exist as Podman secrets
+        if podman secret inspect "$ak_secret" &>/dev/null 2>&1 && \
+           podman secret inspect "$sk_secret" &>/dev/null 2>&1; then
+            echo "    Podman secrets '${ak_secret}' / '${sk_secret}' already exist — skipping"
+            continue
+        fi
+
+        # Generate credentials
+        local access_key secret_key
+        access_key=$(openssl rand -hex 10 | tr '[:lower:]' '[:upper:]')
+        secret_key=$(openssl rand -hex 20)
+
+        # Build policy JSON
+        local policy_json tmp_policy
+        tmp_policy=$(mktemp)
+
+        local statements="[]"
+        if [[ -n "$read_buckets" ]]; then
+            local read_resources="[]"
+            while IFS= read -r b; do
+                read_resources=$(printf '%s' "$read_resources" \
+                    | jq --arg b "$b" '. + ["arn:aws:s3:::"+$b, "arn:aws:s3:::"+$b+"/*"]')
+            done <<< "$read_buckets"
+            statements=$(printf '%s' "$statements" | jq \
+                --argjson res "$read_resources" \
+                '. + [{"Effect":"Allow","Action":["s3:GetObject","s3:ListBucket"],"Resource":$res}]')
+        fi
+        if [[ -n "$write_buckets" ]]; then
+            local write_resources="[]"
+            while IFS= read -r b; do
+                write_resources=$(printf '%s' "$write_resources" \
+                    | jq --arg b "$b" '. + ["arn:aws:s3:::"+$b, "arn:aws:s3:::"+$b+"/*"]')
+            done <<< "$write_buckets"
+            statements=$(printf '%s' "$statements" | jq \
+                --argjson res "$write_resources" \
+                '. + [{"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:DeleteObject","s3:ListBucket"],"Resource":$res}]')
+        fi
+
+        policy_json=$(jq -n \
+            --argjson stmts "$statements" \
+            '{"Version":"2012-10-17","Statement":$stmts}')
+        printf '%s' "$policy_json" > "$tmp_policy"
+
+        # Create the service account via mc
+        $mc_cmd admin user svcacct add \
+            --access-key "$access_key" \
+            --secret-key "$secret_key" \
+            --policy "$tmp_policy" \
+            --comment "$sa_desc" \
+            "$alias" "$root_user" --quiet
+        rm -f "$tmp_policy"
+
+        # Store credentials as Podman secrets
+        printf '%s' "$access_key" | podman secret create "$ak_secret" -
+        printf '%s' "$secret_key" | podman secret create "$sk_secret" -
+        echo "    Created — secrets stored: '${ak_secret}', '${sk_secret}'"
+    done
+
+    echo ""
+    echo "MinIO provisioning complete."
+    echo "Restart knowledge-index to pick up new credentials:"
+    echo "  systemctl --user restart knowledge-index.service"
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1683,6 +1831,7 @@ case "${1:-help}" in
     recommend)               cmd_recommend ;;
     sync-libraries)          cmd_sync_libraries ;;
     build-library)           cmd_build_library "${@:2}" ;;
+    provision-minio)         cmd_provision_minio ;;
     security-audit)          cmd_security_audit "${@:2}" ;;
     help|--help|-h)          usage ;;
     *)
