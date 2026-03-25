@@ -1171,7 +1171,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
-## Phase 21 — Getting Started Guide + Operator FAQ ✅ COMPLETE (commit TBD)
+## Phase 21 — Getting Started Guide + Operator FAQ ✅ COMPLETE (commit `96f5c6d`)
 
 **Goal:** Produce user-facing documentation for standing up and operating the stack day-to-day. No code or config changes — documentation only.
 
