@@ -1800,14 +1800,26 @@ cmd_provision_minio() {
             '{"Version":"2012-10-17","Statement":$stmts}')
         printf '%s' "$policy_json" > "$tmp_policy"
 
+        # When mc runs inside the container (podman exec), the host temp path is
+        # invisible to it.  Copy the policy file in, use the in-container path,
+        # and clean up after.
+        local policy_arg="$tmp_policy"
+        local container_tmp_path=""
+        if [[ "$mc_cmd" == podman\ exec* ]]; then
+            container_tmp_path="/tmp/sa-policy-${sa_name}.json"
+            podman cp "$tmp_policy" "${container_name}:${container_tmp_path}"
+            policy_arg="$container_tmp_path"
+        fi
+
         # Create the service account via mc
         $mc_cmd admin user svcacct add \
             --access-key "$access_key" \
             --secret-key "$secret_key" \
-            --policy "$tmp_policy" \
+            --policy "$policy_arg" \
             --comment "$sa_desc" \
             "$alias" "$root_user" --quiet
         rm -f "$tmp_policy"
+        [[ -n "$container_tmp_path" ]] && podman exec "$container_name" rm -f "$container_tmp_path"
 
         # Store credentials as Podman secrets
         printf '%s' "$access_key" | podman secret create "$ak_secret" -
