@@ -23,6 +23,30 @@ The stack is designed to grow: new inference nodes can be added to increase capa
 
 ---
 
+## Technology Stack
+
+15 containerized services, organized by functional layer. All traffic enters through the Edge layer; every upstream is protected by authentication before a request reaches it.
+
+| Layer | Component | Primary Responsibility |
+|---|---|---|
+| **Application** | OpenWebUI ([ref](https://docs.openwebui.com/)) | Browser-based chat interface; primary user-facing entry point |
+| **Application** | Flowise ([ref](https://flowiseai.com/)) | Visual AI workflow builder; multi-step automation without code |
+| **Edge** | Traefik ([ref](https://traefik.io/traefik/)) | Reverse proxy; TLS termination; routes all inbound traffic to upstream services |
+| **Edge** | Authentik ([ref](https://goauthentik.io/)) | Identity provider; SSO; enforces authentication on every protected service |
+| **Inference** | LiteLLM ([ref](https://docs.litellm.ai/)) | Unified model proxy; routes to local or cloud backends via a single OpenAI-compatible API |
+| **Inference** | Ollama ([ref](https://ollama.com/)) | Local model runner; serves LLMs on CPU or GPU across one or more nodes |
+| **Inference** | vLLM ([ref](https://docs.vllm.ai/)) | High-throughput GPU inference engine; optimized for production serving |
+| **Knowledge** | knowledge-index | Document ingestion pipeline; chunks, embeds, and indexes content into Qdrant |
+| **Storage** | PostgreSQL ([ref](https://www.postgresql.org/)) | Relational database; persistent state for Authentik, Flowise, and LiteLLM |
+| **Storage** | Qdrant ([ref](https://qdrant.tech/)) | Vector database; stores and queries document embeddings for RAG |
+| **Storage** | MinIO ([ref](https://min.io/)) | Object storage; model artifacts, log archives, and backup snapshots |
+| **Observability** | Grafana ([ref](https://grafana.com/grafana/)) | Dashboards and alerting; visualizes metrics and health signals |
+| **Observability** | Prometheus ([ref](https://prometheus.io/)) | Metrics scraping and time-series storage across all stack services |
+| **Observability** | Loki ([ref](https://grafana.com/oss/loki/)) | Log aggregation backend; stores structured logs from all containers |
+| **Observability** | Promtail ([ref](https://grafana.com/docs/loki/latest/send-data/promtail/)) | Log shipping agent; collects and forwards container logs to Loki |
+
+---
+
 ## Table of Contents
 
 **Core Features** *(fully available)*
