@@ -129,7 +129,7 @@ fi
 if [[ $quadlet_count -eq 0 ]] && ! command -v ollama &>/dev/null; then
     if ! $QUIET; then
         echo "Stack is NOT DEPLOYED (no quadlet files found in $QUADLET_DIR, no bare-metal ollama found)"
-        echo "Run: ./scripts/deploy.sh"
+        echo "Run: bash scripts/deploy.sh"
     fi
     exit 2
 fi

@@ -62,7 +62,7 @@ require_jq() {
 require_config() {
     if [[ ! -f "$CONFIG_FILE" ]]; then
         echo "ERROR: Config file not found at $CONFIG_FILE" >&2
-        echo "Run: configure.sh init" >&2
+        echo "Run: bash scripts/configure.sh init" >&2
         exit 1
     fi
 }
@@ -156,7 +156,7 @@ cmd_validate() {
     fi
     for secret in $required_secrets; do
         if ! podman secret inspect "$secret" &>/dev/null; then
-            echo "WARN: Podman secret '$secret' does not exist (run: configure.sh generate-secrets)"
+            echo "WARN: Podman secret '$secret' does not exist (run: bash scripts/configure.sh generate-secrets)"
         fi
     done
 
@@ -164,7 +164,7 @@ cmd_validate() {
     local net_name
     net_name=$(jq -r '.network.name' "$CONFIG_FILE")
     if ! podman network exists "$net_name" 2>/dev/null; then
-        echo "WARN: Network '$net_name' does not exist (deploy.sh will create it)"
+        echo "WARN: Network '$net_name' does not exist (bash scripts/deploy.sh will create it)"
     fi
 
     # Check AI_STACK_DIR
@@ -172,7 +172,7 @@ cmd_validate() {
     ai_stack_dir=$(jq -r '.ai_stack_dir' "$CONFIG_FILE")
     ai_stack_dir="${ai_stack_dir//\$HOME/$HOME}"
     if [[ ! -d "$ai_stack_dir" ]]; then
-        echo "WARN: AI_STACK_DIR=$ai_stack_dir does not exist (run: install.sh)"
+        echo "WARN: AI_STACK_DIR=$ai_stack_dir does not exist (run: bash scripts/install.sh)"
     fi
 
     if [[ $errors -gt 0 ]]; then
@@ -596,7 +596,7 @@ print(json.dumps({'_comment': comment, 'default_models': entries}, indent=2))
 PYEOF
 
     echo "Written: $models_file ($model_count model(s))"
-    echo "Run 'scripts/pull-models.sh' to register routes in LiteLLM."
+    echo "Run 'bash scripts/pull-models.sh' to register routes in LiteLLM."
 }
 
 cmd_detect_hardware() {
@@ -1310,7 +1310,7 @@ cmd_build_library() {
     echo ""
     echo "Next steps:"
     echo "  Ingest locally:     POST /v1/scan with path=${output_dir%/*}"
-    echo "  Push to controller: configure.sh sync-libraries"
+    echo "  Push to controller: bash scripts/configure.sh sync-libraries"
 }
 
 # ---------------------------------------------------------------------------
@@ -1336,7 +1336,7 @@ cmd_security_audit() {
             --json)         json_mode=true;    shift ;;
             --skip-network) skip_network=true; shift ;;
             -h|--help)
-                echo "Usage: configure.sh security-audit [--json] [--skip-network]"
+                echo "Usage: bash scripts/configure.sh security-audit [--json] [--skip-network]"
                 echo ""
                 echo "Options:"
                 echo "  --json           Emit machine-readable JSON instead of human table"
@@ -1715,7 +1715,7 @@ cmd_provision_minio() {
         | jq -r '.[0].SecretData' || true)
     if [[ -z "$root_user" || -z "$root_password" ]]; then
         echo "ERROR: Podman secrets 'minio_root_user' / 'minio_root_password' not found." >&2
-        echo "  Run: configure.sh generate-secrets" >&2
+        echo "  Run: bash scripts/configure.sh generate-secrets" >&2
         exit 1
     fi
 

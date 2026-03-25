@@ -116,7 +116,7 @@ fi
 deploy_check=0
 "$SCRIPT_DIR/status.sh" --check --quiet 2>/dev/null || deploy_check=$?
 if [[ $deploy_check -eq 2 ]]; then
-    echo "Stack is NOT DEPLOYED. Run: ./scripts/deploy.sh && ./scripts/start.sh"
+    echo "Stack is NOT DEPLOYED. Run: bash scripts/deploy.sh && bash scripts/start.sh"
     exit 2
 fi
 
@@ -467,7 +467,7 @@ _check_integrations() {
             else
                 echo "         ! Fix: add to configs/config.json openwebui.environment:"
                 echo "         !   \"OLLAMA_BASE_URL\": \"http://ollama.ai-stack:11434\""
-                echo "         !   Then: configure.sh generate-quadlets && systemctl --user restart openwebui"
+                echo "         !   Then: bash scripts/configure.sh generate-quadlets && systemctl --user restart openwebui"
                 fail=$((fail + 1))
             fi
         else

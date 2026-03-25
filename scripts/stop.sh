@@ -100,4 +100,4 @@ done
 echo ""
 echo "All services stopped."
 echo ""
-echo "Run './scripts/status.sh' to verify."
+echo "Run 'bash scripts/status.sh' to verify."

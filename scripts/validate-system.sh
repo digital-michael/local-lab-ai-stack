@@ -45,7 +45,7 @@ fi
 
 AI_STACK_DIR="${AI_STACK_DIR:-$HOME/ai-stack}"
 if [[ ! -d "$AI_STACK_DIR" ]]; then
-    echo "ERROR: AI_STACK_DIR=$AI_STACK_DIR does not exist (run install.sh first)"
+    echo "ERROR: AI_STACK_DIR=$AI_STACK_DIR does not exist (run bash scripts/install.sh first)"
     ERRORS=$((ERRORS + 1))
 else
     echo "OK: Storage directory exists at $AI_STACK_DIR"
