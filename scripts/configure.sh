@@ -1668,34 +1668,43 @@ cmd_security_audit() {
 cmd_provision_minio() {
     require_config
 
-    # ── Locate mc ────────────────────────────────────────────────────────────
-    local mc_cmd=""
-    if command -v mc &>/dev/null; then
-        mc_cmd="mc"
-    elif command -v mcli &>/dev/null; then
-        mc_cmd="mcli"
-    else
-        # Fall back to running mc inside the minio container (it ships with the image)
-        if podman inspect minio &>/dev/null 2>&1; then
-            mc_cmd="podman exec minio mc"
-        else
-            echo "ERROR: 'mc' (MinIO Client) not found on PATH and minio container is not running." >&2
-            echo "  Install mc: https://min.io/docs/minio/linux/reference/minio-mc.html" >&2
-            echo "  Or start MinIO first: systemctl --user start minio.service" >&2
-            exit 1
-        fi
-    fi
-
-    # ── Read MinIO config ─────────────────────────────────────────────────────
+    # ── Read MinIO config first (needed for health check and endpoint) ─────────
     local host_port container_name
     host_port=$(jq -r '.services.minio.ports[0].host' "$CONFIG_FILE")
     container_name=$(jq -r '.services.minio.container_name // "minio"' "$CONFIG_FILE")
 
-    # Ensure MinIO is reachable
-    if ! curl -sf "http://127.0.0.1:${host_port}/minio/health/live" &>/dev/null; then
-        echo "ERROR: MinIO health check failed at http://127.0.0.1:${host_port}/minio/health/live" >&2
+    # ── Ensure MinIO is running before doing anything else ────────────────────
+    local _health_url="http://127.0.0.1:${host_port}/minio/health/live"
+    local _health_http
+    _health_http=$(curl -so /dev/null -w "%{http_code}" --max-time 5 "$_health_url" 2>/dev/null || echo "000")
+    if [[ "$_health_http" != "200" ]]; then
+        echo "ERROR: MinIO is not reachable (health check at ${_health_url} returned '${_health_http}')." >&2
         echo "  Start MinIO first: systemctl --user start ${container_name}.service" >&2
         exit 1
+    fi
+
+    # ── Locate mc ────────────────────────────────────────────────────────────
+    # Prefer host mc/mcli but verify it is MinIO Client, not Midnight Commander.
+    # Fall back to running mc inside the minio container (it ships with the image).
+    local mc_cmd="" mc_endpoint
+    mc_endpoint="http://127.0.0.1:${host_port}"   # host-facing endpoint (default)
+
+    if command -v mc &>/dev/null && mc --version 2>&1 | grep -qi "minio"; then
+        mc_cmd="mc"
+    elif command -v mcli &>/dev/null; then
+        mc_cmd="mcli"
+    else
+        if podman inspect "$container_name" &>/dev/null 2>&1; then
+            mc_cmd="podman exec ${container_name} mc"
+            # Running inside the container: use the internal port (9000), not the host-mapped port
+            local container_port
+            container_port=$(jq -r '.services.minio.ports[0].container' "$CONFIG_FILE")
+            mc_endpoint="http://localhost:${container_port}"
+        else
+            echo "ERROR: MinIO Client (mc/mcli) not found on PATH and minio container is not running." >&2
+            echo "  Install mc: https://min.io/docs/minio/linux/reference/minio-mc.html" >&2
+            exit 1
+        fi
     fi
 
     # ── Read root credentials from Podman secrets ─────────────────────────────
@@ -1710,11 +1719,11 @@ cmd_provision_minio() {
         exit 1
     fi
 
-    local endpoint="http://127.0.0.1:${host_port}"
     local alias="ai-stack-minio"
 
-    echo "Provisioning MinIO at ${endpoint} ..."
-    $mc_cmd alias set "$alias" "$endpoint" "$root_user" "$root_password" --quiet
+    echo "Provisioning MinIO at ${mc_endpoint} (via: ${mc_cmd}) ..."
+    $mc_cmd alias set "$alias" "$mc_endpoint" "$root_user" "$root_password" --quiet \
+        || { echo "ERROR: mc failed to set alias — is MinIO fully started? (port ${host_port})" >&2; exit 1; }
 
     # ── Create buckets ────────────────────────────────────────────────────────
     local buckets
