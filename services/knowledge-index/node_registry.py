@@ -496,6 +496,11 @@ def node_heartbeat(node_id: str, req: HeartbeatRequest, request: Request) -> dic
             text("UPDATE nodes SET last_seen = CURRENT_TIMESTAMP WHERE node_id = :id"),
             {"id": node_id},
         )
+        # TODO: refresh capabilities.models_loaded from heartbeat metrics
+        # When req.messages carries a "models_loaded" list, extract it here and
+        # UPDATE nodes SET capabilities = json_patch(capabilities, '{"models_loaded": [...]}')
+        # then re-run _litellm_add_node so LiteLLM routing stays current.
+        # Tracked as known debt after Phase 22.
         conn.commit()
 
         transitioned = _transition_up(node_id, conn)
