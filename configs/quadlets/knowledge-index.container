@@ -17,6 +17,8 @@ Label=ai-stack.service=knowledge-index
 Network=ai-stack-net:alias=knowledge-index.ai-stack
 PublishPort=127.0.0.1:8100:8100
 Secret=qdrant_api_key,type=env,target=QDRANT_API_KEY
+Secret=knowledge_index_api_key,type=env,target=API_KEY
+Environment=NODE_PROFILE=controller
 Environment=OLLAMA_URL=http://ollama.ai-stack:11434
 Environment=QDRANT_URL=http://qdrant.ai-stack:6333
 Environment=EMBED_MODEL=llama3.1:8b

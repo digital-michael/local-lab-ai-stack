@@ -222,7 +222,8 @@
         "QDRANT_HOST": "qdrant.ai-stack",
         "QDRANT_PORT": "6333",
         "ROUTE_CACHE_TTL": "60",
-        "LISTEN_PORT": "8100"
+        "LISTEN_PORT": "8100",
+        "NODE_PROFILE": "controller"
       },
       "secrets": [
         {
