@@ -1697,10 +1697,37 @@ cmd_generate_join_token() {
     [[ -z "$display_name" ]] && display_name="$node_id"
 
     if [[ -z "$ki_url" ]]; then
-        ki_url=$(jq -r '.services.knowledge_index.url // "http://localhost:8100"' "$CONFIG_FILE" 2>/dev/null \
-                 || echo "http://localhost:8100")
+        # config.json: services["knowledge-index"].ports[0].host (default 8100)
+        local ki_port
+        ki_port=$(python3 -c "
+import json, sys
+d = json.load(open('$CONFIG_FILE'))
+ports = d.get('services', {}).get('knowledge-index', {}).get('ports', [])
+print(ports[0]['host'] if ports else 8100)
+" 2>/dev/null || echo "8100")
+        ki_url="http://localhost:${ki_port}"
     fi
-    ki_admin_key=$(jq -r '.services.knowledge_index.admin_key // ""' "$CONFIG_FILE" 2>/dev/null || echo "")
+    # Try to resolve the admin key: prefer KI_ADMIN_KEY env var, then
+    # read it from the Podman secret if available, otherwise empty.
+    if [[ -z "${ki_admin_key:-}" ]]; then
+        ki_admin_key="${KI_ADMIN_KEY:-}"
+    fi
+    if [[ -z "${ki_admin_key:-}" ]]; then
+        local secret_name
+        secret_name=$(python3 -c "
+import json
+d = json.load(open('$CONFIG_FILE'))
+secs = d.get('services', {}).get('knowledge-index', {}).get('secrets', [])
+for s in secs:
+    if s.get('target') == 'KI_ADMIN_KEY':
+        print(s.get('name', ''))
+        break
+" 2>/dev/null || echo "")
+        if [[ -n "$secret_name" ]]; then
+            ki_admin_key=$(podman secret inspect "$secret_name" --format '{{.Spec.Name}}' 2>/dev/null \
+                           | xargs -I{} sh -c 'cat /run/secrets/{}' 2>/dev/null || echo "")
+        fi
+    fi
 
     local payload
     payload=$(jq -n \

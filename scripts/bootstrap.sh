@@ -23,11 +23,11 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Pipe-detection guard
 # ---------------------------------------------------------------------------
-# Warn (don't block) when running piped without sha256 verification, because
-# wget-piped execution cannot call shasum on $0.
+# Warn (don't block) when running piped without sha256 verification.
+# [ ! -t 0 ] is true when stdin is not a terminal (wget/curl pipe mode).
 
 _PIPE_MODE=false
-if [[ "${BASH_SOURCE[0]}" == "bash" || "${BASH_SOURCE[0]}" == "sh" || ! -f "${BASH_SOURCE[0]}" ]]; then
+if [ ! -t 0 ]; then
     _PIPE_MODE=true
 fi
 
@@ -196,9 +196,76 @@ printf '%s' "$NODE_ID"        > "$STATE_DIR/node_id"
 
 echo "State saved: $STATE_DIR"
 echo ""
+
+# ---------------------------------------------------------------------------
+# Install heartbeat systemd timer
+# ---------------------------------------------------------------------------
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "$HOME/ai-stack/scripts")"
+QUADLET_TMPL_DIR="$(cd "$SCRIPT_DIR/../configs/quadlets" 2>/dev/null && pwd || echo "")"
+
+SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+mkdir -p "$SYSTEMD_USER_DIR"
+
+_install_unit() {
+    local unit_name="$1"
+    local dest="$SYSTEMD_USER_DIR/$unit_name"
+    if [[ -n "$QUADLET_TMPL_DIR" && -f "$QUADLET_TMPL_DIR/$unit_name" ]]; then
+        cp "$QUADLET_TMPL_DIR/$unit_name" "$dest"
+    else
+        # Fallback: emit inline if template dir not available (wget pipe mode)
+        case "$unit_name" in
+            ai-stack-heartbeat.service)
+                cat > "$dest" <<EOF
+[Unit]
+Description=AI Stack worker node heartbeat
+After=network.target
+ConditionPathExists=%h/.config/ai-stack/controller_url
+[Service]
+Type=oneshot
+ExecStart=/bin/bash %h/ai-stack/scripts/heartbeat.sh
+StandardOutput=journal
+StandardError=journal
+[Install]
+WantedBy=default.target
+EOF
+                ;;
+            ai-stack-heartbeat.timer)
+                cat > "$dest" <<EOF
+[Unit]
+Description=AI Stack worker node heartbeat (every 30s)
+After=network.target
+[Timer]
+OnUnitActiveSec=30s
+RandomizedDelaySec=5s
+AccuracySec=1s
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+                ;;
+        esac
+    fi
+}
+
+_install_unit "ai-stack-heartbeat.service"
+_install_unit "ai-stack-heartbeat.timer"
+
+if command -v systemctl &>/dev/null; then
+    systemctl --user daemon-reload 2>/dev/null && \
+    systemctl --user enable --now ai-stack-heartbeat.timer 2>/dev/null && \
+    echo "Heartbeat timer installed and started (every 30s)." || \
+    echo "WARNING: Could not enable heartbeat timer — start manually:" && \
+    echo "  systemctl --user enable --now ai-stack-heartbeat.timer"
+else
+    echo "WARNING: systemctl not found — start heartbeats manually:"
+    echo "  bash scripts/heartbeat.sh"
+fi
+
+echo ""
 echo "Next steps:"
-echo "  • Install/start the heartbeat systemd timer (heartbeat every 30s)"
 echo "  • Check node status: bash scripts/node.sh status"
 echo "  • View suggestions:  bash scripts/node.sh suggestions list"
+echo "  • Timer status:      systemctl --user status ai-stack-heartbeat.timer"
 echo ""
 echo "Bootstrap complete."

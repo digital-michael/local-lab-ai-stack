@@ -493,3 +493,184 @@ class TestContainerUserSecurity:
             + "\n".join(root_containers)
             + "\nAdd to KNOWN_ROOT_CONTAINERS with a note, or fix with User= in the quadlet."
         )
+
+
+# ---------------------------------------------------------------------------
+# T-093: /admin/v1/nodes auth enforcement (Phase 22 — D-027)
+# ---------------------------------------------------------------------------
+#
+# In-process tests — do NOT require a live KI service.
+# Verifies that:
+#   - POST /admin/v1/nodes returns 401 when KI_ADMIN_KEY is set and no token supplied
+#   - GET  /admin/v1/nodes returns 401 under the same condition
+#   - POST /admin/v1/nodes/{id}/join is EXEMPT (token-gated, no Authorization required)
+#   - Valid KI_ADMIN_KEY bearer token is accepted
+#
+# T-094: Live-service auth smoke test (skipped when KI not running)
+
+import sys as _sys
+from pathlib import Path as _Path
+
+_KI_SRC = _Path(__file__).parent.parent.parent / "services" / "knowledge-index"
+if str(_KI_SRC) not in _sys.path:
+    _sys.path.insert(0, str(_KI_SRC))
+
+
+class TestT093NodeAdminAuthInProcess:
+    """T-093: /admin/v1/nodes endpoints enforce auth when KI_ADMIN_KEY is configured."""
+
+    @pytest.fixture(scope="class")
+    def authed_client(self):
+        """TestClient with KI_ADMIN_KEY set and a fresh in-memory DB."""
+        import os as _os
+        import sys as _sys
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.pool import StaticPool
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS nodes (
+                    node_id           TEXT PRIMARY KEY,
+                    display_name      TEXT NOT NULL DEFAULT '',
+                    profile           TEXT NOT NULL DEFAULT 'knowledge-worker',
+                    address           TEXT NOT NULL DEFAULT '',
+                    capabilities      TEXT NOT NULL DEFAULT '{}',
+                    status            TEXT NOT NULL DEFAULT 'unregistered',
+                    token_hash        TEXT,
+                    litellm_model_ids TEXT NOT NULL DEFAULT '[]',
+                    registered_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    last_seen         TIMESTAMP
+                )
+            """))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS node_heartbeats (
+                    id TEXT PRIMARY KEY, node_id TEXT NOT NULL,
+                    recorded_at TIMESTAMP, cpu_percent REAL, mem_used_gb REAL,
+                    mem_total_gb REAL, gpu_vram_used_mb INTEGER,
+                    requests_last_60s INTEGER, messages TEXT NOT NULL DEFAULT '[]'
+                )
+            """))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS node_suggestions (
+                    id TEXT PRIMARY KEY, node_id TEXT NOT NULL,
+                    created_at TIMESTAMP, consumed_at TIMESTAMP,
+                    suggestion TEXT NOT NULL DEFAULT '{}'
+                )
+            """))
+            conn.commit()
+
+        env_patch = {
+            "NODE_PROFILE":       "controller",
+            "API_KEY":            "",
+            "KI_ADMIN_KEY":       "test-admin-key-093",
+            "LITELLM_MASTER_KEY": "",
+        }
+        with pytest.MonkeyPatch().context() as mp:
+            for k, v in env_patch.items():
+                mp.setenv(k, v)
+            # Force fresh import with patched env
+            for mod in list(_sys.modules.keys()):
+                if mod == "node_registry":
+                    del _sys.modules[mod]
+            import node_registry as nr
+            nr.init_router(engine)
+            mini = FastAPI()
+            mini.include_router(nr.router, prefix="/admin/v1/nodes")
+            yield TestClient(mini, raise_server_exceptions=True), nr
+
+    def test_list_nodes_no_auth_returns_401(self, authed_client):
+        client, _ = authed_client
+        resp = client.get("/admin/v1/nodes")
+        assert resp.status_code == 401, f"Expected 401, got {resp.status_code}"
+
+    def test_register_no_auth_returns_401(self, authed_client):
+        client, _ = authed_client
+        resp = client.post("/admin/v1/nodes", json={"node_id": "unauthed-node"})
+        assert resp.status_code == 401, f"Expected 401, got {resp.status_code}"
+
+    def test_join_exempt_from_auth(self, authed_client):
+        """POST /{id}/join uses token-gating — no Authorization header needed."""
+        client, _ = authed_client
+        # Register first (with auth)
+        reg = client.post(
+            "/admin/v1/nodes",
+            json={"node_id": "t093-join-test"},
+            headers={"Authorization": "Bearer test-admin-key-093"},
+        )
+        assert reg.status_code == 201
+        token = reg.json()["token"]
+
+        # Join without Authorization header — should succeed (token is the auth)
+        resp = client.post(
+            "/admin/v1/nodes/t093-join-test/join",
+            json={"token": token},
+        )
+        assert resp.status_code == 200, \
+            f"join should not require Authorization header, got {resp.status_code}: {resp.text}"
+
+    def test_valid_admin_key_accepted(self, authed_client):
+        client, _ = authed_client
+        resp = client.get(
+            "/admin/v1/nodes",
+            headers={"Authorization": "Bearer test-admin-key-093"},
+        )
+        assert resp.status_code == 200
+
+    def test_wrong_token_returns_401(self, authed_client):
+        client, _ = authed_client
+        resp = client.get(
+            "/admin/v1/nodes",
+            headers={"Authorization": "Bearer wrong-key"},
+        )
+        assert resp.status_code == 401
+
+
+# T-094: Live-service auth smoke — skipped automatically when KI not running
+KNOWLEDGE_INDEX_URL = os.environ.get("KNOWLEDGE_INDEX_URL", "http://localhost:8100")
+
+
+@pytest.fixture(scope="module")
+def ki_available() -> bool:
+    """True if the knowledge-index service is reachable."""
+    try:
+        r = httpx.get(f"{KNOWLEDGE_INDEX_URL}/health", timeout=3.0)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+class TestT094NodeAdminAuthLive:
+    """T-094: Live knowledge-index /admin/v1/nodes returns 401 without auth.
+    Skipped when knowledge-index is not reachable."""
+
+    def test_list_nodes_returns_401_live(self, ki_available):
+        if not ki_available:
+            pytest.skip(f"knowledge-index not reachable at {KNOWLEDGE_INDEX_URL}")
+
+        resp = httpx.get(f"{KNOWLEDGE_INDEX_URL}/admin/v1/nodes", timeout=5.0)
+        # 401 when KI_ADMIN_KEY is configured; 200 in dev mode (no key set)
+        assert resp.status_code in (200, 401), \
+            f"Unexpected status {resp.status_code} — expected 200 (dev) or 401 (keyed)"
+        if resp.status_code == 200:
+            pytest.skip("KI_ADMIN_KEY not configured — auth enforcement test not applicable in dev mode")
+
+    def test_register_returns_401_live(self, ki_available):
+        if not ki_available:
+            pytest.skip(f"knowledge-index not reachable at {KNOWLEDGE_INDEX_URL}")
+
+        resp = httpx.post(
+            f"{KNOWLEDGE_INDEX_URL}/admin/v1/nodes",
+            json={"node_id": "probe-node"},
+            timeout=5.0,
+        )
+        assert resp.status_code in (201, 401, 409), \
+            f"Unexpected status {resp.status_code}"
+        if resp.status_code == 201:
+            pytest.skip("KI_ADMIN_KEY not configured — auth enforcement test not applicable in dev mode")
