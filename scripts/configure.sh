@@ -1771,7 +1771,7 @@ for s in secs:
     }
 
     http_code=$(echo "$response" | tail -1)
-    body=$(echo "$response" | head -n -1)
+    body=$(echo "$response" | sed '$d')
 
     if [[ "$http_code" != "201" ]]; then
         echo "ERROR: Registration failed (HTTP $http_code):" >&2

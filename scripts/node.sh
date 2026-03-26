@@ -171,7 +171,7 @@ cmd_join() {
         echo "ERROR: Failed to reach controller at ${CONTROLLER_URL}" >&2; exit 1
     }
     http_code=$(echo "$response" | tail -1)
-    body_part=$(echo "$response" | head -n -1)
+    body_part=$(echo "$response" | sed '$d')
 
     if [[ "$http_code" != "200" ]]; then
         echo "ERROR: Join failed (HTTP $http_code):" >&2
@@ -205,7 +205,7 @@ cmd_unjoin() {
         echo "ERROR: Failed to reach controller at ${CONTROLLER_URL}" >&2; exit 1
     }
     http_code=$(echo "$response" | tail -1)
-    body_part=$(echo "$response" | head -n -1)
+    body_part=$(echo "$response" | sed '$d')
 
     if [[ "$http_code" != "200" ]]; then
         echo "ERROR: Unjoin failed (HTTP $http_code):" >&2
@@ -239,7 +239,7 @@ cmd_list() {
         echo "ERROR: Failed to reach controller at ${CONTROLLER_URL}" >&2; exit 1
     }
     http_code=$(echo "$response" | tail -1)
-    body_part=$(echo "$response" | head -n -1)
+    body_part=$(echo "$response" | sed '$d')
 
     if [[ "$http_code" != "200" ]]; then
         echo "ERROR: List failed (HTTP $http_code):" >&2
@@ -267,7 +267,7 @@ cmd_status() {
         echo "ERROR: Failed to reach controller at ${CONTROLLER_URL}" >&2; exit 1
     }
     http_code=$(echo "$response" | tail -1)
-    body_part=$(echo "$response" | head -n -1)
+    body_part=$(echo "$response" | sed '$d')
 
     if [[ "$http_code" != "200" ]]; then
         echo "ERROR: Status check failed (HTTP $http_code):" >&2
@@ -301,7 +301,7 @@ cmd_suggestions() {
                 echo "ERROR: Cannot reach $CONTROLLER_URL" >&2; exit 1
             }
             http_code=$(echo "$response" | tail -1)
-            body_part=$(echo "$response" | head -n -1)
+            body_part=$(echo "$response" | sed '$d')
             [[ "$http_code" != "200" ]] && { echo "ERROR HTTP $http_code: $body_part" >&2; exit 1; }
             echo "$body_part" | python3 -m json.tool 2>/dev/null || echo "$body_part"
             ;;
@@ -312,7 +312,7 @@ cmd_suggestions() {
                 echo "ERROR: Cannot reach $CONTROLLER_URL" >&2; exit 1
             }
             http_code=$(echo "$response" | tail -1)
-            body_part=$(echo "$response" | head -n -1)
+            body_part=$(echo "$response" | sed '$d')
             [[ "$http_code" != "200" ]] && { echo "ERROR HTTP $http_code: $body_part" >&2; exit 1; }
             echo "$body_part" | python3 -c "
 import json, sys
@@ -333,7 +333,7 @@ sys.exit(1)
                 echo "ERROR: Cannot reach $CONTROLLER_URL" >&2; exit 1
             }
             http_code=$(echo "$response" | tail -1)
-            body_part=$(echo "$response" | head -n -1)
+            body_part=$(echo "$response" | sed '$d')
             [[ "$http_code" != "200" ]] && { echo "ERROR HTTP $http_code: $body_part" >&2; exit 1; }
             echo "Applied:"
             echo "$body_part" | python3 -m json.tool 2>/dev/null || echo "$body_part"
