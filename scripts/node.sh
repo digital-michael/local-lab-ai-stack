@@ -12,6 +12,7 @@ set -euo pipefail
 #   unjoin  [--controller <url>] [--node-id <id>]
 #                                 Remove this worker from the controller
 #   pause                         (stub) Pause heartbeats without unjoining
+#   list    [--controller <url>]  List all registered nodes and their status
 #   status  [--node-id <id>]      Show this node's status from the controller
 #   suggestions list   [--node-id <id>]
 #   suggestions show   <suggestion-id> [--node-id <id>]
@@ -40,6 +41,7 @@ Commands:
   unjoin  [--controller <url>]   Remove this node from controller routing
           [--node-id <id>]
   pause                          Stub: pause heartbeats temporarily
+  list    [--controller <url>]   List all registered nodes and their status
   status  [--node-id <id>]       Show node status from controller
   suggestions list               List pending suggestions
   suggestions show <id>          Show suggestion detail
@@ -219,6 +221,33 @@ cmd_pause() {
     echo "To stop this node from routing: node.sh unjoin"
 }
 
+cmd_list() {
+    _load_state
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --controller) CONTROLLER_URL="$2"; shift 2 ;;
+            *)            echo "Unknown option: $1" >&2; exit 1 ;;
+        esac
+    done
+
+    _require_controller
+
+    local response http_code body_part
+    response=$(_curl_admin GET "/admin/v1/nodes") || {
+        echo "ERROR: Failed to reach controller at ${CONTROLLER_URL}" >&2; exit 1
+    }
+    http_code=$(echo "$response" | tail -1)
+    body_part=$(echo "$response" | head -n -1)
+
+    if [[ "$http_code" != "200" ]]; then
+        echo "ERROR: List failed (HTTP $http_code):" >&2
+        echo "$body_part" >&2
+        exit 1
+    fi
+
+    echo "$body_part" | python3 -m json.tool 2>/dev/null || echo "$body_part"
+}
+
 cmd_status() {
     _load_state
     while [[ $# -gt 0 ]]; do
@@ -333,6 +362,7 @@ case "${1:-help}" in
     join)        shift; cmd_join "$@" ;;
     unjoin)      shift; cmd_unjoin "$@" ;;
     pause)       cmd_pause ;;
+    list)        shift; cmd_list "$@" ;;
     status)      shift; cmd_status "$@" ;;
     suggestions) shift; cmd_suggestions "$@" ;;
     undeploy)    cmd_undeploy ;;
