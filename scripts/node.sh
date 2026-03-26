@@ -159,7 +159,15 @@ cmd_join() {
     # Auto-detect address if not provided
     if [[ -z "${address:-}" ]]; then
         local ip
-        ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            # macOS: hostname -I not available; use ipconfig getifaddr or route
+            ip=$(ipconfig getifaddr en0 2>/dev/null \
+                 || ipconfig getifaddr en1 2>/dev/null \
+                 || route -n get default 2>/dev/null | awk '/interface:/{print $2}' \
+                 || echo "127.0.0.1")
+        else
+            ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
+        fi
         address="http://${ip}:8100"
     fi
 

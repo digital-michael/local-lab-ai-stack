@@ -1792,7 +1792,9 @@ for s in secs:
     echo "  $token"
     echo ""
     echo "Run on the worker node:"
-    echo "  bash scripts/node.sh join --controller '$controller_url' --token '$token' --node-id '$node_id'"
+    local addr_flag=""
+    [[ -n "$address" ]] && addr_flag=" --address '$address'"
+    echo "  bash scripts/node.sh join --controller '$controller_url' --token '$token' --node-id '$node_id'${addr_flag}"
 }
 
 cmd_provision_minio() {
