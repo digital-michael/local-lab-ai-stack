@@ -1189,6 +1189,72 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
+## Phase 22 — Dynamic Node Registration
+
+**Goal:** Implement full lifecycle management for inference worker nodes — bootstrap, registration, heartbeat, status tracking, and deregistration. Workers self-register with the controller and maintain a live presence via periodic heartbeat. The controller tracks node health, routes LiteLLM traffic based on node status, and surfaces resource suggestions to node operators.
+
+**Inputs:** PostgreSQL running (Phase 6). LiteLLM `model_list` routing pattern established (Phase 9). KI service FastAPI structure (Phase 7). `configure.sh` subcommand pattern (Phase 3+).
+
+### Outputs
+- `services/node-registry/` — isolated FastAPI router (`/admin/v1/nodes`) running in KI service process; separate module with no coupling to KI logic
+- PostgreSQL migration: `nodes` (authoritative registry) + `node_heartbeats` (time-series metrics) + `node_suggestions` (pending recommendations) tables
+- `configure.sh generate-join-token` — pre-generates a one-time join token; controller stores credential; node presents token once during registration (Phase A); provisional/approval-queue join tokens deferred to Operator Dashboard phase
+- `scripts/node.sh` — single situationally-aware lifecycle entrypoint: `deploy`, `join`, `unjoin`, `pause` (stub), `status`, `suggestions list/show/apply`, `undeploy`
+- `scripts/bootstrap.sh` — wget-safe bootstrap script; pipe detection exit (`[ ! -t 0 ]`); sha256 enforced; `--controller <url>` required; `--services <url>` stub (reserved); `--dry-run`; sudo scope minimized
+- Node status daemon — systemd timer on worker; `POST /admin/v1/nodes/{id}/heartbeat` every 30s (configurable); response body carries `pending_suggestions` count
+- LiteLLM routing automation — node status changes trigger model add/remove in LiteLLM `model_list`
+
+### Node Status Taxonomy
+
+| Status | Indicator | LiteLLM routing | Entry trigger |
+|---|---|---|---|
+| `online` | Green | ✅ In rotation | 2 consecutive healthy heartbeats |
+| `caution` | Yellow | ✅ Still routes | 1+ missed heartbeat in rolling 3-min window |
+| `failed` | Red | ❌ Removed | 3 consecutive missed heartbeats (~90s) |
+| `offline` | Gray | ❌ Removed | `failed` status held ≥ 24h (configurable) |
+| `unregistered` | Distinct/hollow | ❌ Removed | Explicit `node.sh unjoin` |
+
+Recovery: `caution`/`failed` → `online` automatically on 2 consecutive healthy heartbeats. `offline` → `online` requires explicit `node.sh join`. `offline` is always a status value, never a hard DELETE (audit trail preserved; `node.sh purge <id>` for optional cleanup later).
+
+### Heartbeat Protocol
+- Worker pushes `POST /admin/v1/nodes/{id}/heartbeat` every 30s
+- Payload: `{node_id, status, timestamp, metrics: {cpu_percent, mem_used_gb, mem_total_gb, gpu_vram_used_mb, models_loaded[], requests_last_60s}, messages[]}`
+- Response: `200 OK` with `{ack: true, pending_suggestions: N, suggestion_ref: "sugg-..."}` — node checks `pending_suggestions > 0` to know to fetch
+- Suggestion fetch: `GET /admin/v1/nodes/{id}/suggestions` → `node.sh suggestions list/show/apply <id>` (per-item, no bulk apply)
+
+### PostgreSQL Schema
+```sql
+CREATE TABLE nodes (
+    node_id TEXT PRIMARY KEY, display_name TEXT, profile TEXT, address TEXT,
+    capabilities JSONB, status TEXT DEFAULT 'unregistered'
+        CHECK (status IN ('online','caution','failed','offline','unregistered')),
+    registered_at TIMESTAMP, last_seen TIMESTAMP
+);
+CREATE TABLE node_heartbeats (
+    id SERIAL PRIMARY KEY, node_id TEXT REFERENCES nodes(node_id),
+    recorded_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    cpu_percent FLOAT, mem_used_gb FLOAT, mem_total_gb FLOAT,
+    gpu_vram_used_mb INT, requests_last_60s INT, messages JSONB
+);
+CREATE TABLE node_suggestions (
+    id TEXT PRIMARY KEY, node_id TEXT REFERENCES nodes(node_id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    consumed_at TIMESTAMP, suggestion JSONB
+);
+```
+
+### Verification
+- [ ] T-120: `configure.sh generate-join-token` produces a token stored in PostgreSQL `nodes` table with status `unregistered`
+- [ ] T-121: `node.sh join` presents token, controller validates, node status transitions to `online`
+- [ ] T-122: Heartbeat endpoint accepts payload, updates `node_heartbeats` and `nodes.last_seen`, returns ack with `pending_suggestions`
+- [ ] T-123: Missed heartbeat transitions status `online` → `caution`; 3 consecutive → `failed`; model removed from LiteLLM
+- [ ] T-124: 2 consecutive healthy heartbeats from `caution`/`failed` restores status to `online`; model re-added to LiteLLM
+- [ ] T-125: `node.sh unjoin` sets status to `unregistered`; node absent from LiteLLM routing
+- [ ] T-126: `failed` status held ≥ threshold transitions to `offline`; explicit `node.sh join` restores to `online`
+- [ ] T-127: `GET /admin/v1/nodes/{id}/suggestions` returns pending suggestions; `node.sh suggestions apply <id>` marks `consumed_at`
+
+---
+
 ## Execution Notes
 
 - **Phases 1–3 are documentation and configuration.** They can be executed in a single session with no external dependencies.
@@ -1264,7 +1330,7 @@ These collapse into the configuration system above. Tracked individually for vis
 - [x] **Enable local GPU for vLLM** — CDI setup, pin Ollama to CPU, select quantized model for 8 GB VRAM, add `models[]` config section, auto-generate LiteLLM model_list (see Phase 8). Root blocker: Podman's CDI spec dirs were empty (`cdiSpecDirs: []`) despite `nvidia-ctk cdi list` showing `nvidia.com/gpu=all`. Fix: add `cdi_spec_dirs = ["/etc/cdi", "/run/cdi"]` under `[engine]` in `~/.config/containers/containers.conf`. vllm.service now starts cleanly; `qwen2.5-1.5b` served via GPU and confirmed reachable through LiteLLM (`Response: working`).
 - [x] **Add `configure.sh detect-hardware`** — `detect-hardware` and `recommend` subcommands implemented (Phase 8/9); detects GPU/VRAM/RAM, suggests node profile and model tier per D-021. Stale `[ ]` closed Phase 20a.
 - [x] **Add node profile support** — `controller`, `inference-worker`, `peer` profiles implemented; `configure.sh` generates profile-specific quadlets; `status.sh` reads `node_profile`; per-node files in `configs/nodes/` carry profile and capabilities (Phase 9/11). Stale `[ ]` closed Phase 20a.
-- [ ] **Implement dynamic node registration** — workers register with controller LiteLLM on startup; heartbeat; static fallback (see Phase 9, D-027 Phase B)
+- [ ] **Implement dynamic node registration** — see Phase 22 above; full lifecycle: bootstrap → join → heartbeat → caution/failed/offline status machine → unjoin; `node.sh` single entrypoint; `bootstrap.sh` wget-safe; PostgreSQL `nodes`/`node_heartbeats`/`node_suggestions`; T-120–T-127
 - [x] **Set up macOS M1 inference worker** — TC25 (macbook-m1) running Ollama natively, registered in `configs/nodes/inference-worker-1.json`, reachable from controller, LiteLLM alias configured (Phase 9b). Stale `[ ]` closed Phase 20a.
 - [x] **Implement library custody sync** — `POST /v1/libraries` fully implemented in `app.py` (custody ingest with checksum verification, Qdrant ingestion, PostgreSQL provenance); `configure.sh sync-libraries` subcommand fully implemented (reads `libraries/`, POSTs to controller `/v1/libraries` with auth, reports per-library status). Both were built alongside Phase 12 infrastructure and pre-existed Phase 15. Stale `[ ]` entry.
 - [x] **Drive smoke tests from `config.json`** — `testing/helpers.bash` `_port_exports` block reads all host ports from `config.json` via Python at suite load time; exports 14 named variables; all `testing/*.bats` files reference `${VAR_NAME}` — zero hardcoded port literals remain. Closed Phase 14 (`77cb8f6`).
@@ -1302,15 +1368,18 @@ These collapse into the configuration system above. Tracked individually for vis
     - Special admin contexts (definition TBD)
     - Register / suspend / unregister inference nodes
     - Restart, stop, backup, diagnose, and status operations per node
+    - **Provisional join token approval queue** (Phase 22 Phase B): when a new node presents a time-limited provisional token, it enters a pending state visible here; admin approves or rejects before credential is issued; wire format identical to Phase A pre-generated tokens
     - Full library entries (private, sensitive — admin-only view)
     - Podman secrets inventory — list secret names, types, and creation/update timestamps (no values exposed); indicate which config-defined secrets are missing from the store
   - **Nodes tab**
-    - Node list: node ID, display name, profile (`inference-worker` / `knowledge-worker` / `peer`), online/offline health indicator, last-seen timestamp
+    - Node list: node ID, display name, profile (`inference-worker` / `knowledge-worker` / `peer`), 5-state health indicator (green=online, yellow=caution, red=failed, gray=offline, hollow=unregistered), last-seen timestamp
+    - Status semantics: `online` routes; `caution` routes (sporadic misses); `failed` removed (3 consecutive misses); `offline` removed (failed ≥ 24h); `unregistered` removed (voluntary unjoin). `caution`/`failed` self-heal on 2 consecutive healthy heartbeats. `offline` requires explicit `node.sh join`. Rows never deleted — `offline` is a status value (see Phase 22).
     - Per-node detail view:
-      - Health: CPU / RAM / VRAM utilization, disk free, uptime
-      - Solution activity: recent LLM calls (model, prompt tokens, latency), active inference requests, error rate
+      - Health: CPU / RAM / VRAM utilization (from heartbeat `metrics` payload), uptime
+      - Inference activity: recent LLM calls (model, prompt tokens, latency), active inference requests, error rate; sparkline from `node_heartbeats` time-series
       - Loaded models: all models present in Ollama model store on that node
       - Active models: models currently loaded into VRAM / serving requests
+      - Pending suggestions: count from `node_suggestions` table; operator applies via `node.sh suggestions apply <id>`
       - Local libraries: `.ai-library` packages indexed by the node (name, version, author, visibility, sync status with controller)
   - **System tab**
     - Per-component health panel with links to: direct web interface, log stream, configuration, and metrics (performance, memory, API call counts)
