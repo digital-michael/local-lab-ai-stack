@@ -1668,23 +1668,25 @@ cmd_security_audit() {
 
 cmd_generate_join_token() {
     # Usage: configure.sh generate-join-token [options]
-    #   --node-id     <id>           Node identifier (default: uuid)
-    #   --display-name <name>        Human-readable name (default: node-id)
-    #   --profile     <profile>      Node profile (default: knowledge-worker)
-    #   --address     <url>          Worker KI address (e.g. http://192.168.1.50:8100)
-    #   --ki-url      <url>          Controller KI API base URL (default: from config.json)
+    #   --node-id        <id>      Node identifier (default: uuid)
+    #   --display-name   <name>    Human-readable name (default: node-id)
+    #   --profile        <profile> Node profile (default: knowledge-worker)
+    #   --address        <url>     Worker KI address (e.g. http://192.168.1.50:8100)
+    #   --ki-url         <url>     Controller KI API base URL for local call (default: localhost from config.json)
+    #   --controller-url <url>     Controller URL embedded in the emitted join command (default: from configs/nodes/)
     require_config
 
     local node_id="" display_name="" profile="knowledge-worker"
-    local address="" ki_url="" ki_admin_key=""
+    local address="" ki_url="" ki_admin_key="" controller_url=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --node-id)       node_id="$2";       shift 2 ;;
-            --display-name)  display_name="$2";  shift 2 ;;
-            --profile)       profile="$2";       shift 2 ;;
-            --address)       address="$2";       shift 2 ;;
-            --ki-url)        ki_url="$2";        shift 2 ;;
+            --node-id)        node_id="$2";        shift 2 ;;
+            --display-name)   display_name="$2";   shift 2 ;;
+            --profile)        profile="$2";        shift 2 ;;
+            --address)        address="$2";        shift 2 ;;
+            --ki-url)         ki_url="$2";         shift 2 ;;
+            --controller-url) controller_url="$2"; shift 2 ;;
             *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
         esac
     done
@@ -1707,6 +1709,27 @@ print(ports[0]['host'] if ports else 8100)
 " 2>/dev/null || echo "8100")
         ki_url="http://localhost:${ki_port}"
     fi
+
+    # Resolve the external controller URL for the emitted join command.
+    # workers connect from outside, so they need the real hostname/IP — not localhost.
+    if [[ -z "$controller_url" ]]; then
+        local _nodes_dir _ctrl_addr _ctrl_port
+        _nodes_dir="$(dirname "$CONFIG_FILE")/nodes"
+        _ctrl_addr=$(for _f in "$_nodes_dir"/*.json; do
+            [[ -f "$_f" ]] && jq -r 'select(.profile == "controller") | .address // empty' "$_f"
+        done 2>/dev/null | grep -v '^$' | head -1 || true)
+        _ctrl_port=$(for _f in "$_nodes_dir"/*.json; do
+            [[ -f "$_f" ]] && jq -r 'select(.profile == "controller") | (.ki_port // empty | tostring)' "$_f"
+        done 2>/dev/null | grep -v '^null$\|^$' | head -1 || true)
+        _ctrl_port="${_ctrl_port:-${ki_port:-8100}}"
+        if [[ -n "$_ctrl_addr" && "$_ctrl_addr" != "null" ]]; then
+            controller_url="http://${_ctrl_addr}:${_ctrl_port}"
+        else
+            controller_url="$ki_url"
+            echo "WARN: No controller address in configs/nodes/ — join command will use localhost; use --controller-url to override" >&2
+        fi
+    fi
+
     # Try to resolve the admin key: prefer KI_ADMIN_KEY env var, then
     # read it from the Podman secret if available, otherwise empty.
     if [[ -z "${ki_admin_key:-}" ]]; then
@@ -1769,7 +1792,7 @@ for s in secs:
     echo "  $token"
     echo ""
     echo "Run on the worker node:"
-    echo "  bash scripts/node.sh join --controller '$ki_url' --token '$token' --node-id '$node_id'"
+    echo "  bash scripts/node.sh join --controller '$controller_url' --token '$token' --node-id '$node_id'"
 }
 
 cmd_provision_minio() {
