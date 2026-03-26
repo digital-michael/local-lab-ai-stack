@@ -1719,13 +1719,13 @@ import json
 d = json.load(open('$CONFIG_FILE'))
 secs = d.get('services', {}).get('knowledge-index', {}).get('secrets', [])
 for s in secs:
-    if s.get('target') == 'KI_ADMIN_KEY':
+    if s.get('target') in ('KI_ADMIN_KEY', 'API_KEY'):
         print(s.get('name', ''))
         break
 " 2>/dev/null || echo "")
         if [[ -n "$secret_name" ]]; then
-            ki_admin_key=$(podman secret inspect "$secret_name" --format '{{.Spec.Name}}' 2>/dev/null \
-                           | xargs -I{} sh -c 'cat /run/secrets/{}' 2>/dev/null || echo "")
+            ki_admin_key=$(podman secret inspect "$secret_name" --showsecret \
+                           --format '{{.SecretData}}' 2>/dev/null || echo "")
         fi
     fi
 
