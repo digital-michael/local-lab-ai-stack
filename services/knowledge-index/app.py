@@ -125,13 +125,15 @@ def _init_db() -> None:
         """))
         # Migration: add status column to existing databases (new DBs already have it above)
         try:
+            conn.execute(text("SAVEPOINT pre_migration"))
             conn.execute(text(
                 "ALTER TABLE libraries ADD COLUMN"
                 " status TEXT NOT NULL DEFAULT 'unvetted'"
                 " CHECK (status IN ('active','unvetted','prohibited'))"
             ))
+            conn.execute(text("RELEASE SAVEPOINT pre_migration"))
         except Exception:
-            pass  # column already exists
+            conn.execute(text("ROLLBACK TO SAVEPOINT pre_migration"))
 
         # Phase 22 — Dynamic Node Registration (D-027)
         conn.execute(text("""
