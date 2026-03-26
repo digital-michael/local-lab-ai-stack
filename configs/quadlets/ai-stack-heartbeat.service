@@ -1,0 +1,20 @@
+# ai-stack-heartbeat.service — AI Stack worker heartbeat sender unit
+#
+# Template for worker nodes. Generated/installed by bootstrap.sh.
+# Location: ~/.config/systemd/user/ai-stack-heartbeat.service
+#
+# Do not edit by hand — managed by bootstrap.sh / node.sh
+
+[Unit]
+Description=AI Stack worker node heartbeat
+After=network.target
+ConditionPathExists=%h/.config/ai-stack/controller_url
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash %h/ai-stack/scripts/heartbeat.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

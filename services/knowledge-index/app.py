@@ -53,6 +53,7 @@ from mcp.types import TextContent, Tool
 from pydantic import BaseModel
 from starlette.requests import Request
 from starlette.responses import Response
+import node_registry as _nr
 
 # ---------------------------------------------------------------------------
 # Configuration (all overridable via environment variables)
@@ -313,7 +314,6 @@ def _proxy_query_to_origin(origin_url: str, req_collection: str, vec_query: str,
 app = FastAPI(title="Knowledge Index Service", version="0.1.0")
 
 # Phase 22 — mount node-registry router (controller-only; guards internally)
-import node_registry as _nr  # noqa: E402
 _nr.init_router(_db)
 app.include_router(_nr.router, prefix="/admin/v1/nodes")
 
