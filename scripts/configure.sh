@@ -42,6 +42,7 @@ Commands:
   recommend                 Interactive node profile recommender (writes to config.json)
   sync-libraries            Push local .ai-library packages to the controller KI service
   build-library             Package a directory of raw documents into a .ai-library bundle
+  generate-join-token       Register a worker node and emit its one-time join token
   provision-minio           Create MinIO buckets and service accounts (requires MinIO running)
   security-audit            Scan ports, API key enforcement, TLS, and secret hygiene
   help                      Show this message
@@ -1665,6 +1666,85 @@ cmd_security_audit() {
     return $exit_code
 }
 
+cmd_generate_join_token() {
+    # Usage: configure.sh generate-join-token [options]
+    #   --node-id     <id>           Node identifier (default: uuid)
+    #   --display-name <name>        Human-readable name (default: node-id)
+    #   --profile     <profile>      Node profile (default: knowledge-worker)
+    #   --address     <url>          Worker KI address (e.g. http://192.168.1.50:8100)
+    #   --ki-url      <url>          Controller KI API base URL (default: from config.json)
+    require_config
+
+    local node_id="" display_name="" profile="knowledge-worker"
+    local address="" ki_url="" ki_admin_key=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --node-id)       node_id="$2";       shift 2 ;;
+            --display-name)  display_name="$2";  shift 2 ;;
+            --profile)       profile="$2";       shift 2 ;;
+            --address)       address="$2";       shift 2 ;;
+            --ki-url)        ki_url="$2";        shift 2 ;;
+            *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
+        esac
+    done
+
+    if [[ -z "$node_id" ]]; then
+        node_id=$(python3 -c "import uuid; print(uuid.uuid4())" 2>/dev/null \
+                  || uuidgen 2>/dev/null \
+                  || { echo "ERROR: cannot generate uuid (need python3 or uuidgen)" >&2; exit 1; })
+    fi
+    [[ -z "$display_name" ]] && display_name="$node_id"
+
+    if [[ -z "$ki_url" ]]; then
+        ki_url=$(jq -r '.services.knowledge_index.url // "http://localhost:8100"' "$CONFIG_FILE" 2>/dev/null \
+                 || echo "http://localhost:8100")
+    fi
+    ki_admin_key=$(jq -r '.services.knowledge_index.admin_key // ""' "$CONFIG_FILE" 2>/dev/null || echo "")
+
+    local payload
+    payload=$(jq -n \
+        --arg nid   "$node_id" \
+        --arg dname "$display_name" \
+        --arg prof  "$profile" \
+        --arg addr  "$address" \
+        '{node_id: $nid, display_name: $dname, profile: $prof, address: $addr, capabilities: {}}')
+
+    local response http_code
+    response=$(curl -s -w "\n%{http_code}" \
+        -X POST "$ki_url/admin/v1/nodes" \
+        -H "Authorization: Bearer $ki_admin_key" \
+        -H "Content-Type: application/json" \
+        -d "$payload") || {
+        echo "ERROR: Failed to reach knowledge-index at $ki_url" >&2
+        exit 1
+    }
+
+    http_code=$(echo "$response" | tail -1)
+    body=$(echo "$response" | head -n -1)
+
+    if [[ "$http_code" != "201" ]]; then
+        echo "ERROR: Registration failed (HTTP $http_code):" >&2
+        echo "$body" >&2
+        exit 1
+    fi
+
+    local token
+    token=$(echo "$body" | jq -r '.token // empty' 2>/dev/null)
+    if [[ -z "$token" ]]; then
+        echo "ERROR: No token in response: $body" >&2
+        exit 1
+    fi
+
+    echo "Node registered: $node_id  (status: unregistered)"
+    echo ""
+    echo "Join token (save this — shown only once):"
+    echo "  $token"
+    echo ""
+    echo "Run on the worker node:"
+    echo "  bash scripts/node.sh join --controller '$ki_url' --token '$token' --node-id '$node_id'"
+}
+
 cmd_provision_minio() {
     require_config
 
@@ -1852,6 +1932,7 @@ case "${1:-help}" in
     recommend)               cmd_recommend ;;
     sync-libraries)          cmd_sync_libraries ;;
     build-library)           cmd_build_library "${@:2}" ;;
+    generate-join-token)     cmd_generate_join_token "${@:2}" ;;
     provision-minio)         cmd_provision_minio ;;
     security-audit)          cmd_security_audit "${@:2}" ;;
     help|--help|-h)          usage ;;

@@ -131,6 +131,45 @@ def _init_db() -> None:
             ))
         except Exception:
             pass  # column already exists
+
+        # Phase 22 — Dynamic Node Registration (D-027)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS nodes (
+                node_id           TEXT PRIMARY KEY,
+                display_name      TEXT NOT NULL DEFAULT '',
+                profile           TEXT NOT NULL DEFAULT 'knowledge-worker',
+                address           TEXT NOT NULL DEFAULT '',
+                capabilities      TEXT NOT NULL DEFAULT '{}',
+                status            TEXT NOT NULL DEFAULT 'unregistered'
+                                      CHECK (status IN ('online','caution','failed','offline','unregistered')),
+                token_hash        TEXT,
+                litellm_model_ids TEXT NOT NULL DEFAULT '[]',
+                registered_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_seen         TIMESTAMP
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS node_heartbeats (
+                id                TEXT PRIMARY KEY,
+                node_id           TEXT NOT NULL REFERENCES nodes(node_id),
+                recorded_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                cpu_percent       REAL,
+                mem_used_gb       REAL,
+                mem_total_gb      REAL,
+                gpu_vram_used_mb  INTEGER,
+                requests_last_60s INTEGER,
+                messages          TEXT NOT NULL DEFAULT '[]'
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS node_suggestions (
+                id          TEXT PRIMARY KEY,
+                node_id     TEXT NOT NULL REFERENCES nodes(node_id),
+                created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                consumed_at TIMESTAMP,
+                suggestion  TEXT NOT NULL DEFAULT '{}'
+            )
+        """))
         conn.commit()
 
 
@@ -272,6 +311,11 @@ def _proxy_query_to_origin(origin_url: str, req_collection: str, vec_query: str,
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="Knowledge Index Service", version="0.1.0")
+
+# Phase 22 — mount node-registry router (controller-only; guards internally)
+import node_registry as _nr  # noqa: E402
+_nr.init_router(_db)
+app.include_router(_nr.router, prefix="/admin/v1/nodes")
 
 # ---------------------------------------------------------------------------
 # Request / response models
