@@ -1244,14 +1244,14 @@ CREATE TABLE node_suggestions (
 ```
 
 ### Verification
-- [ ] T-120: `configure.sh generate-join-token` produces a token stored in PostgreSQL `nodes` table with status `unregistered`
-- [ ] T-121: `node.sh join` presents token, controller validates, node status transitions to `online`
-- [ ] T-122: Heartbeat endpoint accepts payload, updates `node_heartbeats` and `nodes.last_seen`, returns ack with `pending_suggestions`
-- [ ] T-123: Missed heartbeat transitions status `online` → `caution`; 3 consecutive → `failed`; model removed from LiteLLM
-- [ ] T-124: 2 consecutive healthy heartbeats from `caution`/`failed` restores status to `online`; model re-added to LiteLLM
-- [ ] T-125: `node.sh unjoin` sets status to `unregistered`; node absent from LiteLLM routing
-- [ ] T-126: `failed` status held ≥ threshold transitions to `offline`; explicit `node.sh join` restores to `online`
-- [ ] T-127: `GET /admin/v1/nodes/{id}/suggestions` returns pending suggestions; `node.sh suggestions apply <id>` marks `consumed_at`
+- [x] T-120: `configure.sh generate-join-token` produces a token stored in PostgreSQL `nodes` table with status `unregistered`
+- [x] T-121: `node.sh join` presents token, controller validates, node status transitions to `online`
+- [x] T-122: Heartbeat endpoint accepts payload, updates `node_heartbeats` and `nodes.last_seen`, returns ack with `pending_suggestions`
+- [x] T-123: Missed heartbeat transitions status `online` → `caution`; 3 consecutive → `failed`; model removed from LiteLLM
+- [x] T-124: 2 consecutive healthy heartbeats from `caution`/`failed` restores status to `online`; model re-added to LiteLLM
+- [x] T-125: `node.sh unjoin` sets status to `unregistered`; node absent from LiteLLM routing
+- [x] T-126: `failed` status held ≥ threshold transitions to `offline`; explicit `node.sh join` restores to `online`
+- [x] T-127: `GET /admin/v1/nodes/{id}/suggestions` returns pending suggestions; `node.sh suggestions apply <id>` marks `consumed_at`
 
 ---
 
