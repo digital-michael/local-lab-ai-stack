@@ -12,7 +12,7 @@ set -euo pipefail
 #   unjoin  [--controller <url>] [--node-id <id>]
 #                                 Remove this worker from the controller
 #   pause                         (stub) Pause heartbeats without unjoining
-#   list    [--controller <url>]  List all registered nodes and their status
+#   list    [--controller <url>] [--api-key <key>]  List all registered nodes and their status
 #   status  [--node-id <id>]      Show this node's status from the controller
 #   suggestions list   [--node-id <id>]
 #   suggestions show   <suggestion-id> [--node-id <id>]
@@ -41,7 +41,8 @@ Commands:
   unjoin  [--controller <url>]   Remove this node from controller routing
           [--node-id <id>]
   pause                          Stub: pause heartbeats temporarily
-  list    [--controller <url>]   List all registered nodes and their status
+  list    [--controller <url>] \
+          [--api-key <key>]       List all registered nodes and their status
   status  [--node-id <id>]       Show node status from controller
   suggestions list               List pending suggestions
   suggestions show <id>          Show suggestion detail
@@ -226,6 +227,7 @@ cmd_list() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --controller) CONTROLLER_URL="$2"; shift 2 ;;
+            --api-key)    API_KEY_STATE="$2";  shift 2 ;;
             *)            echo "Unknown option: $1" >&2; exit 1 ;;
         esac
     done
