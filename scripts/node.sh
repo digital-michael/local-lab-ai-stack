@@ -262,7 +262,44 @@ cmd_list() {
         exit 1
     fi
 
-    echo "$body_part" | python3 -m json.tool 2>/dev/null || echo "$body_part"
+    echo "$body_part" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+nodes = data.get('nodes', [])
+if not nodes:
+    print('No nodes registered.')
+    sys.exit(0)
+COLS = [
+    ('NODE ID',      'node_id',      22),
+    ('DISPLAY NAME', 'display_name', 18),
+    ('PROFILE',      'profile',      18),
+    ('STATUS',       'status',        9),
+    ('LAST SEEN',    'last_seen',    19),
+    ('CAPABILITIES', None,           28),
+]
+fmt = '  '.join(f'{h:<{w}}' for h, _, w in COLS)
+sep = '  '.join('-' * w for _, _, w in COLS)
+print(fmt)
+print(sep)
+for n in nodes:
+    caps = n.get('capabilities', [])
+    if isinstance(caps, list):
+        caps_str = ','.join(caps) if caps else '-'
+    elif isinstance(caps, dict):
+        caps_str = ','.join(caps.keys()) if caps else '-'
+    else:
+        caps_str = str(caps)
+    row = [
+        n.get('node_id', ''),
+        n.get('display_name', ''),
+        n.get('profile', ''),
+        n.get('status', ''),
+        (n.get('last_seen') or '')[:19],
+        caps_str,
+    ]
+    print('  '.join(f'{str(v)[:w]:<{w}}' for (_, _, w), v in zip(COLS, row)))
+print(f'\nTotal: {len(nodes)} node(s)')
+" 2>/dev/null || echo "$body_part"
 }
 
 cmd_status() {

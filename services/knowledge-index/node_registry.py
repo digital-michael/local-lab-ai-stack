@@ -118,7 +118,7 @@ class NodeRegisterRequest(BaseModel):
     display_name: str             = ""
     profile:      str             = "knowledge-worker"
     address:      str             = ""
-    capabilities: dict[str, Any]  = {}
+    capabilities: list[str]       = []
 
 
 class JoinRequest(BaseModel):
@@ -569,7 +569,7 @@ def list_nodes(request: Request) -> dict:
             "display_name":  r[1],
             "profile":       r[2],
             "address":       r[3],
-            "capabilities":  json.loads(r[4] or "{}"),
+            "capabilities":  json.loads(r[4] or "[]"),
             "status":        r[5],
             "registered_at": str(r[6]) if r[6] else None,
             "last_seen":     str(r[7]) if r[7] else None,
@@ -606,7 +606,7 @@ def get_node(node_id: str, request: Request) -> dict:
         "display_name":  row[1],
         "profile":       row[2],
         "address":       row[3],
-        "capabilities":  json.loads(row[4] or "{}"),
+        "capabilities":  json.loads(row[4] or "[]"),
         "status":        row[5],
         "registered_at": str(row[6]) if row[6] else None,
         "last_seen":     str(row[7]) if row[7] else None,

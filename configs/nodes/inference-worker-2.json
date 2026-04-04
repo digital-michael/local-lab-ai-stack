@@ -1,6 +1,7 @@
 {
   "schema_version": "1.1",
   "alias": "inference-worker-2",
+  "node_id": "sol",
   "name": "alienware",
   "address": "SOL.mynetworksettings.com",
   "address_fallback": "10.19.208.113",

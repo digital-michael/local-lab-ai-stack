@@ -1752,13 +1752,34 @@ for s in secs:
         fi
     fi
 
+    # Look up capabilities from configs/nodes/ by node_id field; default to []
+    local _nf_dir caps_json
+    _nf_dir="$(dirname "$CONFIG_FILE")/nodes"
+    caps_json=$(python3 - "$_nf_dir" "$node_id" <<'PYEOF' 2>/dev/null
+import glob, json, sys
+nodes_dir, nid = sys.argv[1], sys.argv[2]
+for path in sorted(glob.glob(nodes_dir + "/*.json")):
+    try:
+        n = json.load(open(path))
+        if n.get("node_id") == nid:
+            caps = n.get("capabilities", [])
+            print(json.dumps(caps if isinstance(caps, list) else list(caps.keys())))
+            sys.exit(0)
+    except Exception:
+        pass
+print("[]")
+PYEOF
+    )
+    caps_json="${caps_json:-[]}"
+
     local payload
     payload=$(jq -n \
         --arg nid   "$node_id" \
         --arg dname "$display_name" \
         --arg prof  "$profile" \
         --arg addr  "$address" \
-        '{node_id: $nid, display_name: $dname, profile: $prof, address: $addr, capabilities: {}}')
+        --argjson caps "$caps_json" \
+        '{node_id: $nid, display_name: $dname, profile: $prof, address: $addr, capabilities: $caps}')
 
     local response http_code
     response=$(curl -s -w "\n%{http_code}" \
