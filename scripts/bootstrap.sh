@@ -318,8 +318,7 @@ EOF
 Description=AI Stack worker node heartbeat (every 30s)
 After=network.target
 [Timer]
-OnUnitActiveSec=30s
-RandomizedDelaySec=5s
+OnCalendar=*:*:0/30
 AccuracySec=1s
 Persistent=true
 [Install]
