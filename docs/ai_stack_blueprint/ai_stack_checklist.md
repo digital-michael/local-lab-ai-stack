@@ -1189,7 +1189,7 @@ This section defines the reproducible, sequenced implementation plan across all 
 
 ---
 
-## Phase 22 — Dynamic Node Registration
+## Phase 22 — Dynamic Node Registration ✅ COMPLETE (commits `51ec556`–`baf4eb0`)
 
 **Goal:** Implement full lifecycle management for inference worker nodes — bootstrap, registration, heartbeat, status tracking, and deregistration. Workers self-register with the controller and maintain a live presence via periodic heartbeat. The controller tracks node health, routes LiteLLM traffic based on node status, and surfaces resource suggestions to node operators.
 
@@ -1252,6 +1252,50 @@ CREATE TABLE node_suggestions (
 - [x] T-125: `node.sh unjoin` sets status to `unregistered`; node absent from LiteLLM routing
 - [x] T-126: `failed` status held ≥ threshold transitions to `offline`; explicit `node.sh join` restores to `online`
 - [x] T-127: `GET /admin/v1/nodes/{id}/suggestions` returns pending suggestions; `node.sh suggestions apply <id>` marks `consumed_at`
+
+---
+
+## Phase 23 — Heartbeat Reliability + Sleep Inhibitor ✅ COMPLETE (commits `2df0172`–`061f806`)
+
+**Goal:** Harden the worker node heartbeat timer across both platforms and add an opt-in sleep inhibitor to prevent idle suspend on worker nodes while the AI stack is running.
+
+**Inputs:** Phase 22 complete. TC25 (macOS) and SOL (Linux) both registered but heartbeat timers unreliable in practice.
+
+### Issues Found and Fixed
+
+**bootstrap.sh — Linux systemd timer**
+- `OnUnitActiveSec=30s` alone does not re-arm after the first fire (`Trigger: n/a`). Fixed: `OnCalendar=*:*:0/30` fires unconditionally at :00 and :30 of every minute.
+- `_install_unit()` was copying `configs/quadlets/ai-stack-heartbeat.service` verbatim — the template contains `%h/ai-stack/scripts/heartbeat.sh` (hardcoded). Fixed: bypass template, always generate `.service` from inline heredoc with `$HEARTBEAT_SCRIPT` substituted.
+- Added `[[ ! -f "$HEARTBEAT_SCRIPT" ]]` guard: fail fast with clear error if script not found (prevents empty `ExecStart`).
+
+**bootstrap.sh — macOS launchd**
+- `launchctl load/unload` (deprecated) silently fails on Ventura+. Fixed: detect `gui/$UID` domain availability; use `launchctl bootstrap gui/$UID` when available, fall back to `launchctl load -w` for headless SSH.
+- Empty `ProgramArguments` in plist when `HEARTBEAT_SCRIPT` was empty. Resolved by the guard above.
+
+### Sleep Inhibitor (scripts/inhibit.sh)
+- [x] New `scripts/inhibit.sh` with `start` / `stop` / `status` subcommands
+- [x] macOS: `caffeinate -i -s &` (built-in, no sudo; `-i` idle, `-s` system sleep)
+- [x] Linux: `systemd-inhibit --what=idle --mode=block sleep infinity &` (no sudo; idle-block is unprivileged)
+- [x] Controller profile always skipped
+- [x] Opt-in: `"sleep_inhibit": false` key in `config.json` (default off); overridable with `SLEEP_INHIBIT=true` env var
+- [x] PID tracked at `~/.config/ai-stack/inhibit.pid`; stale cleanup on `start`; idempotent
+- [x] Wired into `scripts/start.sh` (acquire) and `scripts/stop.sh` (release) with `|| true`
+
+### Outputs
+- `scripts/bootstrap.sh`: guard + OnCalendar timer + heredoc `.service` unit + macOS launchd fixes
+- `configs/quadlets/ai-stack-heartbeat.timer`: `OnCalendar=*:*:0/30`
+- `scripts/inhibit.sh`: new script
+- `scripts/start.sh`, `scripts/stop.sh`: inhibit.sh calls added
+- `configs/config.json`: `"sleep_inhibit": false` key added
+- `docs/operator-faq.md`: node lifecycle FAQ entries; sleep inhibitor how-to
+
+### Verification
+- [x] TC25 (macOS): launchd timer loaded, heartbeating successfully, `online` state maintained
+- [x] SOL (Linux): systemd timer `Active: waiting` with next trigger, heartbeating successfully, `online` state maintained
+- [x] TC25: `inhibit.sh start` → PID active (caffeinate), `status` shows `active`
+- [x] SOL: `inhibit.sh start` (no sudo) → PID active (systemd-inhibit idle), `status` shows `active`
+- [x] `bash -n scripts/inhibit.sh && bash -n scripts/start.sh && bash -n scripts/stop.sh` → syntax OK
+- [x] `git log --oneline` shows commits `2df0172`–`061f806`
 
 ---
 
@@ -1330,7 +1374,7 @@ These collapse into the configuration system above. Tracked individually for vis
 - [x] **Enable local GPU for vLLM** — CDI setup, pin Ollama to CPU, select quantized model for 8 GB VRAM, add `models[]` config section, auto-generate LiteLLM model_list (see Phase 8). Root blocker: Podman's CDI spec dirs were empty (`cdiSpecDirs: []`) despite `nvidia-ctk cdi list` showing `nvidia.com/gpu=all`. Fix: add `cdi_spec_dirs = ["/etc/cdi", "/run/cdi"]` under `[engine]` in `~/.config/containers/containers.conf`. vllm.service now starts cleanly; `qwen2.5-1.5b` served via GPU and confirmed reachable through LiteLLM (`Response: working`).
 - [x] **Add `configure.sh detect-hardware`** — `detect-hardware` and `recommend` subcommands implemented (Phase 8/9); detects GPU/VRAM/RAM, suggests node profile and model tier per D-021. Stale `[ ]` closed Phase 20a.
 - [x] **Add node profile support** — `controller`, `inference-worker`, `peer` profiles implemented; `configure.sh` generates profile-specific quadlets; `status.sh` reads `node_profile`; per-node files in `configs/nodes/` carry profile and capabilities (Phase 9/11). Stale `[ ]` closed Phase 20a.
-- [ ] **Implement dynamic node registration** — see Phase 22 above; full lifecycle: bootstrap → join → heartbeat → caution/failed/offline status machine → unjoin; `node.sh` single entrypoint; `bootstrap.sh` wget-safe; PostgreSQL `nodes`/`node_heartbeats`/`node_suggestions`; T-120–T-127
+- [x] **Implement dynamic node registration** — Phase 22 complete (`51ec556`–`baf4eb0`): full lifecycle bootstrap → join → heartbeat → caution/failed/offline status machine → unjoin; `node.sh` single entrypoint; `bootstrap.sh` wget-safe; PostgreSQL `nodes`/`node_heartbeats`/`node_suggestions`; T-120–T-127 all pass. Post-delivery fixes: macOS launchd timer, OnCalendar systemd timer, heredoc service unit, per-node API key auth (see Phase 23).
 - [x] **Set up macOS M1 inference worker** — TC25 (macbook-m1) running Ollama natively, registered in `configs/nodes/inference-worker-1.json`, reachable from controller, LiteLLM alias configured (Phase 9b). Stale `[ ]` closed Phase 20a.
 - [x] **Implement library custody sync** — `POST /v1/libraries` fully implemented in `app.py` (custody ingest with checksum verification, Qdrant ingestion, PostgreSQL provenance); `configure.sh sync-libraries` subcommand fully implemented (reads `libraries/`, POSTs to controller `/v1/libraries` with auth, reports per-library status). Both were built alongside Phase 12 infrastructure and pre-existed Phase 15. Stale `[ ]` entry.
 - [x] **Drive smoke tests from `config.json`** — `testing/helpers.bash` `_port_exports` block reads all host ports from `config.json` via Python at suite load time; exports 14 named variables; all `testing/*.bats` files reference `${VAR_NAME}` — zero hardcoded port literals remain. Closed Phase 14 (`77cb8f6`).

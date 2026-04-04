@@ -1,6 +1,6 @@
 # AI Stack — Feature Status
 
-**Last Updated:** 2026-03-24
+**Last Updated:** 2026-04-04
 
 A human-readable summary of what this stack provides, ordered from most to least foundational. Intended for communicating capabilities to a non-technical audience and tracking progress toward a complete platform.
 
@@ -65,12 +65,14 @@ The stack is designed to grow: new inference nodes can be added to increase capa
 - [MCP Tool Integration](#x-mcp-tool-integration)
 - [Localhost Library Discovery](#x-localhost-library-discovery)
 - [Volume Ingestion Pipeline](#x-volume-ingestion-pipeline)
+- [Security Audit Tool](#x-security-audit-tool)
+- [Dynamic Node Registration](#x-dynamic-node-registration)
+- [Worker Sleep Inhibitor](#x-worker-sleep-inhibitor)
 
 **Partially Available**
 - [Local GPU Acceleration](#--local-gpu-acceleration-controller)
 - [Inference Node Security](#--inference-node-security)
 - [Local/WAN Discovery Profiles](#--localwan-discovery-profiles)
-- [Security Audit Tool](#x-security-audit-tool)
 
 **Pending**
 - [vLLM GPU Inference](#-vllm-gpu-inference)
@@ -79,7 +81,6 @@ The stack is designed to grow: new inference nodes can be added to increase capa
 **Deferred**
 - [Peer Node Topology](#d-peer-node-topology)
 - [Operator Dashboard](#d-operator-dashboard)
-- [Dynamic Node Registration](#d-dynamic-node-registration)
 - [Federated Knowledge Search](#d-federated-knowledge-search)
 - [Team-Shared Chat and Context](#d-team-shared-chat-and-context)
 - [Knowledge Library Governance](#d-knowledge-library-governance)
@@ -226,16 +227,36 @@ Protocol specifications and stub endpoints for discovering knowledge libraries o
 - WAN registry server: **pending** (not yet built)
 - _Delivered: [Phase 17](ai_stack_blueprint/ai_stack_checklist.md#phase-17) · Spec: D-014a, D-014b_
 
----
-
-## Pending Features
-
-### `[x]` Security Audit Tool
+### `[X]` Security Audit Tool
 `configure.sh security-audit` — automated posture scan: port bind exposure, auth enforcement probing, TLS cert expiry, secret hygiene in config.json, and unauthenticated Ollama detection on inference-worker nodes.
 - `--json` for machine-readable output; `--skip-network` for offline/CI use
 - Exit codes: 0 (clean), 1 (warnings), 2 (critical findings)
 - T-113–T-116 bats coverage
 - _Delivered: [Phase 19](ai_stack_blueprint/ai_stack_checklist.md#phase-19) · Checks: port exposure, auth probing, TLS, secret hygiene, worker hardening_
+
+### `[X]` Dynamic Node Registration
+Worker nodes self-register with the controller using a one-time join token, then maintain a live presence via a periodic heartbeat. The controller tracks node health, routes LiteLLM traffic based on node status, and queues resource suggestions for node operators.
+- One-time join token flow: `configure.sh generate-join-token` → `bootstrap.sh` on worker → status `online`
+- 5-state health machine: `online` → `caution` → `failed` → `offline` → `unregistered`
+- Recovery from `caution`/`failed`: 2 consecutive healthy heartbeats within 70 s
+- Heartbeat timer: `OnCalendar=*:*:0/30` (Linux systemd) or launchd `StartInterval=30` (macOS)
+- Per-node API key issued at join time; all subsequent calls (heartbeats, status) use it
+- LiteLLM routing updated automatically on status transitions
+- _Powered by: [Node Registry](../services/knowledge-index/node_registry.py)_ · _Scripts: `node.sh`, `bootstrap.sh`, `heartbeat.sh`_ · _Delivered: [Phase 22](ai_stack_blueprint/ai_stack_checklist.md#phase-22)_
+
+### `[X]` Worker Sleep Inhibitor
+Prevents worker nodes from sleeping or hibernating while the AI stack is running, ensuring continuous inference availability.
+- Opt-in per node: set `"sleep_inhibit": true` in `configs/config.json`
+- macOS: `caffeinate -i -s` (built-in, no sudo)
+- Linux: `systemd-inhibit --what=idle --mode=block` (no sudo required)
+- Controller nodes always skip — they manage their own power policy
+- PID tracked at `~/.config/ai-stack/inhibit.pid`; stale cleanup on `start`
+- Automatically acquired by `start.sh` and released by `stop.sh`
+- _Script: [scripts/inhibit.sh](../scripts/inhibit.sh)_ · _Delivered: [Phase 23](ai_stack_blueprint/ai_stack_checklist.md#phase-23)_
+
+---
+
+## Pending Features
 
 ### `[ ]` vLLM GPU Inference
 Running GPU-optimized large language models on the controller's dedicated GPU for maximum local performance on demanding tasks.
@@ -256,10 +277,6 @@ Each node runs the complete stack independently. Nodes share inference capacity,
 ### `[D]` Operator Dashboard
 A unified web UI for users, teams, and administrators with tabs for personal contexts, team-shared contexts, system health, node management, and admin operations.
 - _Tracked: [checklist Future Features](ai_stack_blueprint/ai_stack_checklist.md#4-future-features-architecture-roadmap)_
-
-### `[D]` Dynamic Node Registration
-Inference nodes automatically announce themselves to the controller when they start, and are removed when they go offline — no manual configuration required.
-- _Planned: [Phase 9 deferred](ai_stack_blueprint/ai_stack_checklist.md#phase-9-todos-deferred-not-this-phase)_
 
 ### `[D]` Federated Knowledge Search
 A query sent to any node's knowledge base automatically fans out to all peer nodes' libraries and returns a merged result set — the user sees one unified answer regardless of where the relevant content lives.

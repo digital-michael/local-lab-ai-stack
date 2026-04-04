@@ -232,6 +232,32 @@ bash scripts/backup.sh --restore 20260324T120000
 
 ---
 
+### Enable Sleep Inhibitor on Worker Nodes
+
+Prevents a worker node from sleeping due to inactivity while the AI stack is running.
+
+1. Enable in local `configs/config.json` (edit on the worker node — do not push to git):
+   ```bash
+   # Linux:
+   sed -i 's/"sleep_inhibit": false/"sleep_inhibit": true/' configs/config.json
+   # macOS:
+   sed -i '' 's/"sleep_inhibit": false/"sleep_inhibit": true/' configs/config.json
+   ```
+
+2. Start the inhibitor:
+   ```bash
+   bash scripts/inhibit.sh start
+   bash scripts/inhibit.sh status
+   ```
+
+3. To verify it will start automatically on next `bash scripts/start.sh`, confirm `Enabled: yes` in `status` output.
+
+> **Note:** `sleep_inhibit` defaults to `false` in the repo. Each worker node enables it locally. The controller profile is always skipped — controllers manage their own power policy.
+>
+> No sudo required. macOS uses `caffeinate -i -s`; Linux uses `systemd-inhibit --what=idle`.
+
+---
+
 ### Run the Security Audit
 
 ```bash
