@@ -33,6 +33,36 @@ _KI_API_KEY: str = os.environ.get("KI_API_KEY", "")
 
 _RAG_TOP_K: int = int(os.environ.get("KI_RAG_TOP_K", "3"))
 
+# Models that default to chain-of-thought / thinking mode and should have it
+# disabled at the proxy level unless the caller explicitly opts in.
+_THINKING_MODELS: tuple[str, ...] = ("qwen3",)
+
+
+def _maybe_disable_thinking(data: dict) -> None:
+    """Disable thinking mode for Qwen3 models via reasoning_effort=none.
+
+    Qwen3's thinking mode consumes the entire max_tokens budget for the reasoning
+    chain before generating any content, returning empty content for small limits.
+    LiteLLM's ollama_chat provider maps reasoning_effort=none → think:false in the
+    Ollama API body, which fully disables thinking regardless of token budget.
+
+    Does nothing if the caller has already set reasoning_effort or think preference.
+    """
+    model: str = data.get("model", "").lower()
+    if not any(m in model for m in _THINKING_MODELS):
+        return
+    # Caller already specified a preference — respect it
+    if "reasoning_effort" in data:
+        return
+    if "think" in data:
+        return
+    extra_body: dict = data.get("extra_body") or {}
+    if "think" in extra_body:
+        return
+    # Disable thinking via the OpenAI-compat reasoning_effort parameter.
+    # ollama_chat maps "none" → think:false in the Ollama request body.
+    data["reasoning_effort"] = "none"
+
 
 class AsyncRAGHook(CustomLogger):
     """
@@ -50,6 +80,9 @@ class AsyncRAGHook(CustomLogger):
         # Only handle chat completions
         if call_type not in ("completion", "acompletion"):
             return data
+
+        # Disable thinking mode by default for models that enable it implicitly
+        _maybe_disable_thinking(data)
 
         # Re-read env vars at call time so the hook responds to live config changes
         ki_base = os.environ.get("KI_BASE_URL", "").rstrip("/")
@@ -113,3 +146,9 @@ class AsyncRAGHook(CustomLogger):
             pass
 
         return data
+
+
+# Module-level singleton registered by LiteLLM via get_instance_fn.
+# proxy_config.yaml references 'hooks.async_rag_hook' (must be an instance,
+# not the class, for isinstance(cb, CustomLogger) checks to pass).
+async_rag_hook = AsyncRAGHook()

@@ -9,6 +9,9 @@
 #
 # Reference: https://docs.litellm.ai/docs/proxy/config_settings
 
-general_settings:
+litellm_settings:
+  drop_params: true
   callbacks:
-    - hooks.AsyncRAGHook
+    - hooks.async_rag_hook
+
+general_settings: {}

@@ -33,7 +33,7 @@
     },
     {
       "id": "qwen3:8b",
-      "description": "qwen3:8b — GPU inference via Ollama (RTX 3070 Ti)",
+      "description": "qwen3:8b — GPU inference via Ollama (RTX 3070 Ti). Thinking mode disabled by default (set think:true in extra_body to enable).",
       "litellm_params": {
         "model": "ollama_chat/qwen3:8b",
         "api_base": "http://ollama.ai-stack:11434",

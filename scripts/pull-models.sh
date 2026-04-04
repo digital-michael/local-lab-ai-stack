@@ -86,6 +86,7 @@ for i in $(seq 0 $((model_count - 1))); do
     model_id="$(jq -r ".default_models[$i].id" "$MODELS_FILE")"
     litellm_params="$(jq -c ".default_models[$i].litellm_params" "$MODELS_FILE")"
     model_info="$(jq -c ".default_models[$i].model_info // {}" "$MODELS_FILE")"
+    optional_params="$(jq -c ".default_models[$i].optional_params // {}" "$MODELS_FILE")"
 
     # Delete any existing entries with this model_name (enables idempotent re-run).
     # LiteLLM may normalize ':' to '-' in stored model names, so match both forms.
@@ -107,7 +108,8 @@ for i in $(seq 0 $((model_count - 1))); do
         --arg name "$model_id" \
         --argjson lp "$litellm_params" \
         --argjson mi "$model_info" \
-        '{"model_name": $name, "litellm_params": $lp, "model_info": $mi}')"
+        --argjson op "$optional_params" \
+        '{"model_name": $name, "litellm_params": $lp, "model_info": $mi} + (if $op != {} then {"optional_params": $op} else {} end)')"
 
     echo -n "  Registering '$model_id' ... "
 
