@@ -217,6 +217,12 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "$HOME/ai-stack/scripts")"
 HEARTBEAT_SCRIPT="$SCRIPT_DIR/heartbeat.sh"
 
+if [[ ! -f "$HEARTBEAT_SCRIPT" ]]; then
+    echo "ERROR: heartbeat.sh not found at $HEARTBEAT_SCRIPT" >&2
+    echo "  Run bootstrap.sh from the project root: bash scripts/bootstrap.sh" >&2
+    exit 1
+fi
+
 if [[ "$(uname -s)" == "Darwin" ]]; then
     # -----------------------------------------------------------------------
     # macOS — launchd LaunchAgent
@@ -249,22 +255,32 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
 </plist>
 EOF
 
-    # Unload first in case a stale entry exists (e.g. re-bootstrap)
-    launchctl unload "$PLIST" 2>/dev/null || true
-    if launchctl load -w "$PLIST" 2>/dev/null; then
+    # Unload first in case a stale entry exists (e.g. re-bootstrap).
+    # gui/UID domain requires an active GUI (windowserver) session.
+    # Fall back to user/UID for headless/SSH-only logins.
+    _LAUNCHD_UID=$(id -u)
+    if launchctl print "gui/$_LAUNCHD_UID" &>/dev/null 2>&1; then
+        _LAUNCHD_DOMAIN="gui/$_LAUNCHD_UID"
+    else
+        _LAUNCHD_DOMAIN="user/$_LAUNCHD_UID"
+    fi
+    _LAUNCHD_SERVICE="${_LAUNCHD_DOMAIN}/com.ai-stack.heartbeat"
+    launchctl bootout "$_LAUNCHD_SERVICE" 2>/dev/null || true
+    if launchctl bootstrap "$_LAUNCHD_DOMAIN" "$PLIST" 2>/dev/null; then
         echo "Heartbeat LaunchAgent installed and started (every 30s)."
+        echo "  Domain: $_LAUNCHD_DOMAIN"
         echo "  Plist:  $PLIST"
         echo "  Log:    $HOME/.config/ai-stack/heartbeat.log"
     else
-        echo "WARNING: launchctl load failed — start heartbeats manually:"
-        echo "  launchctl load -w $PLIST"
+        echo "WARNING: launchctl bootstrap failed — start heartbeats manually:"
+        echo "  launchctl bootstrap $_LAUNCHD_DOMAIN $PLIST"
     fi
 
     echo ""
     echo "Next steps:"
     echo "  • Check node status: bash scripts/node.sh status"
     echo "  • View suggestions:  bash scripts/node.sh suggestions list"
-    echo "  • Timer status:      launchctl list | grep ai-stack"
+    echo "  • Timer status:      launchctl print \$_LAUNCHD_DOMAIN/com.ai-stack.heartbeat"
 
 else
     # -----------------------------------------------------------------------

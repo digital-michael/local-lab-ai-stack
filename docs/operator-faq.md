@@ -1,6 +1,6 @@
 # Operator FAQ and How-To Guides
 
-**Last Updated:** 2026-03-25
+**Last Updated:** 2026-04-04
 
 Practical guidance for operating the stack day-to-day. Organized as How-To recipes and an FAQ for common failure modes.
 
@@ -57,37 +57,81 @@ Practical guidance for operating the stack day-to-day. Organized as How-To recip
 
 ---
 
-### Register a Remote Inference Node
+### Register a Worker Node
 
-1. Run hardware detection and Ollama setup on the remote machine (Linux, Podman):
-   ```bash
-   # On the remote node:
-   bash scripts/podman/setup-worker.sh
-   ```
+Worker registration uses a one-time join token. The token is generated on the controller, passed to the worker, and consumed once during the join handshake. After joining, the node authenticates all subsequent requests (including heartbeats) with a per-node API key issued by the controller.
 
-   For a macOS bare-metal node (Apple Silicon):
-   ```bash
-   # On macOS:
-   bash scripts/bare_metal/setup-macos.sh
-   ```
+**Step 1 — Generate a join token (on the controller)**
 
-2. On the remote node, run the registration helper to generate the config block:
-   ```bash
-   bash scripts/register-node.sh
-   ```
+```bash
+bash scripts/configure.sh generate-join-token \
+  --node-id <id> \
+  --profile knowledge-worker \
+  --display-name "TC25 Mac Studio"
+```
 
-3. Copy the printed JSON block into `configs/nodes/` on the controller as a new file (e.g. `configs/nodes/inference-worker-3.json`).
+Options:
+- `--node-id` — unique identifier for the node (default: random UUID)
+- `--profile` — `knowledge-worker` (with KI + Qdrant) or `inference-worker` (Ollama only)
+- `--address` — the worker's KI base URL if known (e.g. `http://192.168.1.50:8100`); can be set during join if omitted
 
-4. On the controller, regenerate the LiteLLM config and register models:
-   ```bash
-   bash scripts/configure.sh generate-litellm-config
-   bash scripts/pull-models.sh
-   ```
+The command prints the token and the exact `node.sh join` command to run on the worker. **The token is shown once — copy it before closing the terminal.**
 
-5. Verify the remote node's models appear in LiteLLM:
-   ```bash
-   curl -s http://localhost:9000/v1/models
-   ```
+**Step 2 — Bootstrap the worker node**
+
+On the worker, from the project root:
+
+```bash
+bash scripts/bootstrap.sh \
+  --controller 'http://<controller-host>:8100' \
+  --token '<token>' \
+  --node-id '<id>'
+```
+
+`bootstrap.sh` runs `node.sh join`, saves state to `~/.config/ai-stack/`, and installs the heartbeat timer (systemd on Linux, launchd on macOS).
+
+Or, if the worker is already set up and only needs to join:
+
+```bash
+bash scripts/node.sh join \
+  --controller 'http://<controller-host>:8100' \
+  --token '<token>' \
+  --node-id '<id>'
+```
+
+**Step 3 — Verify**
+
+On the worker:
+```bash
+bash scripts/node.sh status
+```
+
+On the controller (lists all nodes):
+```bash
+bash scripts/node.sh list --controller 'http://localhost:8100'
+```
+
+The node should show `online` after two successful heartbeats (within ~70 seconds of each other).
+
+---
+
+### Remove (Unjoin) a Worker Node
+
+On the worker (uses saved state from `~/.config/ai-stack/`):
+
+```bash
+bash scripts/node.sh unjoin
+```
+
+Or from the controller for a node that can no longer be reached:
+
+```bash
+bash scripts/node.sh unjoin \
+  --controller 'http://localhost:8100' \
+  --node-id '<id>'
+```
+
+This sets the node to `unregistered` and removes its models from LiteLLM routing. The node can rejoin later with a new `generate-join-token` call.
 
 ---
 
@@ -359,3 +403,115 @@ echo -n "<new-key>" | podman secret rm knowledge_index_api_key ; \
   echo -n "<new-key>" | podman secret create knowledge_index_api_key -
 systemctl --user restart knowledge-index.service
 ```
+
+---
+
+### A worker node shows `failed` or `caution` instead of `online`
+
+The node missed consecutive heartbeats. The state machine is:
+
+| State | Meaning |
+|---|---|
+| `online` | Heartbeating normally |
+| `caution` | Last heartbeat > 90s ago |
+| `failed` | Last heartbeat > 150s ago |
+| `offline` | Last heartbeat > 24h ago (requires a new token to rejoin) |
+
+Recovery requires **two consecutive heartbeats within 70 seconds** of each other. One manual heartbeat is not enough — the second is what triggers the transition back to `online`.
+
+On the worker:
+```bash
+# Send first beat
+bash scripts/heartbeat.sh
+
+# Send second beat within 70s
+bash scripts/heartbeat.sh
+
+# Confirm
+bash scripts/node.sh status
+```
+
+If the heartbeat timer is not running, check it and restart:
+
+```bash
+# Linux:
+systemctl --user status ai-stack-heartbeat.timer
+systemctl --user start ai-stack-heartbeat.timer
+
+# macOS:
+launchctl list | grep ai-stack          # look for com.ai-stack.heartbeat with PID or "-"
+tail -20 ~/.config/ai-stack/heartbeat.log
+```
+
+---
+
+### Heartbeat timer is not running on macOS
+
+The heartbeat timer is installed as a launchd `LaunchAgent`. Common failure causes:
+
+**1. Broken plist (empty `ProgramArguments`)** — happens if `bootstrap.sh` was run from the wrong directory and `HEARTBEAT_SCRIPT` resolved to an empty path. Check:
+
+```bash
+grep -A3 'ProgramArguments' ~/Library/LaunchAgents/com.ai-stack.heartbeat.plist
+```
+
+If the array contains only `/bin/bash` with no second `<string>`, rewrite it:
+
+```bash
+PLIST="$HOME/Library/LaunchAgents/com.ai-stack.heartbeat.plist"
+HEARTBEAT_SCRIPT="$HOME/Projects/active/local-lab-ai-stack/scripts/heartbeat.sh"
+
+cat > "$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.ai-stack.heartbeat</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>${HEARTBEAT_SCRIPT}</string>
+    </array>
+    <key>StartInterval</key><integer>30</integer>
+    <key>RunAtLoad</key><true/>
+    <key>StandardOutPath</key><string>${HOME}/.config/ai-stack/heartbeat.log</string>
+    <key>StandardErrorPath</key><string>${HOME}/.config/ai-stack/heartbeat.log</string>
+</dict>
+</plist>
+EOF
+```
+
+**2. launchd not loaded** — reload with the deprecated-but-domain-agnostic API (works both over SSH and with a GUI session):
+
+```bash
+launchctl load -w ~/Library/LaunchAgents/com.ai-stack.heartbeat.plist
+launchctl list | grep ai-stack      # PID "-" with exit 0 = loaded, running between intervals
+```
+
+**3. Verify beats are landing:**
+```bash
+tail -20 ~/.config/ai-stack/heartbeat.log
+```
+
+If the log shows heartbeats but the node stays `failed`, remember two beats within 70s are required (see above).
+
+---
+
+### A node shows `offline` and cannot send heartbeats
+
+`offline` is a terminal state — the node has been absent for > 24 hours. Heartbeats are rejected with 403. Re-register with a fresh token:
+
+**On the controller:**
+```bash
+bash scripts/configure.sh generate-join-token --node-id <id>
+```
+
+**On the worker:**
+```bash
+bash scripts/node.sh join \
+  --controller 'http://<controller-host>:8100' \
+  --token '<new-token>' \
+  --node-id '<id>'
+```
+
+The existing `node_id` is reused — no data is lost.
