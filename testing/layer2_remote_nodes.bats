@@ -32,50 +32,56 @@ setup_file() {
         return 1
     fi
 
-    # Resolve node addresses from config.json
-    M1_HOST=$(python3 -c "
-import json
-nodes = json.load(open('$CONFIG_FILE'))['nodes']
-n = next((n for n in nodes if n['name'] == 'macbook-m1'), None)
+    # Resolve node addresses from configs/nodes/*.json
+    local _nodes_dir="$PROJECT_ROOT/configs/nodes"
+
+    M1_HOST=$(python3 - "$_nodes_dir" <<'PYEOF' 2>/dev/null
+import glob, json, sys
+nodes = [json.load(open(f)) for f in glob.glob(sys.argv[1]+"/*.json")]
+n = next((n for n in nodes if n.get('name') == 'macbook-m1'), None)
 print(n['address'] if n else '')
-" 2>/dev/null)
+PYEOF
+)
 
-    M1_FALLBACK=$(python3 -c "
-import json
-nodes = json.load(open('$CONFIG_FILE'))['nodes']
-n = next((n for n in nodes if n['name'] == 'macbook-m1'), None)
-print(n.get('address_fallback','') or '' if n else '')
-" 2>/dev/null)
+    M1_FALLBACK=$(python3 - "$_nodes_dir" <<'PYEOF' 2>/dev/null
+import glob, json, sys
+nodes = [json.load(open(f)) for f in glob.glob(sys.argv[1]+"/*.json")]
+n = next((n for n in nodes if n.get('name') == 'macbook-m1'), None)
+print(n.get('address_fallback') or '' if n else '')
+PYEOF
+)
 
-    SOL_HOST=$(python3 -c "
-import json
-nodes = json.load(open('$CONFIG_FILE'))['nodes']
-n = next((n for n in nodes if n['name'] == 'alienware'), None)
+    SOL_HOST=$(python3 - "$_nodes_dir" <<'PYEOF' 2>/dev/null
+import glob, json, sys
+nodes = [json.load(open(f)) for f in glob.glob(sys.argv[1]+"/*.json")]
+n = next((n for n in nodes if n.get('name') == 'alienware'), None)
 print(n['address'] if n else '')
-" 2>/dev/null)
+PYEOF
+)
 
-    SOL_FALLBACK=$(python3 -c "
-import json
-nodes = json.load(open('$CONFIG_FILE'))['nodes']
-n = next((n for n in nodes if n['name'] == 'alienware'), None)
-print(n.get('address_fallback','') or '' if n else '')
-" 2>/dev/null)
+    SOL_FALLBACK=$(python3 - "$_nodes_dir" <<'PYEOF' 2>/dev/null
+import glob, json, sys
+nodes = [json.load(open(f)) for f in glob.glob(sys.argv[1]+"/*.json")]
+n = next((n for n in nodes if n.get('name') == 'alienware'), None)
+print(n.get('address_fallback') or '' if n else '')
+PYEOF
+)
 
-    M1_MODEL=$(python3 -c "
-import json
-cfg = json.load(open('$CONFIG_FILE'))
-nodes = cfg['nodes']
-n = next((n for n in nodes if n['name'] == 'macbook-m1'), None)
+    M1_MODEL=$(python3 - "$_nodes_dir" <<'PYEOF' 2>/dev/null
+import glob, json, sys
+nodes = [json.load(open(f)) for f in glob.glob(sys.argv[1]+"/*.json")]
+n = next((n for n in nodes if n.get('name') == 'macbook-m1'), None)
 print(n['models'][0] if n and n.get('models') else '')
-" 2>/dev/null)
+PYEOF
+)
 
-    SOL_MODEL=$(python3 -c "
-import json
-cfg = json.load(open('$CONFIG_FILE'))
-nodes = cfg['nodes']
-n = next((n for n in nodes if n['name'] == 'alienware'), None)
+    SOL_MODEL=$(python3 - "$_nodes_dir" <<'PYEOF' 2>/dev/null
+import glob, json, sys
+nodes = [json.load(open(f)) for f in glob.glob(sys.argv[1]+"/*.json")]
+n = next((n for n in nodes if n.get('name') == 'alienware'), None)
 print(n['models'][0] if n and n.get('models') else '')
-" 2>/dev/null)
+PYEOF
+)
 
     export M1_HOST M1_FALLBACK SOL_HOST SOL_FALLBACK M1_MODEL SOL_MODEL
 
