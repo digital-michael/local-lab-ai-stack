@@ -211,40 +211,93 @@ echo "State saved: $STATE_DIR"
 echo ""
 
 # ---------------------------------------------------------------------------
-# Install heartbeat systemd timer
+# Install heartbeat timer (systemd on Linux, launchd on macOS)
 # ---------------------------------------------------------------------------
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "$HOME/ai-stack/scripts")"
-QUADLET_TMPL_DIR="$(cd "$SCRIPT_DIR/../configs/quadlets" 2>/dev/null && pwd || echo "")"
+HEARTBEAT_SCRIPT="$SCRIPT_DIR/heartbeat.sh"
 
-SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
-mkdir -p "$SYSTEMD_USER_DIR"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    # -----------------------------------------------------------------------
+    # macOS — launchd LaunchAgent
+    # -----------------------------------------------------------------------
+    PLIST_DIR="$HOME/Library/LaunchAgents"
+    PLIST="$PLIST_DIR/com.ai-stack.heartbeat.plist"
+    mkdir -p "$PLIST_DIR"
 
-_install_unit() {
-    local unit_name="$1"
-    local dest="$SYSTEMD_USER_DIR/$unit_name"
-    if [[ -n "$QUADLET_TMPL_DIR" && -f "$QUADLET_TMPL_DIR/$unit_name" ]]; then
-        cp "$QUADLET_TMPL_DIR/$unit_name" "$dest"
+    cat > "$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ai-stack.heartbeat</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>${HEARTBEAT_SCRIPT}</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>30</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${HOME}/.config/ai-stack/heartbeat.log</string>
+    <key>StandardErrorPath</key>
+    <string>${HOME}/.config/ai-stack/heartbeat.log</string>
+</dict>
+</plist>
+EOF
+
+    # Unload first in case a stale entry exists (e.g. re-bootstrap)
+    launchctl unload "$PLIST" 2>/dev/null || true
+    if launchctl load -w "$PLIST" 2>/dev/null; then
+        echo "Heartbeat LaunchAgent installed and started (every 30s)."
+        echo "  Plist:  $PLIST"
+        echo "  Log:    $HOME/.config/ai-stack/heartbeat.log"
     else
-        # Fallback: emit inline if template dir not available (wget pipe mode)
-        case "$unit_name" in
-            ai-stack-heartbeat.service)
-                cat > "$dest" <<EOF
+        echo "WARNING: launchctl load failed — start heartbeats manually:"
+        echo "  launchctl load -w $PLIST"
+    fi
+
+    echo ""
+    echo "Next steps:"
+    echo "  • Check node status: bash scripts/node.sh status"
+    echo "  • View suggestions:  bash scripts/node.sh suggestions list"
+    echo "  • Timer status:      launchctl list | grep ai-stack"
+
+else
+    # -----------------------------------------------------------------------
+    # Linux — systemd user timer
+    # -----------------------------------------------------------------------
+    QUADLET_TMPL_DIR="$(cd "$SCRIPT_DIR/../configs/quadlets" 2>/dev/null && pwd || echo "")"
+    SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+    mkdir -p "$SYSTEMD_USER_DIR"
+
+    _install_unit() {
+        local unit_name="$1"
+        local dest="$SYSTEMD_USER_DIR/$unit_name"
+        if [[ -n "$QUADLET_TMPL_DIR" && -f "$QUADLET_TMPL_DIR/$unit_name" ]]; then
+            cp "$QUADLET_TMPL_DIR/$unit_name" "$dest"
+        else
+            case "$unit_name" in
+                ai-stack-heartbeat.service)
+                    cat > "$dest" <<EOF
 [Unit]
 Description=AI Stack worker node heartbeat
 After=network.target
 ConditionPathExists=%h/.config/ai-stack/controller_url
 [Service]
 Type=oneshot
-ExecStart=/bin/bash %h/ai-stack/scripts/heartbeat.sh
+ExecStart=/bin/bash ${HEARTBEAT_SCRIPT}
 StandardOutput=journal
 StandardError=journal
 [Install]
 WantedBy=default.target
 EOF
-                ;;
-            ai-stack-heartbeat.timer)
-                cat > "$dest" <<EOF
+                    ;;
+                ai-stack-heartbeat.timer)
+                    cat > "$dest" <<EOF
 [Unit]
 Description=AI Stack worker node heartbeat (every 30s)
 After=network.target
@@ -256,29 +309,31 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 EOF
-                ;;
-        esac
+                    ;;
+            esac
+        fi
+    }
+
+    _install_unit "ai-stack-heartbeat.service"
+    _install_unit "ai-stack-heartbeat.timer"
+
+    if command -v systemctl &>/dev/null; then
+        systemctl --user daemon-reload 2>/dev/null && \
+        systemctl --user enable --now ai-stack-heartbeat.timer 2>/dev/null && \
+        echo "Heartbeat timer installed and started (every 30s)." || \
+        echo "WARNING: Could not enable heartbeat timer — start manually:" && \
+        echo "  systemctl --user enable --now ai-stack-heartbeat.timer"
+    else
+        echo "WARNING: systemctl not found — start heartbeats manually:"
+        echo "  bash scripts/heartbeat.sh"
     fi
-}
 
-_install_unit "ai-stack-heartbeat.service"
-_install_unit "ai-stack-heartbeat.timer"
-
-if command -v systemctl &>/dev/null; then
-    systemctl --user daemon-reload 2>/dev/null && \
-    systemctl --user enable --now ai-stack-heartbeat.timer 2>/dev/null && \
-    echo "Heartbeat timer installed and started (every 30s)." || \
-    echo "WARNING: Could not enable heartbeat timer — start manually:" && \
-    echo "  systemctl --user enable --now ai-stack-heartbeat.timer"
-else
-    echo "WARNING: systemctl not found — start heartbeats manually:"
-    echo "  bash scripts/heartbeat.sh"
+    echo ""
+    echo "Next steps:"
+    echo "  • Check node status: bash scripts/node.sh status"
+    echo "  • View suggestions:  bash scripts/node.sh suggestions list"
+    echo "  • Timer status:      systemctl --user status ai-stack-heartbeat.timer"
 fi
 
-echo ""
-echo "Next steps:"
-echo "  • Check node status: bash scripts/node.sh status"
-echo "  • View suggestions:  bash scripts/node.sh suggestions list"
-echo "  • Timer status:      systemctl --user status ai-stack-heartbeat.timer"
 echo ""
 echo "Bootstrap complete."
