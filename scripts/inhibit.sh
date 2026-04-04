@@ -116,7 +116,7 @@ cmd_start() {
             return 0
         fi
         systemd-inhibit \
-            --what=idle:sleep:handle-suspend-key:handle-hibernate-key \
+            --what=idle \
             --who="ai-stack" \
             --why="AI Stack worker is running" \
             --mode=block \
