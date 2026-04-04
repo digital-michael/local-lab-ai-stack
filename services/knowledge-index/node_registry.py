@@ -428,10 +428,10 @@ def join_node(node_id: str, req: JoinRequest) -> dict:
             raise HTTPException(status_code=404, detail="Node not found — register first")
         if row[1] != token_hash:
             raise HTTPException(status_code=401, detail="Invalid join token")
-        if row[0] not in ("unregistered", "offline"):
+        if row[0] == "online":
             raise HTTPException(
                 status_code=409,
-                detail=f"Node is '{row[0]}'; can only join from unregistered or offline status",
+                detail="Node is already online; unjoin first or wait for it to degrade",
             )
 
         if req.address:
