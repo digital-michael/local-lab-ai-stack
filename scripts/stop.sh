@@ -101,3 +101,6 @@ echo ""
 echo "All services stopped."
 echo ""
 echo "Run 'bash scripts/status.sh' to verify."
+
+# ── Sleep inhibitor ───────────────────────────────────────────────────────────
+"$SCRIPT_DIR/inhibit.sh" stop || true

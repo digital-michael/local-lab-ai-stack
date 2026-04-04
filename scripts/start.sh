@@ -124,3 +124,6 @@ echo ""
 echo "First deployment? Run the following to detect and fix integration issues"
 echo "(OpenWebUI DB Ollama URL, API key alignment, etc.):"
 echo "  bash scripts/diagnose.sh --profile full --fix"
+
+# ── Sleep inhibitor ───────────────────────────────────────────────────────────
+"$SCRIPT_DIR/inhibit.sh" start || true
