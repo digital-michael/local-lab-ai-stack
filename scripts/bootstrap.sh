@@ -135,7 +135,14 @@ fi
 # ---------------------------------------------------------------------------
 
 if [[ -z "$ADDRESS" ]]; then
-    primary_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        primary_ip=$(ipconfig getifaddr en0 2>/dev/null \
+                     || ipconfig getifaddr en1 2>/dev/null \
+                     || route -n get default 2>/dev/null | awk '/interface:/{print $2}' \
+                     || echo "127.0.0.1")
+    else
+        primary_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
+    fi
     ADDRESS="http://${primary_ip}:8100"
 fi
 
@@ -173,7 +180,7 @@ response=$(curl -s -w "\n%{http_code}" \
 }
 
 http_code=$(echo "$response" | tail -1)
-body_part=$(echo "$response" | head -n -1)
+body_part=$(echo "$response" | sed '$d')
 
 if [[ "$http_code" != "200" ]]; then
     echo "ERROR: Join failed (HTTP $http_code):" >&2
@@ -193,6 +200,12 @@ STATE_DIR="${AI_STACK_NODE_DIR:-$HOME/.config/ai-stack}"
 mkdir -p "$STATE_DIR"
 printf '%s' "$CONTROLLER_URL" > "$STATE_DIR/controller_url"
 printf '%s' "$NODE_ID"        > "$STATE_DIR/node_id"
+
+# Save per-node API key issued by the controller on join
+node_api_key=$(echo "$body_part" \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('node_api_key',''))" \
+    2>/dev/null || true)
+[[ -n "$node_api_key" ]] && printf '%s' "$node_api_key" > "$STATE_DIR/api_key"
 
 echo "State saved: $STATE_DIR"
 echo ""

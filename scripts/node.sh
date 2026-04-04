@@ -191,6 +191,13 @@ cmd_join() {
     echo "$body_part" | python3 -m json.tool 2>/dev/null || echo "$body_part"
     echo ""
 
+    # Extract and persist the per-node API key issued by the controller
+    local node_api_key
+    node_api_key=$(echo "$body_part" \
+        | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('node_api_key',''))" \
+        2>/dev/null || true)
+    [[ -n "$node_api_key" ]] && API_KEY_STATE="$node_api_key"
+
     _save_state
     echo "State saved to $STATE_DIR"
 }

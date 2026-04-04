@@ -88,13 +88,24 @@ def _check_admin(request: Request) -> None:
 
 
 def _check_node_or_admin(request: Request) -> None:
-    """Accept either the node API_KEY or the admin KI_ADMIN_KEY."""
+    """Accept the per-node API key, the shared API_KEY, or the admin KI_ADMIN_KEY."""
     auth  = request.headers.get("Authorization", "")
     token = auth[7:] if auth.startswith("Bearer ") else auth
     if not API_KEY and not KI_ADMIN_KEY:
         return
     if (API_KEY and token == API_KEY) or (KI_ADMIN_KEY and token == KI_ADMIN_KEY):
         return
+    # Check per-node API key (keyed to the node_id in the URL path)
+    node_id = request.path_params.get("node_id")
+    if node_id and _db is not None and token:
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        with _db.connect() as conn:
+            row = conn.execute(
+                text("SELECT node_api_key_hash FROM nodes WHERE node_id = :id"),
+                {"id": node_id},
+            ).fetchone()
+        if row and row[0] and row[0] == token_hash:
+            return
     raise HTTPException(status_code=401, detail="Unauthorized")
 
 
@@ -441,9 +452,16 @@ def join_node(node_id: str, req: JoinRequest) -> dict:
                 """),
                 {"id": node_id},
             )
+
+        node_key      = str(uuid.uuid4())
+        node_key_hash = hashlib.sha256(node_key.encode()).hexdigest()
+        conn.execute(
+            text("UPDATE nodes SET node_api_key_hash = :nkh WHERE node_id = :id"),
+            {"nkh": node_key_hash, "id": node_id},
+        )
         conn.commit()
 
-    return {"ack": True, "node_id": node_id, "status": "online"}
+    return {"ack": True, "node_id": node_id, "status": "online", "node_api_key": node_key}
 
 
 @router.post("/{node_id}/heartbeat")

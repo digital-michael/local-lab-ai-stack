@@ -173,6 +173,13 @@ def _init_db() -> None:
                 suggestion  TEXT NOT NULL DEFAULT '{}'
             )
         """))
+        # Migration: add node_api_key_hash column to existing databases
+        try:
+            conn.execute(text("SAVEPOINT pre_node_key_migration"))
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN node_api_key_hash TEXT"))
+            conn.execute(text("RELEASE SAVEPOINT pre_node_key_migration"))
+        except Exception:
+            conn.execute(text("ROLLBACK TO SAVEPOINT pre_node_key_migration"))
         conn.commit()
 
 
