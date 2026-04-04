@@ -262,44 +262,94 @@ cmd_list() {
         exit 1
     fi
 
-    echo "$body_part" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-nodes = data.get('nodes', [])
-if not nodes:
-    print('No nodes registered.')
+    local nodes_dir="$SCRIPT_DIR/../configs/nodes"
+    local _tmp; _tmp=$(mktemp)
+    echo "$body_part" > "$_tmp"
+
+    python3 - "$_tmp" "$nodes_dir" <<'PYEOF'
+import glob, json, sys
+
+data      = json.load(open(sys.argv[1]))
+db_nodes  = data.get('nodes', [])
+nodes_dir = sys.argv[2]
+
+# ------------------------------------------------------------------
+# Load node-file data: node_id -> {models, display_name, capabilities}
+# ------------------------------------------------------------------
+nf_map = {}
+ctrl_rows = []
+for path in sorted(glob.glob(nodes_dir + "/*.json")):
+    try:
+        nf = json.load(open(path))
+    except Exception:
+        continue
+    nid = nf.get("node_id")
+    if not nid:
+        continue
+    nf_map[nid] = nf
+    if nf.get("profile") == "controller":
+        caps = nf.get("capabilities", [])
+        ctrl_rows.append({
+            "node_id":      nid,
+            "display_name": nf.get("name", nid),
+            "profile":      "controller",
+            "status":       "local",
+            "last_seen":    "",
+            "capabilities": caps,
+            "models":       nf.get("models", []),
+        })
+
+# Merge DB rows with node-file models
+all_rows = []
+for n in db_nodes:
+    nid  = n.get("node_id", "")
+    nf   = nf_map.get(nid, {})
+    caps = n.get("capabilities", [])
+    if isinstance(caps, dict):
+        caps = list(caps.keys())
+    all_rows.append({
+        "node_id":      nid,
+        "display_name": n.get("display_name", ""),
+        "profile":      n.get("profile", ""),
+        "status":       n.get("status", ""),
+        "last_seen":    (n.get("last_seen") or "")[:19],
+        "capabilities": caps,
+        "models":       nf.get("models", []),
+    })
+
+# Controller row(s) prepended (not in DB)
+rows = ctrl_rows + all_rows
+
+if not rows:
+    print("No nodes found.")
     sys.exit(0)
+
+def fmt_list(lst):
+    return ",".join(lst) if lst else "-"
+
 COLS = [
-    ('NODE ID',      'node_id',      22),
-    ('DISPLAY NAME', 'display_name', 18),
-    ('PROFILE',      'profile',      18),
-    ('STATUS',       'status',        9),
-    ('LAST SEEN',    'last_seen',    19),
-    ('CAPABILITIES', None,           28),
+    ("NODE ID",       "node_id",      16),
+    ("DISPLAY NAME",  "display_name", 16),
+    ("PROFILE",       "profile",      16),
+    ("STATUS",        "status",        9),
+    ("CAPABILITIES",  "capabilities", 24),
+    ("MODELS",        "models",       36),
 ]
-fmt = '  '.join(f'{h:<{w}}' for h, _, w in COLS)
-sep = '  '.join('-' * w for _, _, w in COLS)
-print(fmt)
+hdr = "  ".join(f"{h:<{w}}" for h, _, w in COLS)
+sep = "  ".join("-" * w          for _, _, w in COLS)
+print(hdr)
 print(sep)
-for n in nodes:
-    caps = n.get('capabilities', [])
-    if isinstance(caps, list):
-        caps_str = ','.join(caps) if caps else '-'
-    elif isinstance(caps, dict):
-        caps_str = ','.join(caps.keys()) if caps else '-'
-    else:
-        caps_str = str(caps)
-    row = [
-        n.get('node_id', ''),
-        n.get('display_name', ''),
-        n.get('profile', ''),
-        n.get('status', ''),
-        (n.get('last_seen') or '')[:19],
-        caps_str,
-    ]
-    print('  '.join(f'{str(v)[:w]:<{w}}' for (_, _, w), v in zip(COLS, row)))
-print(f'\nTotal: {len(nodes)} node(s)')
-" 2>/dev/null || echo "$body_part"
+for r in rows:
+    vals = []
+    for _, key, w in COLS:
+        v = r.get(key, "")
+        if isinstance(v, list):
+            v = fmt_list(v)
+        vals.append(f"{str(v)[:w]:<{w}}")
+    print("  ".join(vals))
+print(f"\nTotal: {len(rows)} node(s)  ({len(ctrl_rows)} controller, {len(all_rows)} registered)")
+PYEOF
+    rm -f "$_tmp"
 }
 
 cmd_status() {
