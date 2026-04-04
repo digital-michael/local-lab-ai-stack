@@ -332,21 +332,55 @@ COLS = [
     ("DISPLAY NAME",  "display_name", 16),
     ("PROFILE",       "profile",      16),
     ("STATUS",        "status",        9),
-    ("CAPABILITIES",  "capabilities", 42),
-    ("MODELS",        "models",       36),
+    ("CAPABILITIES",  "capabilities", 28),
+    ("MODELS",        "models",       28),
 ]
-hdr = "  ".join(f"{h:<{w}}" for h, _, w in COLS)
-sep = "  ".join("-" * w          for _, _, w in COLS)
+SEP = "  "
+
+def wrap_cell(text, width):
+    """Split comma-delimited text into lines of at most width chars.
+    Breaks preferentially at comma boundaries; falls back to hard breaks
+    only when a single token exceeds width."""
+    if len(text) <= width:
+        return [text] if text else [""]
+    tokens = text.split(",")
+    lines = []
+    current = ""
+    for tok in tokens:
+        candidate = current + ("," if current else "") + tok
+        if len(candidate) <= width:
+            current = candidate
+        else:
+            if current:
+                lines.append(current + ",")
+            # Token itself may exceed width — hard-break it
+            while len(tok) > width:
+                lines.append(tok[:width])
+                tok = tok[width:]
+            current = tok
+    if current:
+        lines.append(current)
+    return lines or [""]
+
+hdr = SEP.join(f"{h:<{w}}" for h, _, w in COLS)
+sep = SEP.join("-" * w     for _, _, w in COLS)
 print(hdr)
 print(sep)
 for r in rows:
-    vals = []
+    # Build wrapped lines per column
+    col_lines = []
     for _, key, w in COLS:
         v = r.get(key, "")
         if isinstance(v, list):
             v = fmt_list(v)
-        vals.append(f"{str(v)[:w]:<{w}}")
-    print("  ".join(vals))
+        col_lines.append(wrap_cell(str(v), w))
+    row_height = max(len(lines) for lines in col_lines)
+    for line_idx in range(row_height):
+        parts = []
+        for i, (_, _, w) in enumerate(COLS):
+            chunk = col_lines[i][line_idx] if line_idx < len(col_lines[i]) else ""
+            parts.append(f"{chunk:<{w}}")
+        print(SEP.join(parts))
 print(f"\nTotal: {len(rows)} node(s)  ({len(ctrl_rows)} controller, {len(all_rows)} registered)")
 PYEOF
     rm -f "$_tmp"
