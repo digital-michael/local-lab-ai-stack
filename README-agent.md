@@ -136,3 +136,22 @@ If a change must deviate from the guidance in `docs/library/framework_components
 | `best_practices.md` | Both | Industry-standard component practices |
 | `security.md` | Both | Hardening and access control |
 | `guidance.md` | Both | Project-specific opinionated decisions |
+
+---
+
+## 11 Session Protocol (Locked-In)
+
+Every agent session in this repo must establish **Locked-In** status before proceeding. Locked-In means three standing context aspects are engaged: meta framework, lessons learned, and active todo list.
+
+- **Default profile for this repo:** `standard`
+- **Forcing function:** `.github/copilot-instructions.md` (auto-injected by VS Code Copilot)
+- **Protocol definition (tooling-agnostic):** `docs/meta/meta_context_protocol.md`
+- **VS Code implementation:** `/memories/locked-in.md` (user↔agent), `/memories/locked-in-delegation.md` (agent↔agent)
+
+**Declaration format** (emitted once, first response of each conversation):
+```
+🔒 Locked-In | <context-type> | profile:<name>
+   loaded: <aspect> ✓  ...
+```
+
+A session without a declaration is implicitly **Not Locked-In**. If you are resuming a session and no declaration was emitted, load `standard` profile before proceeding.
