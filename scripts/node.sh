@@ -332,7 +332,7 @@ COLS = [
     ("DISPLAY NAME",  "display_name", 16),
     ("PROFILE",       "profile",      16),
     ("STATUS",        "status",        9),
-    ("CAPABILITIES",  "capabilities", 24),
+    ("CAPABILITIES",  "capabilities", 42),
     ("MODELS",        "models",       36),
 ]
 hdr = "  ".join(f"{h:<{w}}" for h, _, w in COLS)
