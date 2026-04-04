@@ -293,10 +293,18 @@ else
     _install_unit() {
         local unit_name="$1"
         local dest="$SYSTEMD_USER_DIR/$unit_name"
-        if [[ -n "$QUADLET_TMPL_DIR" && -f "$QUADLET_TMPL_DIR/$unit_name" ]]; then
-            cp "$QUADLET_TMPL_DIR/$unit_name" "$dest"
-        else
-            case "$unit_name" in
+        case "$unit_name" in
+            ai-stack-heartbeat.service)
+                # Always generate from heredoc so $HEARTBEAT_SCRIPT is substituted.
+                # Never copy the template — it contains a hardcoded %h/ai-stack path.
+                true ;;
+            *)
+                if [[ -n "$QUADLET_TMPL_DIR" && -f "$QUADLET_TMPL_DIR/$unit_name" ]]; then
+                    cp "$QUADLET_TMPL_DIR/$unit_name" "$dest"
+                    return
+                fi ;;
+        esac
+        case "$unit_name" in
                 ai-stack-heartbeat.service)
                     cat > "$dest" <<EOF
 [Unit]
@@ -326,7 +334,6 @@ WantedBy=timers.target
 EOF
                     ;;
             esac
-        fi
     }
 
     _install_unit "ai-stack-heartbeat.service"
