@@ -11,7 +11,9 @@
   "registered_at": "2026-03-24T00:00:00Z",
   "models": [
     "llama3.1:8b",
-    "qwen2.5-1.5b"
+    "qwen3.5:4b",
+    "qwen3:8b",
+    "llama3.2:3b"
   ],
   "capabilities": ["knowledge-index", "qdrant", "postgres"],
   "ki_port": 8100

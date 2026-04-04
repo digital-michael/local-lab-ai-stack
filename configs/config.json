@@ -12,7 +12,30 @@
     {
       "name": "llama3.1:8b",
       "backend": "ollama",
-      "device": "cpu"
+      "device": "gpu",
+      "num_gpu": -1,
+      "description": "8B — full GPU (RTX 3070 Ti)"
+    },
+    {
+      "name": "qwen3.5:4b",
+      "backend": "ollama",
+      "device": "gpu",
+      "num_gpu": -1,
+      "description": "4.7B — full GPU (RTX 3070 Ti)"
+    },
+    {
+      "name": "qwen3:8b",
+      "backend": "ollama",
+      "device": "gpu",
+      "num_gpu": -1,
+      "description": "8B — full GPU (RTX 3070 Ti)"
+    },
+    {
+      "name": "llama3.2:3b",
+      "backend": "ollama",
+      "device": "gpu",
+      "num_gpu": -1,
+      "description": "3B — full GPU (RTX 3070 Ti)"
     },
     {
       "name": "qwen2.5-1.5b",
@@ -453,7 +476,9 @@
         }
       ],
       "environment": {
-        "CUDA_VISIBLE_DEVICES": ""
+        "OLLAMA_MAX_LOADED_MODELS": "2",
+        "OLLAMA_KEEP_ALIVE": "5m",
+        "OLLAMA_NUM_PARALLEL": "1"
       },
       "secrets": [],
       "health_check": {
@@ -463,9 +488,9 @@
         "timeout": "5s"
       },
       "resources": {
-        "cpus": 4,
-        "memory": "16g",
-        "gpu": null
+        "cpus": null,
+        "memory": null,
+        "gpu": "nvidia.com/gpu=0"
       }
     },
     "flowise": {
