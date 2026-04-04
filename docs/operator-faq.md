@@ -413,6 +413,36 @@ Then re-run `pull-models.sh`.
 
 ---
 
+### Restricting Ollama port on inference worker nodes
+
+The controller's Ollama binds to `127.0.0.1:11434` (set in `configs/config.json`) — it is
+not exposed on the LAN because LiteLLM reaches it via the internal container network.
+
+Remote **bare-metal** worker nodes run Ollama natively. By default, Ollama listens on
+`0.0.0.0:11434`. To restrict it to the controller IP only, add a firewall rule on each
+worker host:
+
+**Linux (ufw):**
+```bash
+sudo ufw deny 11434              # block all by default
+sudo ufw allow from <controller-ip> to any port 11434
+sudo ufw reload
+```
+
+**Linux (iptables):**
+```bash
+iptables -A INPUT -p tcp --dport 11434 ! -s <controller-ip> -j DROP
+```
+
+**macOS (pf) — add to `/etc/pf.conf`:**
+```
+block in on en0 proto tcp from any to any port 11434
+pass  in on en0 proto tcp from <controller-ip> to any port 11434
+```
+Then `sudo pfctl -f /etc/pf.conf && sudo pfctl -e`.
+
+---
+
 ### Knowledge Index returns 401 on `/v1/catalog`
 
 The endpoint requires a valid API key:
