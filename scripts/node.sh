@@ -11,6 +11,8 @@ set -euo pipefail
 #                                 Register this worker with the controller
 #   unjoin  [--controller <url>] [--node-id <id>]
 #                                 Remove this worker from the controller
+#   purge   [--node-id <id>] [--older-than <minutes>] [--dry-run] [--force]
+#                                 Hard-delete offline nodes (or a specific node) from the registry
 #   pause                         (stub) Pause heartbeats without unjoining
 #   list    [--controller <url>] [--api-key <key>] [-v] [-m]  List all registered nodes and their status
 #   status  [--node-id <id>]      Show this node's status from the controller
@@ -40,6 +42,10 @@ Commands:
           [--address <url>]      This node's KI base URL (default: auto-detect)
   unjoin  [--controller <url>]   Remove this node from controller routing
           [--node-id <id>]
+  purge   [--node-id <id>]       Hard-delete a specific node regardless of status (prompts unless --force)
+          [--older-than <min>]   Bulk: purge offline nodes last seen > N minutes ago (default: all offline)
+          [--dry-run]            Show candidates without deleting
+          [--force]              Skip confirmation prompt
   pause                          Stub: pause heartbeats temporarily
   list    [--controller <url>] \
           [--api-key <key>] [-v] [-m]  List nodes (-v: show messages, -m: names+messages only)
@@ -235,6 +241,142 @@ cmd_unjoin() {
 cmd_pause() {
     echo "(stub) pause — heartbeat suspension not yet implemented" >&2
     echo "To stop this node from routing: node.sh unjoin"
+}
+
+cmd_purge() {
+    _load_state
+    local node_id_arg="" older_than="" dry_run=0 force=0
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --controller)   CONTROLLER_URL="$2"; shift 2 ;;
+            --api-key)      API_KEY_STATE="$2";  shift 2 ;;
+            --node-id)      node_id_arg="$2";    shift 2 ;;
+            --older-than)   older_than="$2";     shift 2 ;;
+            --dry-run)      dry_run=1;           shift   ;;
+            --force)        force=1;             shift   ;;
+            *)              echo "Unknown option: $1" >&2; exit 1 ;;
+        esac
+    done
+
+    _require_controller
+
+    # Fetch current node list
+    local response http_code body_part
+    response=$(_curl_admin GET "/admin/v1/nodes") || {
+        echo "ERROR: Failed to reach controller at ${CONTROLLER_URL}" >&2; exit 1
+    }
+    http_code=$(echo "$response" | tail -1)
+    body_part=$(echo "$response" | sed '$d')
+    if [[ "$http_code" != "200" ]]; then
+        echo "ERROR: Could not fetch node list (HTTP $http_code)" >&2; exit 1
+    fi
+
+    local _tmp; _tmp=$(mktemp)
+    echo "$body_part" > "$_tmp"
+    local _node_id_arg="$node_id_arg"
+    local _older_than="$older_than"
+
+    # Build candidate list — tab-separated: node_id, display_name, status, last_seen
+    local candidates
+    candidates=$(python3 - "$_tmp" "$_node_id_arg" "$_older_than" <<'PYEOF' 2>&1
+import json, sys, datetime
+
+now  = datetime.datetime.now(datetime.timezone.utc)
+data = json.load(open(sys.argv[1]))
+nodes        = data.get('nodes', [])
+node_id_arg  = sys.argv[2]
+older_than   = sys.argv[3]  # minutes, or ""
+
+def parse_ts(s):
+    for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S',
+                '%Y-%m-%dT%H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S'):
+        try:
+            return datetime.datetime.strptime(s[:26], fmt).replace(
+                       tzinfo=datetime.timezone.utc)
+        except ValueError:
+            pass
+    return None
+
+results = []
+if node_id_arg:
+    match = next((n for n in nodes if n['node_id'] == node_id_arg), None)
+    if not match:
+        print('ERROR: node not found: ' + node_id_arg, file=sys.stderr)
+        sys.exit(1)
+    results.append(match)
+else:
+    for n in nodes:
+        if n.get('status') != 'offline':
+            continue
+        if older_than:
+            ls = n.get('last_seen', '')
+            if not ls:
+                continue
+            dt = parse_ts(ls)
+            if dt is None:
+                continue
+            if (now - dt).total_seconds() / 60 < float(older_than):
+                continue
+        results.append(n)
+
+for n in results:
+    ls = (n.get('last_seen') or '')[:19]
+    print(n['node_id'] + '\t' + n.get('display_name', '') + '\t' +
+          n.get('status', '') + '\t' + ls)
+PYEOF
+    )
+    local py_exit=$?
+    rm -f "$_tmp"
+    if [[ $py_exit -ne 0 ]]; then echo "$candidates" >&2; exit 1; fi
+
+    if [[ -z "$candidates" ]]; then
+        echo "No nodes match the purge criteria."
+        exit 0
+    fi
+
+    # Display candidates
+    echo "Nodes to be purged:"
+    echo ""
+    printf "  %-24s  %-20s  %-12s  %s\n" "NODE ID" "DISPLAY NAME" "STATUS" "LAST SEEN"
+    printf "  %-24s  %-20s  %-12s  %s\n" "------------------------" "--------------------" "------------" "-------------------"
+    while IFS=$'\t' read -r nid dname status ls; do
+        printf "  %-24s  %-20s  %-12s  %s\n" "$nid" "$dname" "$status" "$ls"
+    done <<< "$candidates"
+    echo ""
+
+    if [[ $dry_run -eq 1 ]]; then
+        echo "(dry-run — no changes made)"
+        exit 0
+    fi
+
+    # Confirm unless --force
+    if [[ $force -eq 0 ]]; then
+        local count ans
+        count=$(echo "$candidates" | wc -l | tr -d ' ')
+        read -r -p "Permanently delete ${count} node(s)? This cannot be undone. [y/N] " ans
+        [[ "$ans" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
+    fi
+
+    # Execute purge
+    local failed=0
+    while IFS=$'\t' read -r nid _rest; do
+        local del_resp del_http del_body
+        del_resp=$(_curl_admin DELETE "/admin/v1/nodes/${nid}/purge") || {
+            echo "  ERROR: request failed for ${nid}" >&2; failed=1; continue
+        }
+        del_http=$(echo "$del_resp" | tail -1)
+        del_body=$(echo "$del_resp" | sed '$d')
+        if [[ "$del_http" == "200" ]]; then
+            echo "  purged: ${nid}"
+        else
+            echo "  ERROR: ${nid} — HTTP ${del_http}: ${del_body}" >&2
+            failed=1
+        fi
+    done <<< "$candidates"
+
+    [[ $failed -eq 0 ]] && echo "" && echo "Done."
+    exit $failed
 }
 
 cmd_list() {
@@ -521,6 +663,7 @@ case "${1:-help}" in
     join)        shift; cmd_join "$@" ;;
     unjoin)      shift; cmd_unjoin "$@" ;;
     pause)       cmd_pause ;;
+    purge)       shift; cmd_purge "$@" ;;
     list)        shift; cmd_list "$@" ;;
     status)      shift; cmd_status "$@" ;;
     suggestions) shift; cmd_suggestions "$@" ;;

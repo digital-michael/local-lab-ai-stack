@@ -652,6 +652,44 @@ def unjoin_node(node_id: str, request: Request) -> dict:
     return {"node_id": node_id, "status": "unregistered"}
 
 
+@router.delete("/{node_id}/purge")
+def purge_node(node_id: str, request: Request) -> dict:
+    """Hard-delete a node and all its history from the DB; remove from LiteLLM."""
+    _require_controller()
+    _check_admin(request)
+    assert _db is not None
+
+    with _db.connect() as conn:
+        row = conn.execute(
+            text("SELECT status, litellm_model_ids FROM nodes WHERE node_id = :id"),
+            {"id": node_id},
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Node not found")
+
+        ltm_ids: list[str] = []
+        try:
+            ltm_ids = json.loads(row[1] or "[]")
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        conn.execute(
+            text("DELETE FROM node_suggestions WHERE node_id = :id"), {"id": node_id}
+        )
+        conn.execute(
+            text("DELETE FROM node_heartbeats WHERE node_id = :id"), {"id": node_id}
+        )
+        conn.execute(
+            text("DELETE FROM nodes WHERE node_id = :id"), {"id": node_id}
+        )
+        conn.commit()
+
+    if ltm_ids:
+        _litellm_remove_ids(ltm_ids)
+
+    return {"node_id": node_id, "purged": True}
+
+
 @router.get("/{node_id}/suggestions")
 def list_suggestions(node_id: str, request: Request) -> dict:
     """List pending (unconsumed) suggestions for a node."""
