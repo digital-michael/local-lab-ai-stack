@@ -208,6 +208,25 @@ def _init_db() -> None:
                 {"eid": str(_uuid.uuid4()), "nid": nid},
             )
         conn.commit()
+        # Migration: recreate node_id FKs with ON UPDATE CASCADE so rename works
+        try:
+            conn.execute(text("SAVEPOINT pre_fk_cascade_migration"))
+            conn.execute(text(
+                "ALTER TABLE node_heartbeats "
+                "DROP CONSTRAINT IF EXISTS node_heartbeats_node_id_fkey, "
+                "ADD CONSTRAINT node_heartbeats_node_id_fkey "
+                "FOREIGN KEY (node_id) REFERENCES nodes(node_id) ON UPDATE CASCADE ON DELETE CASCADE"
+            ))
+            conn.execute(text(
+                "ALTER TABLE node_suggestions "
+                "DROP CONSTRAINT IF EXISTS node_suggestions_node_id_fkey, "
+                "ADD CONSTRAINT node_suggestions_node_id_fkey "
+                "FOREIGN KEY (node_id) REFERENCES nodes(node_id) ON UPDATE CASCADE ON DELETE CASCADE"
+            ))
+            conn.execute(text("RELEASE SAVEPOINT pre_fk_cascade_migration"))
+        except Exception:
+            conn.execute(text("ROLLBACK TO SAVEPOINT pre_fk_cascade_migration"))
+        conn.commit()
 
 
 _init_db()

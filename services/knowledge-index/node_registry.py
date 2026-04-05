@@ -538,17 +538,9 @@ def node_heartbeat(node_id: str, req: HeartbeatRequest, request: Request) -> dic
         ).fetchone()
         if pending_row and pending_row[0]:
             new_id = pending_row[0]
-            # Update nodes first so the FK target exists before updating child tables
+            # ON UPDATE CASCADE propagates to node_heartbeats and node_suggestions automatically
             conn.execute(
                 text("UPDATE nodes SET node_id = :new, pending_node_id = NULL WHERE node_id = :old"),
-                {"new": new_id, "old": node_id},
-            )
-            conn.execute(
-                text("UPDATE node_heartbeats SET node_id = :new WHERE node_id = :old"),
-                {"new": new_id, "old": node_id},
-            )
-            conn.execute(
-                text("UPDATE node_suggestions SET node_id = :new WHERE node_id = :old"),
                 {"new": new_id, "old": node_id},
             )
             conn.commit()
