@@ -546,7 +546,12 @@ class TestT093NodeAdminAuthInProcess:
                     token_hash        TEXT,
                     litellm_model_ids TEXT NOT NULL DEFAULT '[]',
                     registered_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    last_seen         TIMESTAMP
+                    last_seen         TIMESTAMP,
+                    node_api_key_hash TEXT,
+                    last_message      TEXT NOT NULL DEFAULT '',
+                    entry_id          TEXT NOT NULL DEFAULT '',
+                    pending_node_id   TEXT,
+                    alias             TEXT NOT NULL DEFAULT ''
                 )
             """))
             conn.execute(text("""

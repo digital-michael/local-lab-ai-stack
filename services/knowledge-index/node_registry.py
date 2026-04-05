@@ -118,7 +118,7 @@ class NodeRegisterRequest(BaseModel):
     display_name: str             = ""
     profile:      str             = "knowledge-worker"
     address:      str             = ""
-    capabilities: list[str]       = []
+    capabilities: list[str] | dict[str, Any] = {}
 
 
 class JoinRequest(BaseModel):
@@ -336,6 +336,8 @@ def _transition_up(node_id: str, conn: Any) -> bool:
     try:
         caps = json.loads(caps_raw)
     except (json.JSONDecodeError, TypeError):
+        caps = {}
+    if not isinstance(caps, dict):
         caps = {}
     models = caps.get("models_loaded") or []
     if models and address:

@@ -56,21 +56,26 @@ def in_memory_db():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    # Bootstrap schema (mirrors _init_db logic for the Phase 22 tables)
+    # Bootstrap schema — keep in sync with _init_db() in app.py
     with engine.connect() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS nodes (
-                node_id           TEXT PRIMARY KEY,
-                display_name      TEXT NOT NULL DEFAULT '',
-                profile           TEXT NOT NULL DEFAULT 'knowledge-worker',
-                address           TEXT NOT NULL DEFAULT '',
-                capabilities      TEXT NOT NULL DEFAULT '{}',
-                status            TEXT NOT NULL DEFAULT 'unregistered'
-                                      CHECK (status IN ('online','caution','failed','offline','unregistered')),
-                token_hash        TEXT,
-                litellm_model_ids TEXT NOT NULL DEFAULT '[]',
-                registered_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                last_seen         TIMESTAMP
+                node_id              TEXT PRIMARY KEY,
+                display_name         TEXT NOT NULL DEFAULT '',
+                profile              TEXT NOT NULL DEFAULT 'knowledge-worker',
+                address              TEXT NOT NULL DEFAULT '',
+                capabilities         TEXT NOT NULL DEFAULT '{}',
+                status               TEXT NOT NULL DEFAULT 'unregistered'
+                                         CHECK (status IN ('online','caution','failed','offline','unregistered')),
+                token_hash           TEXT,
+                litellm_model_ids    TEXT NOT NULL DEFAULT '[]',
+                registered_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_seen            TIMESTAMP,
+                node_api_key_hash    TEXT,
+                last_message         TEXT NOT NULL DEFAULT '',
+                entry_id             TEXT NOT NULL DEFAULT '',
+                pending_node_id      TEXT,
+                alias                TEXT NOT NULL DEFAULT ''
             )
         """))
         conn.execute(text("""
