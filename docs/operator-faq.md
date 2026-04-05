@@ -462,6 +462,38 @@ systemctl --user restart knowledge-index.service
 
 ---
 
+### Worker node registered but never sends heartbeats
+
+`node.sh join` only writes the state files (`controller_url`, `node_id`, `api_key`) to
+`~/.config/ai-stack/` on the worker. It does **not** install the systemd timer units.
+The heartbeat timer must be installed separately by running `bootstrap.sh` locally on the
+worker — if that step was skipped, the node will appear in `node.sh list` (the DB entry
+exists) but will immediately fall to `caution` → `failed` → `offline` with no errors, since
+there is simply no timer present to fire.
+
+**Symptoms:**
+- `systemctl --user status ai-stack-heartbeat.timer` → `Unit ... could not be found`
+- `~/.config/ai-stack/` exists but contains only files created manually (no state files, or
+  state files were written manually without a matching bootstrap run)
+- Node shows in `node.sh list` but transitions to `failed` within 3 minutes of joining
+
+**Fix — install the timer on the worker:**
+```bash
+cp ~/ai-stack/configs/quadlets/ai-stack-heartbeat.service ~/.config/systemd/user/
+cp ~/ai-stack/configs/quadlets/ai-stack-heartbeat.timer   ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now ai-stack-heartbeat.timer
+```
+
+If the repo is not at `~/ai-stack/` on this machine, the `ExecStart` path in the installed
+service unit must be corrected before reloading:
+```bash
+sed -i "s|%h/ai-stack/scripts/heartbeat.sh|$(pwd)/scripts/heartbeat.sh|" \
+  ~/.config/systemd/user/ai-stack-heartbeat.service
+```
+
+---
+
 ### A worker node shows `failed` or `caution` instead of `online`
 
 The node missed consecutive heartbeats. The state machine is:
