@@ -452,6 +452,36 @@ print(json.dumps(obj))
     if [[ "$http_code" == "200" ]]; then
         echo "Done."
         [[ -n "$new_id" ]] && echo "  Waiting for node to pick up rename on next heartbeat..."
+
+        # Keep configs/nodes/*.json in sync with the live DB rename so that
+        # harden-worker, generate-join-token, and any other local tools that
+        # read node_id from static files stay accurate.
+        if [[ -n "$new_id" ]]; then
+            local nodes_dir="$SCRIPT_DIR/../configs/nodes"
+            local updated_file="" f
+            while IFS= read -r -d '' f; do
+                local nid
+                nid=$(jq -r '.node_id // empty' "$f")
+                if [[ "$nid" == "$target_node_id" ]]; then
+                    updated_file="$f"
+                    break
+                fi
+            done < <(find "$nodes_dir" -maxdepth 1 -name '*.json' -print0 2>/dev/null)
+
+            if [[ -n "$updated_file" ]]; then
+                local tmp
+                tmp=$(mktemp)
+                if jq --arg v "$new_id" '.node_id = $v' "$updated_file" > "$tmp"; then
+                    mv "$tmp" "$updated_file"
+                    echo "  Updated $(basename "$updated_file"): node_id $target_node_id → $new_id"
+                else
+                    rm -f "$tmp"
+                    echo "  WARN: could not update $(basename "$updated_file") — update node_id manually" >&2
+                fi
+            else
+                echo "  NOTE: no matching file in configs/nodes/ for node_id='$target_node_id' — nothing to update locally"
+            fi
+        fi
     else
         echo "ERROR: rename failed (HTTP $http_code):" >&2
         echo "$body_part" >&2
