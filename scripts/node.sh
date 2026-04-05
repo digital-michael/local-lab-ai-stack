@@ -22,6 +22,9 @@ set -euo pipefail
 #   suggestions show   <suggestion-id> [--node-id <id>]
 #   suggestions apply  <suggestion-id> [--node-id <id>]
 #                                 Manage controller suggestions for this node
+#   harden-worker --node-id <id> [--controller-ip <ip>]
+#                                 Print OS-appropriate firewall rules to restrict Ollama :11434
+#                                 on an inference-worker to controller access only
 #   undeploy                      Remove the knowledge-index container
 #   help                          Show this message
 
@@ -58,6 +61,9 @@ Commands:
   suggestions list               List pending suggestions
   suggestions show <id>          Show suggestion detail
   suggestions apply <id>         Mark suggestion consumed
+  harden-worker --node-id <id> \
+          [--controller-ip <ip>] Print OS-appropriate firewall rules to restrict Ollama :11434
+                                 on the target inference-worker to controller access only
   undeploy                       Stop and remove knowledge-index container
   help                           This message
 
@@ -727,6 +733,182 @@ cmd_undeploy() {
 }
 
 # ---------------------------------------------------------------------------
+# harden-worker — Print firewall commands to restrict Ollama port 11434
+#                 on an inference-worker node to controller access only.
+#
+# Usage: node.sh harden-worker --node-id <id> [--controller-ip <ip>]
+#
+# Reads node config from configs/nodes/<alias>.json to determine OS and
+# deployment type, then prints OS-appropriate firewall instructions.
+# The operator copies these commands and runs them on the target worker.
+# ---------------------------------------------------------------------------
+
+_harden_worker_linux() {
+    local node_id="$1" controller_ip="$2"
+    local port="11434"
+
+    cat <<EOF
+Linux (nftables / firewalld) — run on worker node: $node_id
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Option A — nftables (Fedora / RHEL 9+ default):
+
+  # Allow Ollama from controller only; drop all other inbound traffic on 11434
+  sudo nft add rule inet filter input ip saddr $controller_ip tcp dport $port accept comment '"ai-stack allow controller"'
+  sudo nft add rule inet filter input tcp dport $port drop comment '"ai-stack block ollama"'
+
+  # Persist across reboots:
+  sudo sh -c 'nft list ruleset > /etc/nftables.conf'
+  sudo systemctl enable --now nftables
+
+Option B — firewalld (if active instead of raw nftables):
+
+  sudo firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="$controller_ip" port port="$port" protocol="tcp" accept'
+  sudo firewall-cmd --permanent --add-rich-rule='rule family="ipv4" port port="$port" protocol="tcp" drop'
+  sudo firewall-cmd --reload
+
+Verify from the controller after applying:
+  bash scripts/configure.sh security-audit   # WORKER-OLLAMA-${node_id^^} should show OK
+
+EOF
+}
+
+_harden_worker_macos() {
+    local node_id="$1" controller_ip="$2"
+    local port="11434"
+
+    cat <<EOF
+macOS (pf) — run on worker node: $node_id
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Step 1 — Create the pf anchor file:
+
+  sudo tee /etc/pf.anchors/ai-stack-ollama <<'PFRULES'
+  # Allow Ollama from controller only
+  pass  in quick proto tcp from $controller_ip to any port $port
+  block in quick proto tcp to any port $port
+  PFRULES
+
+Step 2 — Load it immediately:
+
+  sudo pfctl -a ai-stack-ollama -f /etc/pf.anchors/ai-stack-ollama
+  sudo pfctl -e
+
+Step 3 — Persist across reboots:
+  Add the following line to /etc/pf.conf (before the 'anchor "com.apple/*"' line):
+
+    anchor "ai-stack-ollama" from file "/etc/pf.anchors/ai-stack-ollama"
+
+Verify from the controller after applying:
+  bash scripts/configure.sh security-audit   # WORKER-OLLAMA-${node_id^^} should show OK
+
+EOF
+}
+
+cmd_harden_worker() {
+    local node_id="" controller_ip_override=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --node-id)       node_id="$2";               shift 2 ;;
+            --controller-ip) controller_ip_override="$2"; shift 2 ;;
+            -h|--help)
+                echo "Usage: node.sh harden-worker --node-id <id> [--controller-ip <ip>]"
+                echo ""
+                echo "Prints OS-appropriate firewall instructions to restrict Ollama port 11434"
+                echo "on the target inference-worker to the controller IP only."
+                echo ""
+                echo "Options:"
+                echo "  --node-id       <id>   Worker node_id (required)"
+                echo "  --controller-ip <ip>   Override auto-detected controller IP"
+                return 0 ;;
+            *) echo "ERROR: unknown flag: $1" >&2; usage >&2; exit 1 ;;
+        esac
+    done
+
+    if [[ -z "$node_id" ]]; then
+        echo "ERROR: --node-id is required" >&2
+        usage >&2
+        exit 1
+    fi
+
+    # --- Locate node in configs/nodes/ ---
+    local nodes_dir="$SCRIPT_DIR/../configs/nodes"
+    local node_file=""
+    local f
+    while IFS= read -r -d '' f; do
+        local nid
+        nid=$(jq -r '.node_id // empty' "$f")
+        if [[ "$nid" == "$node_id" ]]; then
+            node_file="$f"
+            break
+        fi
+    done < <(find "$nodes_dir" -maxdepth 1 -name '*.json' -print0 2>/dev/null)
+
+    if [[ -z "$node_file" ]]; then
+        echo "ERROR: No node with node_id='$node_id' found in configs/nodes/" >&2
+        echo "       Available nodes:" >&2
+        jq -r '.node_id' "$nodes_dir"/*.json 2>/dev/null | sed 's/^/         /' >&2
+        exit 1
+    fi
+
+    local profile os_type
+    profile=$(jq -r '.profile // ""' "$node_file")
+    os_type=$(jq -r '.os // "linux"' "$node_file")
+
+    if [[ "$profile" != "inference-worker" ]]; then
+        echo "ERROR: node '$node_id' has profile '$profile' — only inference-worker nodes run Ollama" >&2
+        exit 1
+    fi
+
+    # --- Resolve controller IP ---
+    local controller_ip="$controller_ip_override"
+    if [[ -z "$controller_ip" ]]; then
+        local ctrl_addr ctrl_fallback
+        ctrl_addr=$(for cf in "$nodes_dir"/*.json; do
+            [[ -f "$cf" ]] && jq -r 'select(.profile == "controller") | .address // empty' "$cf"
+        done 2>/dev/null | grep -v '^$' | head -1 || true)
+        ctrl_fallback=$(for cf in "$nodes_dir"/*.json; do
+            [[ -f "$cf" ]] && jq -r 'select(.profile == "controller") | .address_fallback // empty' "$cf"
+        done 2>/dev/null | grep -v '^null$\|^$' | head -1 || true)
+
+        # Resolve DNS to IP — firewall rules need an IP, not a hostname
+        if [[ -n "$ctrl_addr" && "$ctrl_addr" != "null" ]]; then
+            local resolved
+            resolved=$(getent hosts "$ctrl_addr" 2>/dev/null | awk '{print $1}' | head -1 || true)
+            controller_ip="${resolved:-$ctrl_fallback}"
+        fi
+        if [[ -z "$controller_ip" || "$controller_ip" == "null" ]]; then
+            controller_ip="$ctrl_fallback"
+        fi
+    fi
+
+    if [[ -z "$controller_ip" || "$controller_ip" == "null" ]]; then
+        echo "ERROR: Cannot determine controller IP." >&2
+        echo "       Set address_fallback on the controller node in configs/nodes/, or use --controller-ip <ip>" >&2
+        exit 1
+    fi
+
+    local worker_addr
+    worker_addr=$(jq -r '.address // .address_fallback // "unknown"' "$node_file")
+
+    echo ""
+    echo "Inference Worker Hardening Plan"
+    echo "================================"
+    echo "  Node:           $node_id  ($worker_addr)"
+    echo "  OS:             $os_type"
+    echo "  Controller IP:  $controller_ip"
+    echo "  Goal:           Restrict Ollama :11434 to controller access only"
+    echo ""
+
+    if [[ "$os_type" == "darwin" ]]; then
+        _harden_worker_macos "$node_id" "$controller_ip"
+    else
+        _harden_worker_linux "$node_id" "$controller_ip"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -741,8 +923,9 @@ case "${1:-help}" in
     rename)      shift; cmd_rename "$@" ;;
     list)        shift; cmd_list "$@" ;;
     status)      shift; cmd_status "$@" ;;
-    suggestions) shift; cmd_suggestions "$@" ;;
-    undeploy)    cmd_undeploy ;;
+    suggestions)    shift; cmd_suggestions "$@" ;;
+    undeploy)       cmd_undeploy ;;
+    harden-worker)  shift; cmd_harden_worker "$@" ;;
     help|--help|-h) usage ;;
     *)
         echo "Unknown command: $1" >&2

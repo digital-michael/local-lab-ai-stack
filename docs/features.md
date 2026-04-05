@@ -68,6 +68,7 @@ The stack is designed to grow: new inference nodes can be added to increase capa
 - [Security Audit Tool](#x-security-audit-tool)
 - [Dynamic Node Registration](#x-dynamic-node-registration)
 - [Worker Sleep Inhibitor](#x-worker-sleep-inhibitor)
+- [Inference Node Hardening](#x-inference-node-hardening)
 
 **Partially Available**
 - [Local GPU Acceleration](#--local-gpu-acceleration-controller)
@@ -76,7 +77,6 @@ The stack is designed to grow: new inference nodes can be added to increase capa
 
 **Pending**
 - [vLLM GPU Inference](#-vllm-gpu-inference)
-- [Inference Node Hardening](#-inference-node-hardening)
 
 **Deferred**
 - [Peer Node Topology](#d-peer-node-topology)
@@ -213,8 +213,9 @@ The controller node's GPU can be used for high-speed inference, enabling larger 
 Registered inference nodes are functional but not independently hardened — they rely on network-level trust rather than per-node authentication.
 - The controller's API is fully protected; inference node endpoints are not
 - The inference port on each node is reachable by any host on the same network segment
-- Per-node API key enforcement and firewall rules: **pending**
-- _Tracked: [Inference Node Hardening](#-inference-node-hardening)_ · _Delivered: [Security Audit Tool](#x-security-audit-tool)_
+- Per-node API key enforcement: **pending**
+- Firewall enforcement: **available** — `bash scripts/node.sh harden-worker --node-id <id>`
+- _Delivered: [Security Audit Tool](#x-security-audit-tool)_ · _Delivered: [Inference Node Hardening](#x-inference-node-hardening)_
 
 ### `[-]` Local/WAN Discovery Profiles
 Protocol specifications and stub endpoints for discovering knowledge libraries on peer nodes (local mDNS/DNS-SD) and federated registries (WAN).
@@ -254,6 +255,14 @@ Prevents worker nodes from sleeping or hibernating while the AI stack is running
 - Automatically acquired by `start.sh` and released by `stop.sh`
 - _Script: [scripts/inhibit.sh](../scripts/inhibit.sh)_ · _Delivered: [Phase 23](ai_stack_blueprint/ai_stack_checklist.md#phase-23)_
 
+### `[X]` Inference Node Hardening
+`node.sh harden-worker` — generates OS-appropriate firewall instructions to restrict Ollama port 11434 on an inference-worker node to the controller IP only.
+- Reads controller IP from `configs/nodes/` (DNS-resolved to IP; falls back to `address_fallback`)
+- Linux: prints `nftables` rules (primary) and `firewalld` rich-rules (alternative)
+- macOS: prints `pf` anchor file + load commands + `/etc/pf.conf` persistence step
+- `configure.sh security-audit` Check E now includes the exact `harden-worker` remediation command in its CRITICAL finding message
+- _Delivered: [Phase 24](ai_stack_blueprint/ai_stack_checklist.md) · Script: [scripts/node.sh](../scripts/node.sh)_
+
 ---
 
 ## Pending Features
@@ -261,10 +270,6 @@ Prevents worker nodes from sleeping or hibernating while the AI stack is running
 ### `[ ]` vLLM GPU Inference
 Running GPU-optimized large language models on the controller's dedicated GPU for maximum local performance on demanding tasks.
 - _Planned: [Phase 8](ai_stack_blueprint/ai_stack_checklist.md#phase-8--local-gpu-enablement-and-model-routing)_
-
-### `[ ]` Inference Node Hardening
-Restrict inference node endpoints so that only the controller can reach them — preventing unauthenticated access from other hosts on the network. Phase 19 detects this condition; enforcement (firewall rules or Ollama auth proxy) is a separate future item.
-- _Detected by: [Security Audit Tool](#x-security-audit-tool) · Enforcement tracked: [checklist Future Features](ai_stack_blueprint/ai_stack_checklist.md#4-future-features-architecture-roadmap)_
 
 ---
 
