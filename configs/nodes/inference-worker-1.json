@@ -1,7 +1,7 @@
 {
   "schema_version": "1.1",
   "alias": "inference-worker-1",
-  "node_id": "tc25",
+  "node_id": "TC25",
   "name": "macbook-m1",
   "address": "TC25.mynetworksettings.com",
   "address_fallback": "10.19.208.118",
@@ -13,5 +13,7 @@
   "models": [
     "llama3.1:8b-instruct-q4_K_M"
   ],
-  "capabilities": ["inference"]
+  "capabilities": [
+    "inference"
+  ]
 }

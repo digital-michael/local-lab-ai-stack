@@ -1,7 +1,7 @@
 {
   "schema_version": "1.2",
   "alias": "controller-1",
-  "node_id": "services",
+  "node_id": "CENTAURI",
   "name": "workstation",
   "address": "SERVICES.mynetworksettings.com",
   "address_fallback": null,
@@ -16,6 +16,11 @@
     "qwen3:8b",
     "llama3.2:3b"
   ],
-  "capabilities": ["knowledge-index", "qdrant", "postgres", "inference"],
+  "capabilities": [
+    "knowledge-index",
+    "qdrant",
+    "postgres",
+    "inference"
+  ],
   "ki_port": 8100
 }
