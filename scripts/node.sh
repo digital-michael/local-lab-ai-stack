@@ -12,7 +12,7 @@ set -euo pipefail
 #   unjoin  [--controller <url>] [--node-id <id>]
 #                                 Remove this worker from the controller
 #   pause                         (stub) Pause heartbeats without unjoining
-#   list    [--controller <url>] [--api-key <key>]  List all registered nodes and their status
+#   list    [--controller <url>] [--api-key <key>] [-v]  List all registered nodes and their status
 #   status  [--node-id <id>]      Show this node's status from the controller
 #   suggestions list   [--node-id <id>]
 #   suggestions show   <suggestion-id> [--node-id <id>]
@@ -42,7 +42,7 @@ Commands:
           [--node-id <id>]
   pause                          Stub: pause heartbeats temporarily
   list    [--controller <url>] \
-          [--api-key <key>]       List all registered nodes and their status
+          [--api-key <key>] [-v]  List all registered nodes and their status (-v: show node messages)
   status  [--node-id <id>]       Show node status from controller
   suggestions list               List pending suggestions
   suggestions show <id>          Show suggestion detail
@@ -239,10 +239,12 @@ cmd_pause() {
 
 cmd_list() {
     _load_state
+    local verbose=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --controller) CONTROLLER_URL="$2"; shift 2 ;;
             --api-key)    API_KEY_STATE="$2";  shift 2 ;;
+            -v)           verbose=1;           shift   ;;
             *)            echo "Unknown option: $1" >&2; exit 1 ;;
         esac
     done
@@ -266,12 +268,13 @@ cmd_list() {
     local _tmp; _tmp=$(mktemp)
     echo "$body_part" > "$_tmp"
 
-    python3 - "$_tmp" "$nodes_dir" <<'PYEOF'
+    python3 - "$_tmp" "$nodes_dir" "$verbose" <<'PYEOF'
 import glob, json, sys
 
 data      = json.load(open(sys.argv[1]))
 db_nodes  = data.get('nodes', [])
 nodes_dir = sys.argv[2]
+verbose   = len(sys.argv) > 3 and sys.argv[3] == '1'
 
 # ------------------------------------------------------------------
 # Load node-file data: node_id -> {models, display_name, capabilities}
@@ -383,9 +386,10 @@ for r in rows:
             parts.append(f"{chunk:<{w}}")
         print(SEP.join(parts))
     msg = r.get("last_message", "")
-    if msg:
-        print(f"  message: {msg}")
-print(f"\nTotal: {len(rows)} node(s)  ({len(ctrl_rows)} controller, {len(all_rows)} registered)")
+    if verbose and msg:
+        print(f"   Message: {msg}")
+    print()
+print(f"Total: {len(rows)} node(s)  ({len(ctrl_rows)} controller, {len(all_rows)} registered)")
 PYEOF
     rm -f "$_tmp"
 }

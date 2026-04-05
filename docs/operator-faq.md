@@ -553,6 +553,35 @@ If the log shows heartbeats but the node stays `failed`, remember two beats with
 
 ---
 
+### Rebuilding the knowledge-index container after code changes
+
+After editing `services/knowledge-index/app.py` or `node_registry.py`, the running container
+must be rebuilt and restarted. Two pitfalls:
+
+**1. Build the correct tag** — the quadlet is pinned to `0.1.0`. Building `:latest` creates a
+separate image; `systemctl restart` will silently keep running the old `0.1.0` image:
+
+```bash
+# Correct:
+podman build --no-cache -t localhost/knowledge-index:0.1.0 services/knowledge-index/
+
+# Wrong (container won't pick it up):
+podman build -t localhost/knowledge-index:latest services/knowledge-index/
+```
+
+**2. Always pass `--no-cache`** — the `COPY app.py node_registry.py` layer is cache-keyed
+on the Containerfile, not the source files. Without `--no-cache`, changed Python files are
+silently skipped and the old code is deployed.
+
+After building, restart and verify:
+
+```bash
+systemctl --user restart knowledge-index
+podman exec knowledge-index grep -c "<changed-symbol>" /app/node_registry.py
+```
+
+---
+
 ### A node shows `offline` and cannot send heartbeats
 
 `offline` is a terminal state — the node has been absent for > 24 hours. Heartbeats are rejected with 403. Re-register with a fresh token:
