@@ -22,9 +22,10 @@ set -euo pipefail
 #   suggestions show   <suggestion-id> [--node-id <id>]
 #   suggestions apply  <suggestion-id> [--node-id <id>]
 #                                 Manage controller suggestions for this node
-#   harden-worker --node-id <id> [--controller-ip <ip>]
+#   harden-worker --alias <alias> [--controller-ip <ip>]
 #                                 Print OS-appropriate firewall rules to restrict Ollama :11434
 #                                 on an inference-worker to controller access only
+#                                 (--node-id <id> also accepted for backward compat)
 #   undeploy                      Remove the knowledge-index container
 #   help                          Show this message
 
@@ -755,7 +756,8 @@ cmd_undeploy() {
 # harden-worker — Print firewall commands to restrict Ollama port 11434
 #                 on an inference-worker node to controller access only.
 #
-# Usage: node.sh harden-worker --node-id <id> [--controller-ip <ip>]
+# Usage: node.sh harden-worker --alias <alias> [--controller-ip <ip>]
+#              or: node.sh harden-worker --node-id <id> [--controller-ip <ip>]  (backward compat)
 #
 # Reads node config from configs/nodes/<alias>.json to determine OS and
 # deployment type, then prints OS-appropriate firewall instructions.

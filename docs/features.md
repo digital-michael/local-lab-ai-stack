@@ -214,7 +214,7 @@ Registered inference nodes are functional but not independently hardened — the
 - The controller's API is fully protected; inference node endpoints are not
 - The inference port on each node is reachable by any host on the same network segment
 - Per-node API key enforcement: **pending**
-- Firewall enforcement: **available** — `bash scripts/node.sh harden-worker --node-id <id>`
+- Firewall enforcement: **available** — `bash scripts/node.sh harden-worker --alias <alias>`
 - _Delivered: [Security Audit Tool](#x-security-audit-tool)_ · _Delivered: [Inference Node Hardening](#x-inference-node-hardening)_
 
 ### `[-]` Local/WAN Discovery Profiles

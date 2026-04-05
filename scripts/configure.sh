@@ -1607,7 +1607,7 @@ cmd_security_audit() {
                 worker_code=$(_http_check "http://${address}:${ollama_port_w}/api/tags")
                 if [[ "$worker_code" == "200" ]]; then
                     _finding CRITICAL "WORKER-OLLAMA-${alias^^}" \
-                        "Ollama on $alias ($address:${ollama_port_w}) is unauthenticated and reachable — run: bash scripts/node.sh harden-worker --node-id $(jq -r '.node_id' "$node_file")"
+                        "Ollama on $alias ($address:${ollama_port_w}) is unauthenticated and reachable — run: bash scripts/node.sh harden-worker --alias $(jq -r '.alias' "$node_file")"
                 elif [[ "$worker_code" == "ERR" ]]; then
                     _finding OK "WORKER-OLLAMA-${alias^^}" \
                         "Ollama on $alias ($address) not reachable from this host (expected)"

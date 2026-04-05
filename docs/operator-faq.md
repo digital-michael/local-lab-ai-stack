@@ -277,7 +277,7 @@ Runs five checks:
 A Check E CRITICAL finding includes the exact `harden-worker` command to remediate:
 
 ```
-CRITICAL  WORKER-OLLAMA-SOL  Ollama on SOL (...) is unauthenticated — run: bash scripts/node.sh harden-worker --node-id SOL
+CRITICAL  WORKER-OLLAMA-SOL  Ollama on SOL (...) is unauthenticated — run: bash scripts/node.sh harden-worker --alias inference-worker-2
 ```
 
 See [Hardening Ollama port on inference worker nodes](#hardening-ollama-port-on-inference-worker-nodes).
@@ -443,11 +443,11 @@ to the controller IP only:
 
 ```bash
 # Run on the controller — prints instructions for the named worker
-bash scripts/node.sh harden-worker --node-id <node-id>
+bash scripts/node.sh harden-worker --alias <alias>
 
 # Examples:
-bash scripts/node.sh harden-worker --node-id SOL    # Linux worker
-bash scripts/node.sh harden-worker --node-id TC25   # macOS worker
+bash scripts/node.sh harden-worker --alias inference-worker-2   # Linux worker
+bash scripts/node.sh harden-worker --alias inference-worker-1   # macOS worker
 ```
 
 The command auto-resolves the controller IP from `configs/nodes/`. If DNS is
