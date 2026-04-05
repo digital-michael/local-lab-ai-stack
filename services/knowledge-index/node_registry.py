@@ -131,6 +131,7 @@ class HeartbeatRequest(BaseModel):
     timestamp: str                   = ""
     metrics:   dict[str, Any]        = {}
     messages:  list[dict[str, Any]]  = []
+    message:   str                   = ""
 
 
 class SuggestionCreateRequest(BaseModel):
@@ -511,8 +512,8 @@ def node_heartbeat(node_id: str, req: HeartbeatRequest, request: Request) -> dic
             },
         )
         conn.execute(
-            text("UPDATE nodes SET last_seen = CURRENT_TIMESTAMP WHERE node_id = :id"),
-            {"id": node_id},
+            text("UPDATE nodes SET last_seen = CURRENT_TIMESTAMP, last_message = :msg WHERE node_id = :id"),
+            {"id": node_id, "msg": req.message},
         )
         # TODO: refresh capabilities.models_loaded from heartbeat metrics
         # When req.messages carries a "models_loaded" list, extract it here and
@@ -558,7 +559,7 @@ def list_nodes(request: Request) -> dict:
         rows = conn.execute(
             text("""
                 SELECT node_id, display_name, profile, address, capabilities,
-                       status, registered_at, last_seen
+                       status, registered_at, last_seen, last_message
                 FROM nodes ORDER BY registered_at
             """)
         ).fetchall()
@@ -573,6 +574,7 @@ def list_nodes(request: Request) -> dict:
             "status":        r[5],
             "registered_at": str(r[6]) if r[6] else None,
             "last_seen":     str(r[7]) if r[7] else None,
+            "last_message":  r[8] or "",
         }
         for r in rows
     ]

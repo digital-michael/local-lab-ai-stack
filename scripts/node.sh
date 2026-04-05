@@ -315,6 +315,7 @@ for n in db_nodes:
         "last_seen":    (n.get("last_seen") or "")[:19],
         "capabilities": caps,
         "models":       nf.get("models", []),
+        "last_message": n.get("last_message", ""),
     })
 
 # Controller row(s) prepended (not in DB)
@@ -381,6 +382,9 @@ for r in rows:
             chunk = col_lines[i][line_idx] if line_idx < len(col_lines[i]) else ""
             parts.append(f"{chunk:<{w}}")
         print(SEP.join(parts))
+    msg = r.get("last_message", "")
+    if msg:
+        print(f"  message: {msg}")
 print(f"\nTotal: {len(rows)} node(s)  ({len(ctrl_rows)} controller, {len(all_rows)} registered)")
 PYEOF
     rm -f "$_tmp"

@@ -88,13 +88,27 @@ except:
 fi
 
 # ---------------------------------------------------------------------------
+# Optional message — run $STATE_DIR/heartbeat-message.sh if present
+# ---------------------------------------------------------------------------
+
+hb_message=""
+_msg_script="$STATE_DIR/heartbeat-message.sh"
+if [[ -f "$_msg_script" && -x "$_msg_script" ]]; then
+    hb_message=$("$_msg_script" 2>/dev/null || true)
+fi
+
+# ---------------------------------------------------------------------------
 # Build payload and POST
 # ---------------------------------------------------------------------------
 
-payload=$(python3 -c "
-import json
+_hb_msg_file=$(mktemp)
+printf '%s' "$hb_message" | head -c 512 > "$_hb_msg_file"
+
+payload=$(python3 - "$_hb_msg_file" <<PYEOF 2>/dev/null
+import json, sys
+message = open(sys.argv[1]).read() if len(sys.argv) > 1 else ""
 print(json.dumps({
-    'node_id':  '$NODE_ID',
+    'node_id':  '${NODE_ID}',
     'timestamp': __import__('datetime').datetime.utcnow().isoformat() + 'Z',
     'metrics': {
         'cpu_percent':       float('${cpu_percent:-0}'),
@@ -104,9 +118,12 @@ print(json.dumps({
         'models_loaded':     ${models_loaded},
         'requests_last_60s': 0,
     },
+    'message':  message,
     'messages': [],
 }))
-" 2>/dev/null)
+PYEOF
+)
+rm -f "$_hb_msg_file"
 
 auth_header=""
 [[ -n "${API_KEY_STATE:-}" ]] && auth_header="Authorization: Bearer $API_KEY_STATE"

@@ -180,6 +180,15 @@ def _init_db() -> None:
             conn.execute(text("RELEASE SAVEPOINT pre_node_key_migration"))
         except Exception:
             conn.execute(text("ROLLBACK TO SAVEPOINT pre_node_key_migration"))
+        # Migration: add last_message column to existing databases
+        try:
+            conn.execute(text("SAVEPOINT pre_last_message_migration"))
+            conn.execute(text(
+                "ALTER TABLE nodes ADD COLUMN last_message TEXT NOT NULL DEFAULT ''"
+            ))
+            conn.execute(text("RELEASE SAVEPOINT pre_last_message_migration"))
+        except Exception:
+            conn.execute(text("ROLLBACK TO SAVEPOINT pre_last_message_migration"))
         conn.commit()
 
 
