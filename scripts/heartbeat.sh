@@ -152,3 +152,17 @@ if [[ "$pending" -gt 0 ]]; then
     logger -t "$LOG_TAG" "INFO: $pending pending suggestion(s) — run: node.sh suggestions list" 2>/dev/null || true
     echo "[$LOG_TAG] $pending pending suggestion(s) available (run: node.sh suggestions list)"
 fi
+
+# Check for a pending rename — applied atomically by the server on this heartbeat
+rename_to=$(echo "$response" | python3 -c "
+import json, sys
+try: print(json.load(sys.stdin).get('rename_to') or '')
+except: print('')
+" 2>/dev/null || echo "")
+
+if [[ -n "$rename_to" ]]; then
+    printf '%s' "$rename_to" > "$STATE_DIR/node_id"
+    NODE_ID="$rename_to"
+    logger -t "$LOG_TAG" "INFO: node_id renamed to $rename_to" 2>/dev/null || true
+    echo "[$LOG_TAG] INFO: node_id renamed to $rename_to"
+fi

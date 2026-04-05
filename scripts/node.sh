@@ -13,6 +13,8 @@ set -euo pipefail
 #                                 Remove this worker from the controller
 #   purge   [--node-id <id>] [--older-than <minutes>] [--dry-run] [--force]
 #                                 Hard-delete offline nodes (or a specific node) from the registry
+#   rename  --node-id <id> [--new-id <id>] [--display-name <text>]
+#                                 Rename a node's id and/or display name (admin)
 #   pause                         (stub) Pause heartbeats without unjoining
 #   list    [--controller <url>] [--api-key <key>] [-v] [-m]  List all registered nodes and their status
 #   status  [--node-id <id>]      Show this node's status from the controller
@@ -46,6 +48,9 @@ Commands:
           [--older-than <min>]   Bulk: purge offline nodes last seen > N minutes ago (default: all offline)
           [--dry-run]            Show candidates without deleting
           [--force]              Skip confirmation prompt
+  rename  --node-id <id>          Rename a node (at least one of --new-id or --display-name required)
+          [--new-id <new>]        New node id (applied on next heartbeat via heartbeat.sh auto-update)
+          [--display-name <text>] New display name (applied immediately)
   pause                          Stub: pause heartbeats temporarily
   list    [--controller <url>] \
           [--api-key <key>] [-v] [-m]  List nodes (-v: show messages, -m: names+messages only)
@@ -379,6 +384,75 @@ PYEOF
     exit $failed
 }
 
+cmd_rename() {
+    _load_state
+    local target_node_id="" new_id="" display_name=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --controller)    CONTROLLER_URL="$2"; shift 2 ;;
+            --api-key)       API_KEY_STATE="$2";  shift 2 ;;
+            --node-id)       target_node_id="$2"; shift 2 ;;
+            --new-id)        new_id="$2";         shift 2 ;;
+            --display-name)  display_name="$2";   shift 2 ;;
+            *)               echo "Unknown option: $1" >&2; exit 1 ;;
+        esac
+    done
+
+    _require_controller
+
+    if [[ -z "$target_node_id" ]]; then
+        echo "ERROR: --node-id required" >&2; exit 1
+    fi
+    if [[ -z "$new_id" && -z "$display_name" ]]; then
+        echo "ERROR: at least one of --new-id or --display-name required" >&2; exit 1
+    fi
+
+    # Show summary of what will change
+    echo "Node rename summary:"
+    echo "  Current node-id:    $target_node_id"
+    [[ -n "$new_id" ]]       && echo "  New node-id:        $new_id"
+    [[ -n "$display_name" ]] && echo "  New display name:   $display_name"
+    if [[ -n "$new_id" ]]; then
+        echo ""
+        echo "  NOTE: the id change takes effect on the node's next heartbeat (≤30s)."
+        echo "        heartbeat.sh will update ~/.config/ai-stack/node_id automatically."
+    fi
+    echo ""
+
+    local ans
+    read -r -p "Apply rename? [y/N] " ans
+    [[ "$ans" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
+
+    # Build JSON payload safely
+    local payload
+    payload=$(python3 -c "
+import json, sys
+obj = {}
+new_id       = sys.argv[1]
+display_name = sys.argv[2]
+if new_id:       obj['new_id']       = new_id
+if display_name: obj['display_name'] = display_name
+print(json.dumps(obj))
+" "$new_id" "$display_name")
+
+    local response http_code body_part
+    response=$(_curl_admin PATCH "/admin/v1/nodes/${target_node_id}/rename" "$payload") || {
+        echo "ERROR: request failed" >&2; exit 1
+    }
+    http_code=$(echo "$response" | tail -1)
+    body_part=$(echo "$response" | sed '$d')
+
+    if [[ "$http_code" == "200" ]]; then
+        echo "Done."
+        [[ -n "$new_id" ]] && echo "  Waiting for node to pick up rename on next heartbeat..."
+    else
+        echo "ERROR: rename failed (HTTP $http_code):" >&2
+        echo "$body_part" >&2
+        exit 1
+    fi
+}
+
 cmd_list() {
     _load_state
     local verbose=0
@@ -664,6 +738,7 @@ case "${1:-help}" in
     unjoin)      shift; cmd_unjoin "$@" ;;
     pause)       cmd_pause ;;
     purge)       shift; cmd_purge "$@" ;;
+    rename)      shift; cmd_rename "$@" ;;
     list)        shift; cmd_list "$@" ;;
     status)      shift; cmd_status "$@" ;;
     suggestions) shift; cmd_suggestions "$@" ;;

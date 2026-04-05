@@ -138,6 +138,11 @@ class SuggestionCreateRequest(BaseModel):
     suggestion: dict[str, Any]
 
 
+class NodeRenameRequest(BaseModel):
+    new_id:       str = ""
+    display_name: str = ""
+
+
 # ---------------------------------------------------------------------------
 # Timestamp helper
 # ---------------------------------------------------------------------------
@@ -524,19 +529,44 @@ def node_heartbeat(node_id: str, req: HeartbeatRequest, request: Request) -> dic
 
         transitioned = _transition_up(node_id, conn)
 
+    # Check for a pending rename — apply atomically and notify the worker
+    rename_to: str | None = None
+    with _db.connect() as conn:
+        pending_row = conn.execute(
+            text("SELECT pending_node_id FROM nodes WHERE node_id = :id"),
+            {"id": node_id},
+        ).fetchone()
+        if pending_row and pending_row[0]:
+            new_id = pending_row[0]
+            conn.execute(
+                text("UPDATE node_heartbeats SET node_id = :new WHERE node_id = :old"),
+                {"new": new_id, "old": node_id},
+            )
+            conn.execute(
+                text("UPDATE node_suggestions SET node_id = :new WHERE node_id = :old"),
+                {"new": new_id, "old": node_id},
+            )
+            conn.execute(
+                text("UPDATE nodes SET node_id = :new, pending_node_id = NULL WHERE node_id = :old"),
+                {"new": new_id, "old": node_id},
+            )
+            conn.commit()
+            rename_to = new_id
+
     with _db.connect() as conn:
         count = conn.execute(
             text("""
                 SELECT COUNT(*) FROM node_suggestions
                 WHERE node_id = :id AND consumed_at IS NULL
             """),
-            {"id": node_id},
+            {"id": rename_to if rename_to else node_id},
         ).fetchone()[0]
 
     return {
         "ack":                 True,
         "pending_suggestions": count,
         "transitioned_to":     "online" if transitioned and transitioned is True else None,
+        "rename_to":           rename_to,
     }
 
 
@@ -650,6 +680,60 @@ def unjoin_node(node_id: str, request: Request) -> dict:
         _litellm_remove_ids(ltm_ids)
 
     return {"node_id": node_id, "status": "unregistered"}
+
+
+@router.patch("/{node_id}/rename")
+def rename_node(node_id: str, req: NodeRenameRequest, request: Request) -> dict:
+    """Schedule a node_id rename and/or update display_name.
+
+    If new_id is provided, the rename is applied on the node's next heartbeat
+    and the worker's state file is updated automatically via the response.
+    If display_name only, the update is applied immediately.
+    """
+    _require_controller()
+    _check_admin(request)
+    assert _db is not None
+
+    if not req.new_id and not req.display_name:
+        raise HTTPException(status_code=400, detail="At least one of new_id or display_name required")
+
+    with _db.connect() as conn:
+        row = conn.execute(
+            text("SELECT node_id, display_name FROM nodes WHERE node_id = :id"),
+            {"id": node_id},
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Node not found")
+
+        if req.new_id and req.new_id != node_id:
+            conflict = conn.execute(
+                text("SELECT 1 FROM nodes WHERE node_id = :id"),
+                {"id": req.new_id},
+            ).fetchone()
+            if conflict:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Node id '{req.new_id}' is already in use",
+                )
+            conn.execute(
+                text("UPDATE nodes SET pending_node_id = :new WHERE node_id = :old"),
+                {"new": req.new_id, "old": node_id},
+            )
+
+        if req.display_name:
+            conn.execute(
+                text("UPDATE nodes SET display_name = :dn WHERE node_id = :id"),
+                {"dn": req.display_name, "id": node_id},
+            )
+
+        conn.commit()
+
+    return {
+        "node_id":          node_id,
+        "pending_node_id":  req.new_id or None,
+        "display_name":     req.display_name or None,
+        "rename_pending":   bool(req.new_id and req.new_id != node_id),
+    }
 
 
 @router.delete("/{node_id}/purge")

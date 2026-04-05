@@ -189,6 +189,24 @@ def _init_db() -> None:
             conn.execute(text("RELEASE SAVEPOINT pre_last_message_migration"))
         except Exception:
             conn.execute(text("ROLLBACK TO SAVEPOINT pre_last_message_migration"))
+        # Migration: add entry_id (surrogate key) and pending_node_id to nodes
+        try:
+            conn.execute(text("SAVEPOINT pre_entry_id_migration"))
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN entry_id TEXT NOT NULL DEFAULT ''"))
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN pending_node_id TEXT"))
+            conn.execute(text("RELEASE SAVEPOINT pre_entry_id_migration"))
+        except Exception:
+            conn.execute(text("ROLLBACK TO SAVEPOINT pre_entry_id_migration"))
+        # Backfill entry_id for any nodes that don't have one yet
+        import uuid as _uuid
+        blank_nodes = conn.execute(
+            text("SELECT node_id FROM nodes WHERE entry_id = '' OR entry_id IS NULL")
+        ).fetchall()
+        for (nid,) in blank_nodes:
+            conn.execute(
+                text("UPDATE nodes SET entry_id = :eid WHERE node_id = :nid"),
+                {"eid": str(_uuid.uuid4()), "nid": nid},
+            )
         conn.commit()
 
 
