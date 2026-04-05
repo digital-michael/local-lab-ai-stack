@@ -1,6 +1,6 @@
 # Operator FAQ and How-To Guides
 
-**Last Updated:** 2026-04-04
+**Last Updated:** 2026-04-05
 
 Practical guidance for operating the stack day-to-day. Organized as How-To recipes and an FAQ for common failure modes.
 
@@ -264,10 +264,29 @@ Prevents a worker node from sleeping due to inactivity while the AI stack is run
 bash scripts/configure.sh security-audit
 ```
 
-Checks port exposure, API key enforcement, TLS certificate expiry, secret hygiene, and worker node hardening. For machine-readable output:
+Runs five checks:
+
+| Check | What it tests |
+|---|---|
+| A | Port exposure — services bound to `0.0.0.0` vs `127.0.0.1` |
+| B | Auth enforcement — unauthenticated probes of LiteLLM, Qdrant, Knowledge Index |
+| C | TLS certificate validity and expiry |
+| D | Secret hygiene — no plaintext secrets in `configs/config.json` |
+| E | Worker hardening — Ollama on inference-worker nodes reachable without auth |
+
+A Check E CRITICAL finding includes the exact `harden-worker` command to remediate:
+
+```
+CRITICAL  WORKER-OLLAMA-SOL  Ollama on SOL (...) is unauthenticated — run: bash scripts/node.sh harden-worker --node-id SOL
+```
+
+See [Hardening Ollama port on inference worker nodes](#hardening-ollama-port-on-inference-worker-nodes).
+
+For machine-readable output or offline/CI use:
 
 ```bash
 bash scripts/configure.sh security-audit --json
+bash scripts/configure.sh security-audit --skip-network
 ```
 
 Exit codes: `0` = clean, `1` = warnings only, `2` = critical findings.
@@ -413,33 +432,40 @@ Then re-run `pull-models.sh`.
 
 ---
 
-### Restricting Ollama port on inference worker nodes
+### Hardening Ollama port on inference worker nodes
 
-The controller's Ollama binds to `127.0.0.1:11434` (set in `configs/config.json`) — it is
-not exposed on the LAN because LiteLLM reaches it via the internal container network.
+The controller's Ollama binds to `127.0.0.1:11434` — it is not LAN-exposed because
+LiteLLM reaches it via the internal container network.
 
-Remote **bare-metal** worker nodes run Ollama natively. By default, Ollama listens on
-`0.0.0.0:11434`. To restrict it to the controller IP only, add a firewall rule on each
-worker host:
+Remote inference-worker nodes run Ollama natively on `0.0.0.0:11434`. Use
+`harden-worker` to generate OS-appropriate firewall rules that restrict port 11434
+to the controller IP only:
 
-**Linux (ufw):**
 ```bash
-sudo ufw deny 11434              # block all by default
-sudo ufw allow from <controller-ip> to any port 11434
-sudo ufw reload
+# Run on the controller — prints instructions for the named worker
+bash scripts/node.sh harden-worker --node-id <node-id>
+
+# Examples:
+bash scripts/node.sh harden-worker --node-id SOL    # Linux worker
+bash scripts/node.sh harden-worker --node-id TC25   # macOS worker
 ```
 
-**Linux (iptables):**
+The command auto-resolves the controller IP from `configs/nodes/`. If DNS is
+unavailable, set `address_fallback` on the controller node or pass
+`--controller-ip <ip>` explicitly.
+
+Copy the printed commands and run them **on the worker node**. Each OS path
+includes persistence steps (nftables/firewalld for Linux; pf anchor for macOS).
+
+After applying, verify from the controller:
+
 ```bash
-iptables -A INPUT -p tcp --dport 11434 ! -s <controller-ip> -j DROP
+bash scripts/configure.sh security-audit
+# WORKER-OLLAMA-<NODE-ID> should change from CRITICAL → OK
 ```
 
-**macOS (pf) — add to `/etc/pf.conf`:**
-```
-block in on en0 proto tcp from any to any port 11434
-pass  in on en0 proto tcp from <controller-ip> to any port 11434
-```
-Then `sudo pfctl -f /etc/pf.conf && sudo pfctl -e`.
+> **Note:** If `configure.sh security-audit` reports a CRITICAL finding for a worker,
+> the message includes the exact `harden-worker` command to run.
 
 ---
 
