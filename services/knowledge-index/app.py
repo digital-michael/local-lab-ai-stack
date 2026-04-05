@@ -645,7 +645,7 @@ def list_catalog(request: Request) -> dict:
     with _db.connect() as conn:
         rows = conn.execute(
             text(
-                "SELECT name, version, author, origin_node, visibility, status, synced_at"
+                "SELECT name, version, author, origin_node, visibility, status, synced_at, path"
                 " FROM libraries ORDER BY name, version"
             )
         ).fetchall()
@@ -660,6 +660,7 @@ def list_catalog(request: Request) -> dict:
             "name": r[0], "version": r[1], "author": r[2],
             "origin_node": r[3], "visibility": r[4], "status": lib_status,
             "synced_at": str(r[6]) if r[6] else None,
+            "path": r[7],
         })
     return {"count": len(libraries), "libraries": libraries}
 

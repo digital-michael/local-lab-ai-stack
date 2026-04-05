@@ -239,6 +239,11 @@
           "host": "$AI_STACK_DIR/libraries",
           "container": "/libraries",
           "mode": "ro"
+        },
+        {
+          "host": "$AI_STACK_DIR/test-tmp",
+          "container": "/test-tmp",
+          "mode": "rw"
         }
       ],
       "environment": {
