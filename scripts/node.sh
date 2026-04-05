@@ -12,7 +12,7 @@ set -euo pipefail
 #   unjoin  [--controller <url>] [--node-id <id>]
 #                                 Remove this worker from the controller
 #   pause                         (stub) Pause heartbeats without unjoining
-#   list    [--controller <url>] [--api-key <key>] [-v]  List all registered nodes and their status
+#   list    [--controller <url>] [--api-key <key>] [-v] [-m]  List all registered nodes and their status
 #   status  [--node-id <id>]      Show this node's status from the controller
 #   suggestions list   [--node-id <id>]
 #   suggestions show   <suggestion-id> [--node-id <id>]
@@ -42,7 +42,7 @@ Commands:
           [--node-id <id>]
   pause                          Stub: pause heartbeats temporarily
   list    [--controller <url>] \
-          [--api-key <key>] [-v]  List all registered nodes and their status (-v: show node messages)
+          [--api-key <key>] [-v] [-m]  List nodes (-v: show messages, -m: names+messages only)
   status  [--node-id <id>]       Show node status from controller
   suggestions list               List pending suggestions
   suggestions show <id>          Show suggestion detail
@@ -240,11 +240,13 @@ cmd_pause() {
 cmd_list() {
     _load_state
     local verbose=0
+    local msg_only=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --controller) CONTROLLER_URL="$2"; shift 2 ;;
             --api-key)    API_KEY_STATE="$2";  shift 2 ;;
             -v)           verbose=1;           shift   ;;
+            -m)           msg_only=1;          shift   ;;
             *)            echo "Unknown option: $1" >&2; exit 1 ;;
         esac
     done
@@ -268,13 +270,14 @@ cmd_list() {
     local _tmp; _tmp=$(mktemp)
     echo "$body_part" > "$_tmp"
 
-    python3 - "$_tmp" "$nodes_dir" "$verbose" <<'PYEOF'
+    python3 - "$_tmp" "$nodes_dir" "$verbose" "$msg_only" <<'PYEOF'
 import glob, json, sys
 
 data      = json.load(open(sys.argv[1]))
 db_nodes  = data.get('nodes', [])
 nodes_dir = sys.argv[2]
 verbose   = len(sys.argv) > 3 and sys.argv[3] == '1'
+msg_only  = len(sys.argv) > 4 and sys.argv[4] == '1'
 
 # ------------------------------------------------------------------
 # Load node-file data: node_id -> {models, display_name, capabilities}
@@ -326,6 +329,16 @@ rows = ctrl_rows + all_rows
 
 if not rows:
     print("No nodes found.")
+    sys.exit(0)
+
+if msg_only:
+    for r in rows:
+        name = r.get("display_name") or r.get("node_id", "")
+        msg  = r.get("last_message", "")
+        print(f"{name}")
+        if msg:
+            print(f"   Message: {msg}")
+        print()
     sys.exit(0)
 
 def fmt_list(lst):
