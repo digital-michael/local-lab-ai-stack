@@ -53,24 +53,6 @@ def require_knowledge_index():
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
-def ki_client() -> httpx.Client:
-    """HTTP client pointed at knowledge-index."""
-    with httpx.Client(base_url=KNOWLEDGE_INDEX_URL, timeout=60.0) as client:
-        yield client
-
-
-@pytest.fixture(scope="module")
-def ki_headers() -> dict:
-    """Standard auth headers for KI requests."""
-    import os
-    key = os.environ.get("KI_API_KEY", "")
-    h = {"Content-Type": "application/json"}
-    if key:
-        h["Authorization"] = f"Bearer {key}"
-    return h
-
-
-@pytest.fixture(scope="module")
 def admin_headers() -> dict:
     """Auth headers using KI_ADMIN_KEY (skips tests that need it if unset)."""
     import os

@@ -7,7 +7,7 @@
         license-check
 
 BATS := bats
-PYTEST := python -m pytest
+PYTEST := $(shell test -f .venv/bin/python && echo .venv/bin/python || echo python) -m pytest
 
 # ── Help ─────────────────────────────────────────────────────────────────────
 
@@ -60,7 +60,15 @@ help:
 
 
 # All BATS + pytest (with a readiness wait between them)
+# Exits on first BATS failure. Use 'test-all' to continue through known infra failures.
 test: test-bats wait-services test-pytest
+
+# Full test run that continues through BATS failures (e.g. pre-existing T-019/T-023/T-047).
+# Always runs wait-services then pytest even if BATS has failures.
+test-all:
+	-$(MAKE) test-bats
+	$(MAKE) wait-services
+	$(MAKE) test-pytest
 
 # Wait for LiteLLM readiness and restart deferred services that may have been
 # cascade-stopped by lifecycle tests (knowledge-index requires ollama).
@@ -108,8 +116,22 @@ test-bats:
 	        testing/layer4_localhost.bats
 
 # All pytest (layer3 + security)
+# KI_API_KEY is resolved from the Podman secret if not already set in the environment.
 test-pytest:
-	$(PYTEST) -v
+	@key="$${KI_API_KEY:-$$(podman secret inspect knowledge_index_api_key --showsecret --format '{{.SecretData}}' 2>/dev/null || true)}"; \
+	KI_API_KEY="$$key" $(PYTEST) -v; \
+	exit_code=$$?; \
+	echo ""; \
+	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
+	echo "  NOTE: layer2b lifecycle tests stop postgres/qdrant, which"; \
+	echo "  cascade-stops knowledge-index via systemd Requires=."; \
+	echo "  If knowledge-index was running before the test run, restore it:"; \
+	echo ""; \
+	echo "    systemctl --user start knowledge-index"; \
+	echo ""; \
+	echo "  Or run 'make wait-services' for a full readiness check."; \
+	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
+	exit $$exit_code
 
 # ── BATS targets ─────────────────────────────────────────────────────────────
 

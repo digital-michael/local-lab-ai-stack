@@ -49,13 +49,6 @@ def require_knowledge_index():
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
-def ki_client() -> httpx.Client:
-    """HTTP client pointed at knowledge-index."""
-    with httpx.Client(base_url=KNOWLEDGE_INDEX_URL, timeout=60.0) as client:
-        yield client
-
-
-@pytest.fixture(scope="module")
 def scan_root(tmp_path_factory):
     """Module-scoped temp directory containing one valid .ai-library package.
 
@@ -92,9 +85,9 @@ def scan_root(tmp_path_factory):
 # T-070 — First scan: single package ingested
 # ---------------------------------------------------------------------------
 
-def test_t070_scan_single_package(ki_client, scan_root):
+def test_t070_scan_single_package(ki_client, ki_headers, scan_root):
     """POST /v1/scan — one valid .ai-library package must be ingested."""
-    resp = ki_client.post("/v1/scan", json={"path": str(scan_root)})
+    resp = ki_client.post("/v1/scan", json={"path": str(scan_root)}, headers=ki_headers)
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["scanned"] == 1
@@ -111,9 +104,9 @@ def test_t070_scan_single_package(ki_client, scan_root):
 # T-071 — Re-scan without force: already cataloged → skipped
 # ---------------------------------------------------------------------------
 
-def test_t071_skip_existing(ki_client, scan_root):
+def test_t071_skip_existing(ki_client, ki_headers, scan_root):
     """POST /v1/scan without force=true must skip already-cataloged packages."""
-    resp = ki_client.post("/v1/scan", json={"path": str(scan_root), "force": False})
+    resp = ki_client.post("/v1/scan", json={"path": str(scan_root), "force": False}, headers=ki_headers)
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["scanned"] == 1
@@ -126,9 +119,9 @@ def test_t071_skip_existing(ki_client, scan_root):
 # T-072 — Force re-ingest: already cataloged but force=true → ingested
 # ---------------------------------------------------------------------------
 
-def test_t072_force_reingest(ki_client, scan_root):
+def test_t072_force_reingest(ki_client, ki_headers, scan_root):
     """POST /v1/scan with force=true must re-ingest already-cataloged packages."""
-    resp = ki_client.post("/v1/scan", json={"path": str(scan_root), "force": True})
+    resp = ki_client.post("/v1/scan", json={"path": str(scan_root), "force": True}, headers=ki_headers)
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["scanned"] == 1
@@ -141,11 +134,12 @@ def test_t072_force_reingest(ki_client, scan_root):
 # T-073 — Bad path: non-existent scan path → HTTP 400
 # ---------------------------------------------------------------------------
 
-def test_t073_bad_path(ki_client):
+def test_t073_bad_path(ki_client, ki_headers):
     """POST /v1/scan with a non-existent path must return HTTP 400."""
     resp = ki_client.post(
         "/v1/scan",
         json={"path": "/nonexistent-llm-stack-test-path-xyz-phase15"},
+        headers=ki_headers,
     )
     assert resp.status_code == 400
 
@@ -154,9 +148,9 @@ def test_t073_bad_path(ki_client):
 # T-074 — Catalog entry reflects scanned package metadata
 # ---------------------------------------------------------------------------
 
-def test_t074_catalog_entry(ki_client, scan_root):
+def test_t074_catalog_entry(ki_client, ki_headers, scan_root):
     """GET /v1/catalog must include the scanned library with origin_node=localhost and path set."""
-    resp = ki_client.get("/v1/catalog")
+    resp = ki_client.get("/v1/catalog", headers=ki_headers)
     assert resp.status_code == 200, resp.text
     libs = resp.json().get("libraries", [])
     match = next(

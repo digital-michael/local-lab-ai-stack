@@ -658,3 +658,34 @@ bash scripts/node.sh join \
 ```
 
 The existing `node_id` is reused — no data is lost.
+
+---
+
+### knowledge-index stops after running the test suite
+
+The **layer2b lifecycle tests** (T-054 cold-boot) stop `postgres` and `qdrant` as part of the
+full service stop sequence. Because the knowledge-index quadlet declares
+`Requires=postgres.service` and `Requires=qdrant.service`, systemd cascade-stops
+knowledge-index at the same time. T-054 then restarts postgres and qdrant but does not restart
+knowledge-index — so it stays stopped.
+
+`make test` handles this automatically via the `wait-services` step (runs between BATS and
+pytest), which detects and restarts knowledge-index if inactive. If you ran BATS and pytest
+separately (e.g. BATS halted on a failure and you ran pytest manually), `wait-services` was
+skipped and knowledge-index remained down.
+
+To recover, run either:
+
+```bash
+# Full recovery including readiness checks:
+make wait-services
+
+# Or restart directly:
+systemctl --user start knowledge-index
+```
+
+Verify:
+
+```bash
+systemctl --user status knowledge-index --no-pager | head -5
+```

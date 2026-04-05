@@ -52,24 +52,6 @@ def require_knowledge_index():
 # Fixtures
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(scope="module")
-def ki_client() -> httpx.Client:
-    """HTTP client pointed at knowledge-index."""
-    with httpx.Client(base_url=KNOWLEDGE_INDEX_URL, timeout=30.0) as client:
-        yield client
-
-
-@pytest.fixture(scope="module")
-def ki_headers() -> dict:
-    """Headers for authenticated KI requests (reads KI_API_KEY if set)."""
-    import os
-    key = os.environ.get("KI_API_KEY", "")
-    headers = {"Content-Type": "application/json"}
-    if key:
-        headers["Authorization"] = f"Bearer {key}"
-    return headers
-
-
 # ---------------------------------------------------------------------------
 # T-098: GET /v1/catalog/peers — 501 when "local" not in DISCOVERY_PROFILE
 # ---------------------------------------------------------------------------

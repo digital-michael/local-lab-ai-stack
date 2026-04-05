@@ -16,7 +16,6 @@
 # Run: pytest testing/layer3_model/test_mcp_tools.py -v
 
 import asyncio
-import os
 import uuid
 
 import httpx
@@ -53,22 +52,12 @@ def require_knowledge_index():
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
-def ki_client() -> httpx.Client:
-    """HTTP client pointed at knowledge-index."""
-    with httpx.Client(base_url=KNOWLEDGE_INDEX_URL, timeout=60.0) as client:
-        yield client
-
-
-@pytest.fixture(scope="module")
-def mcp_headers() -> dict:
+def mcp_headers(ki_headers: dict) -> dict:
     """
     Authorization header for MCP endpoints.
-    Uses API_KEY env var when set; empty dict otherwise (no-auth mode).
+    Delegates to ki_headers (resolved from KI_API_KEY or Podman secret).
     """
-    api_key = os.environ.get("API_KEY", "")
-    if api_key:
-        return {"Authorization": f"Bearer {api_key}"}
-    return {}
+    return ki_headers
 
 
 @pytest.fixture(scope="module")
