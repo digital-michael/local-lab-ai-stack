@@ -227,6 +227,14 @@ def _init_db() -> None:
         except Exception:
             conn.execute(text("ROLLBACK TO SAVEPOINT pre_fk_cascade_migration"))
         conn.commit()
+        # Migration: add alias column — stable join key between DB and configs/nodes/ files
+        try:
+            conn.execute(text("SAVEPOINT pre_alias_migration"))
+            conn.execute(text("ALTER TABLE nodes ADD COLUMN alias TEXT NOT NULL DEFAULT ''"))
+            conn.execute(text("RELEASE SAVEPOINT pre_alias_migration"))
+        except Exception:
+            conn.execute(text("ROLLBACK TO SAVEPOINT pre_alias_migration"))
+        conn.commit()
 
 
 _init_db()

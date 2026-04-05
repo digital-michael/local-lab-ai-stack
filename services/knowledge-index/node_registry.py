@@ -124,6 +124,7 @@ class NodeRegisterRequest(BaseModel):
 class JoinRequest(BaseModel):
     token:   str
     address: str = ""
+    alias:   str = ""
 
 
 class HeartbeatRequest(BaseModel):
@@ -132,6 +133,7 @@ class HeartbeatRequest(BaseModel):
     metrics:   dict[str, Any]        = {}
     messages:  list[dict[str, Any]]  = []
     message:   str                   = ""
+    alias:     str                   = ""
 
 
 class SuggestionCreateRequest(BaseModel):
@@ -444,19 +446,21 @@ def join_node(node_id: str, req: JoinRequest) -> dict:
             conn.execute(
                 text("""
                     UPDATE nodes
-                    SET status = 'online', address = :addr, last_seen = CURRENT_TIMESTAMP
+                    SET status = 'online', address = :addr, last_seen = CURRENT_TIMESTAMP,
+                        alias = CASE WHEN :alias != '' THEN :alias ELSE alias END
                     WHERE node_id = :id
                 """),
-                {"addr": req.address, "id": node_id},
+                {"addr": req.address, "alias": req.alias, "id": node_id},
             )
         else:
             conn.execute(
                 text("""
                     UPDATE nodes
-                    SET status = 'online', last_seen = CURRENT_TIMESTAMP
+                    SET status = 'online', last_seen = CURRENT_TIMESTAMP,
+                        alias = CASE WHEN :alias != '' THEN :alias ELSE alias END
                     WHERE node_id = :id
                 """),
-                {"id": node_id},
+                {"alias": req.alias, "id": node_id},
             )
 
         node_key      = str(uuid.uuid4())
@@ -520,6 +524,12 @@ def node_heartbeat(node_id: str, req: HeartbeatRequest, request: Request) -> dic
             text("UPDATE nodes SET last_seen = CURRENT_TIMESTAMP, last_message = :msg WHERE node_id = :id"),
             {"id": node_id, "msg": req.message},
         )
+        # Backfill alias on first heartbeat from a node that joined before alias was stored
+        if req.alias:
+            conn.execute(
+                text("UPDATE nodes SET alias = :alias WHERE node_id = :id AND (alias = '' OR alias IS NULL)"),
+                {"alias": req.alias, "id": node_id},
+            )
         # TODO: refresh capabilities.models_loaded from heartbeat metrics
         # When req.messages carries a "models_loaded" list, extract it here and
         # UPDATE nodes SET capabilities = json_patch(capabilities, '{"models_loaded": [...]}')
@@ -582,7 +592,7 @@ def list_nodes(request: Request) -> dict:
         rows = conn.execute(
             text("""
                 SELECT node_id, display_name, profile, address, capabilities,
-                       status, registered_at, last_seen, last_message
+                       status, registered_at, last_seen, last_message, alias
                 FROM nodes ORDER BY registered_at
             """)
         ).fetchall()
@@ -598,6 +608,7 @@ def list_nodes(request: Request) -> dict:
             "registered_at": str(r[6]) if r[6] else None,
             "last_seen":     str(r[7]) if r[7] else None,
             "last_message":  r[8] or "",
+            "alias":         r[9] or "",
         }
         for r in rows
     ]
@@ -617,7 +628,7 @@ def get_node(node_id: str, request: Request) -> dict:
         row = conn.execute(
             text("""
                 SELECT node_id, display_name, profile, address, capabilities,
-                       status, registered_at, last_seen
+                       status, registered_at, last_seen, alias
                 FROM nodes WHERE node_id = :id
             """),
             {"id": node_id},
@@ -635,6 +646,7 @@ def get_node(node_id: str, request: Request) -> dict:
         "status":        row[5],
         "registered_at": str(row[6]) if row[6] else None,
         "last_seen":     str(row[7]) if row[7] else None,
+        "alias":         row[8] or "",
     }
 
 

@@ -44,6 +44,7 @@ Commands:
   join    --controller <url> \
           --token <token>        Register with the controller (token from generate-join-token)
           [--node-id <id>]       Node ID (default: hostname -s)
+          [--alias <alias>]      Stable alias matching configs/nodes/<alias>.json (optional)
           [--address <url>]      This node's KI base URL (default: auto-detect)
   unjoin  [--controller <url>]   Remove this node from controller routing
           [--node-id <id>]
@@ -61,9 +62,10 @@ Commands:
   suggestions list               List pending suggestions
   suggestions show <id>          Show suggestion detail
   suggestions apply <id>         Mark suggestion consumed
-  harden-worker --node-id <id> \
+  harden-worker --alias <alias> \
           [--controller-ip <ip>] Print OS-appropriate firewall rules to restrict Ollama :11434
                                  on the target inference-worker to controller access only
+          [--node-id <id>]       Backward compat: locate node by node_id instead of alias
   undeploy                       Stop and remove knowledge-index container
   help                           This message
 
@@ -159,11 +161,13 @@ cmd_deploy() {
 
 cmd_join() {
     local token=""
+    local node_alias=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --controller) CONTROLLER_URL="$2"; shift 2 ;;
             --token)      token="$2";          shift 2 ;;
             --node-id)    NODE_ID="$2";        shift 2 ;;
+            --alias)      node_alias="$2";     shift 2 ;;
             --address)    local address="$2";  shift 2 ;;
             *)            echo "Unknown option: $1" >&2; exit 1 ;;
         esac
@@ -189,7 +193,13 @@ cmd_join() {
     fi
 
     local body
-    body=$(printf '{"token":"%s","address":"%s"}' "$token" "$address")
+    body=$(python3 -c "
+import json, sys
+obj = {'token': sys.argv[1], 'address': sys.argv[2]}
+if sys.argv[3]:
+    obj['alias'] = sys.argv[3]
+print(json.dumps(obj))
+" "$token" "$address" "${node_alias:-}")
 
     local response http_code body_part
     response=$(_curl_admin POST "/admin/v1/nodes/${NODE_ID}/join" "$body") || {
@@ -216,6 +226,7 @@ cmd_join() {
     [[ -n "$node_api_key" ]] && API_KEY_STATE="$node_api_key"
 
     _save_state
+    [[ -n "${node_alias:-}" ]] && printf '%s' "$node_alias" > "$STATE_DIR/alias"
     echo "State saved to $STATE_DIR"
 }
 
@@ -452,36 +463,6 @@ print(json.dumps(obj))
     if [[ "$http_code" == "200" ]]; then
         echo "Done."
         [[ -n "$new_id" ]] && echo "  Waiting for node to pick up rename on next heartbeat..."
-
-        # Keep configs/nodes/*.json in sync with the live DB rename so that
-        # harden-worker, generate-join-token, and any other local tools that
-        # read node_id from static files stay accurate.
-        if [[ -n "$new_id" ]]; then
-            local nodes_dir="$SCRIPT_DIR/../configs/nodes"
-            local updated_file="" f
-            while IFS= read -r -d '' f; do
-                local nid
-                nid=$(jq -r '.node_id // empty' "$f")
-                if [[ "$nid" == "$target_node_id" ]]; then
-                    updated_file="$f"
-                    break
-                fi
-            done < <(find "$nodes_dir" -maxdepth 1 -name '*.json' -print0 2>/dev/null)
-
-            if [[ -n "$updated_file" ]]; then
-                local tmp
-                tmp=$(mktemp)
-                if jq --arg v "$new_id" '.node_id = $v' "$updated_file" > "$tmp"; then
-                    mv "$tmp" "$updated_file"
-                    echo "  Updated $(basename "$updated_file"): node_id $target_node_id → $new_id"
-                else
-                    rm -f "$tmp"
-                    echo "  WARN: could not update $(basename "$updated_file") — update node_id manually" >&2
-                fi
-            else
-                echo "  NOTE: no matching file in configs/nodes/ for node_id='$target_node_id' — nothing to update locally"
-            fi
-        fi
     else
         echo "ERROR: rename failed (HTTP $http_code):" >&2
         echo "$body_part" >&2
@@ -532,24 +513,29 @@ verbose   = len(sys.argv) > 3 and sys.argv[3] == '1'
 msg_only  = len(sys.argv) > 4 and sys.argv[4] == '1'
 
 # ------------------------------------------------------------------
-# Load node-file data: node_id -> {models, display_name, capabilities}
+# Load node-file data: build two lookup maps
+#   nf_alias_map  — keyed by .alias  (stable — preferred)
+#   nf_nodeid_map — keyed by .node_id (backward compat for un-aliased nodes)
 # ------------------------------------------------------------------
-nf_map = {}
+nf_alias_map  = {}
+nf_nodeid_map = {}
 ctrl_rows = []
 for path in sorted(glob.glob(nodes_dir + "/*.json")):
     try:
         nf = json.load(open(path))
     except Exception:
         continue
-    nid = nf.get("node_id")
-    if not nid:
-        continue
-    nf_map[nid] = nf
+    a   = nf.get("alias", "")
+    nid = nf.get("node_id", "")
+    if a:
+        nf_alias_map[a] = nf
+    if nid:
+        nf_nodeid_map[nid] = nf
     if nf.get("profile") == "controller":
         caps = nf.get("capabilities", [])
         ctrl_rows.append({
-            "node_id":      nid,
-            "display_name": nf.get("name", nid),
+            "node_id":      nid or a,
+            "display_name": nf.get("name", nid or a),
             "profile":      "controller",
             "status":       "local",
             "last_seen":    "",
@@ -557,11 +543,14 @@ for path in sorted(glob.glob(nodes_dir + "/*.json")):
             "models":       nf.get("models", []),
         })
 
-# Merge DB rows with node-file models
+# Merge DB rows with node-file models.
+# Prefer alias-based lookup; fall back to node_id for nodes that haven't
+# sent their alias yet (pre-upgrade heartbeat).
 all_rows = []
 for n in db_nodes:
-    nid  = n.get("node_id", "")
-    nf   = nf_map.get(nid, {})
+    nid        = n.get("node_id", "")
+    node_alias = n.get("alias", "")
+    nf = (nf_alias_map.get(node_alias) or nf_nodeid_map.get(nid)) or {}
     caps = n.get("capabilities", [])
     if isinstance(caps, dict):
         caps = list(caps.keys())
@@ -836,28 +825,31 @@ EOF
 }
 
 cmd_harden_worker() {
-    local node_id="" controller_ip_override=""
+    local node_id="" node_alias="" controller_ip_override=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --node-id)       node_id="$2";               shift 2 ;;
+            --alias)         node_alias="$2";             shift 2 ;;
             --controller-ip) controller_ip_override="$2"; shift 2 ;;
             -h|--help)
-                echo "Usage: node.sh harden-worker --node-id <id> [--controller-ip <ip>]"
+                echo "Usage: node.sh harden-worker --alias <alias> [--controller-ip <ip>]"
+                echo "            or: node.sh harden-worker --node-id <id> [--controller-ip <ip>]"
                 echo ""
                 echo "Prints OS-appropriate firewall instructions to restrict Ollama port 11434"
                 echo "on the target inference-worker to the controller IP only."
                 echo ""
                 echo "Options:"
-                echo "  --node-id       <id>   Worker node_id (required)"
-                echo "  --controller-ip <ip>   Override auto-detected controller IP"
+                echo "  --alias         <alias>  Worker alias, e.g. inference-worker-1 (preferred)"
+                echo "  --node-id       <id>     Worker node_id, e.g. TC25 (backward compat)"
+                echo "  --controller-ip <ip>     Override auto-detected controller IP"
                 return 0 ;;
             *) echo "ERROR: unknown flag: $1" >&2; usage >&2; exit 1 ;;
         esac
     done
 
-    if [[ -z "$node_id" ]]; then
-        echo "ERROR: --node-id is required" >&2
+    if [[ -z "$node_id" && -z "$node_alias" ]]; then
+        echo "ERROR: --alias or --node-id is required" >&2
         usage >&2
         exit 1
     fi
@@ -867,18 +859,32 @@ cmd_harden_worker() {
     local node_file=""
     local f
     while IFS= read -r -d '' f; do
-        local nid
-        nid=$(jq -r '.node_id // empty' "$f")
-        if [[ "$nid" == "$node_id" ]]; then
-            node_file="$f"
-            break
+        if [[ -n "$node_alias" ]]; then
+            local a
+            a=$(jq -r '.alias // empty' "$f")
+            if [[ "$a" == "$node_alias" ]]; then
+                node_file="$f"
+                break
+            fi
+        else
+            local nid
+            nid=$(jq -r '.node_id // empty' "$f")
+            if [[ "$nid" == "$node_id" ]]; then
+                node_file="$f"
+                break
+            fi
         fi
     done < <(find "$nodes_dir" -maxdepth 1 -name '*.json' -print0 2>/dev/null)
 
+    local lookup_id="${node_alias:-$node_id}"
     if [[ -z "$node_file" ]]; then
-        echo "ERROR: No node with node_id='$node_id' found in configs/nodes/" >&2
-        echo "       Available nodes:" >&2
-        jq -r '.node_id' "$nodes_dir"/*.json 2>/dev/null | sed 's/^/         /' >&2
+        if [[ -n "$node_alias" ]]; then
+            echo "ERROR: No node with alias='$node_alias' found in configs/nodes/" >&2
+        else
+            echo "ERROR: No node with node_id='$node_id' found in configs/nodes/" >&2
+        fi
+        echo "       Available aliases:" >&2
+        jq -r '.alias // .node_id' "$nodes_dir"/*.json 2>/dev/null | sed 's/^/         /' >&2
         exit 1
     fi
 
@@ -925,16 +931,16 @@ cmd_harden_worker() {
     echo ""
     echo "Inference Worker Hardening Plan"
     echo "================================"
-    echo "  Node:           $node_id  ($worker_addr)"
+    echo "  Node:           $lookup_id  ($worker_addr)"
     echo "  OS:             $os_type"
     echo "  Controller IP:  $controller_ip"
     echo "  Goal:           Restrict Ollama :11434 to controller access only"
     echo ""
 
     if [[ "$os_type" == "darwin" ]]; then
-        _harden_worker_macos "$node_id" "$controller_ip"
+        _harden_worker_macos "$lookup_id" "$controller_ip"
     else
-        _harden_worker_linux "$node_id" "$controller_ip"
+        _harden_worker_linux "$lookup_id" "$controller_ip"
     fi
 }
 

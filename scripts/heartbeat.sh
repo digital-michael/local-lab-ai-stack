@@ -39,6 +39,37 @@ if [[ -z "$CONTROLLER_URL" || -z "$NODE_ID" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Resolve alias (stable node identity matching configs/nodes/<alias>.json)
+# ---------------------------------------------------------------------------
+
+ALIAS="${ALIAS:-}"
+if [[ -f "$STATE_DIR/alias" ]]; then
+    ALIAS="${ALIAS:-$(cat "$STATE_DIR/alias" 2>/dev/null || echo '')}"
+fi
+# One-time backfill: derive alias from configs/nodes/ by matching node_id.
+# Written to state once so subsequent heartbeats skip the file scan.
+if [[ -z "$ALIAS" ]]; then
+    _hb_script_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+    _nodes_dir_hb="$_hb_script_dir/../configs/nodes"
+    if [[ -d "$_nodes_dir_hb" ]]; then
+        ALIAS=$(python3 - "$_nodes_dir_hb" "$NODE_ID" <<'PYEOF' 2>/dev/null
+import glob, json, sys
+nodes_dir, nid = sys.argv[1], sys.argv[2]
+for f in glob.glob(nodes_dir + '/*.json'):
+    try:
+        d = json.load(open(f))
+        if d.get('node_id') == nid:
+            print(d.get('alias', ''))
+            break
+    except Exception:
+        pass
+PYEOF
+        )
+        [[ -n "$ALIAS" ]] && printf '%s' "$ALIAS" > "$STATE_DIR/alias"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # Collect metrics
 # ---------------------------------------------------------------------------
 
@@ -109,6 +140,7 @@ import json, sys
 message = open(sys.argv[1]).read() if len(sys.argv) > 1 else ""
 print(json.dumps({
     'node_id':  '${NODE_ID}',
+    'alias':    '${ALIAS:-}',
     'timestamp': __import__('datetime').datetime.utcnow().isoformat() + 'Z',
     'metrics': {
         'cpu_percent':       float('${cpu_percent:-0}'),
