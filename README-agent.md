@@ -75,10 +75,11 @@ The component guidance in `docs/library/framework_components/` is **normative**.
 │   ├── install.sh                       # One-time system setup
 │   └── validate-system.sh              # Pre-flight environment checks
 └── docs/
-    ├── decisions.md                     # Architecture Decision Records (D-001 … D-015)
+    ├── decisions.md                     # Architecture Decision Records (D-001 … D-035)
     ├── ai_stack_blueprint/              # Architecture, implementation, config, checklist
     └── library/
-        └── framework_components/        # Per-component reference (14 components)
+        ├── framework_components/        # Per-component reference (14 components)
+        └── actions/                     # Agent skill definitions (SKILL.md files)
 ```
 
 ---
@@ -125,6 +126,7 @@ See also: [shell-scripting/best_practices.md](docs/library/framework_components/
 - Do not duplicate content. Cross-reference the canonical source.
 - When adding a new component, create a subdirectory under `docs/library/framework_components/` with `best_practices.md`, `security.md`, and `guidance.md`.
 - Update the component table in [framework_components/README-agent.md](docs/library/framework_components/README-agent.md) when adding or removing components.
+- Agent skills (reusable LLM agent workflows) live in `docs/library/actions/<skill-name>/SKILL.md`. Create one subdirectory per skill; no other file types are required.
 - Update the [checklist](docs/ai_stack_blueprint/ai_stack_checklist.md) when completing or adding tasks.
 - `README-agent.md` files target LLM agents. `README.md` files target humans. Do not mix audiences.
 

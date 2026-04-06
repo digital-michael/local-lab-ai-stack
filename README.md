@@ -38,22 +38,24 @@ All services run as rootless Podman containers managed by systemd quadlets on a 
     │   ├── ai_stack_configuration.md  # Configuration schema and rationale
     │   └── ai_stack_checklist.md      # Task tracker: blockers, deferrables, future work
     └── library/
-        └── framework_components/      # Per-component reference documentation
-            ├── README-agent.md        # Governance policy for LLM agents
-            ├── openwebui/             # best_practices.md, security.md, guidance.md
-            ├── flowise/
-            ├── litellm/
-            ├── vllm/
-            ├── llamacpp/
-            ├── qdrant/
-            ├── postgresql/
-            ├── authentik/
-            ├── prometheus/
-            ├── grafana/
-            ├── loki/
-            ├── promtail/
-            ├── podman/
-            └── shell-scripting/
+        ├── framework_components/      # Per-component reference documentation
+        │   ├── README-agent.md        # Governance policy for LLM agents
+        │   ├── openwebui/             # best_practices.md, security.md, guidance.md
+        │   ├── flowise/
+        │   ├── litellm/
+        │   ├── vllm/
+        │   ├── llamacpp/
+        │   ├── qdrant/
+        │   ├── postgresql/
+        │   ├── authentik/
+        │   ├── prometheus/
+        │   ├── grafana/
+        │   ├── loki/
+        │   ├── promtail/
+        │   ├── podman/
+        │   └── shell-scripting/
+        └── actions/                   # Agent skill definitions (SKILL.md)
+            └── generate-playbook/     # Operational playbook generation skill
 ```
 
 ## Prerequisites
@@ -96,4 +98,4 @@ Per-component best practices, security hardening, and project-specific guidance 
 
 ## Status
 
-This project is in the **pre-implementation planning phase**. The architecture, configuration schema, and tooling are defined. Service image tags in `config.json` are set to `TBD` pending version pinning.
+This project is **deployed and operational** on the CENTAURI cluster. All core services are running as rootless Podman containers managed by systemd quadlets. The test suite (layers 0–4) passes. Outstanding items are tracked in the [checklist](docs/ai_stack_blueprint/ai_stack_checklist.md) and [features](docs/features.md).
