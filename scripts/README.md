@@ -1,8 +1,23 @@
 # scripts/ — AI Stack Script Reference
 
+**Last Updated:** 2026-04-06
+
 Scripts are listed in **operational order**: environment setup → first deployment → running operations → reconfiguration → troubleshooting → shutdown and teardown. Worker node scripts follow.
 
 Run any script with `--help` or `-h` for full usage details, options, and examples.
+
+---
+
+## Table of Contents
+
+- [Environment Setup](#environment-setup) — `validate-system.sh` · `install.sh` · `generate-tls.sh`
+- [First Deployment](#first-deployment) — `configure.sh` · `deploy.sh` · `pull-models.sh`
+- [Running Operations](#running-operations) — `start.sh` · `status.sh` · `backup.sh` · `inhibit.sh`
+- [Reconfiguration](#reconfiguration)
+- [Troubleshooting](#troubleshooting) — `diagnose.sh`
+- [Shutdown and Teardown](#shutdown-and-teardown) — `stop.sh` · `undeploy.sh`
+- [Worker Node Scripts](#worker-node-scripts) — `node.sh` · `bootstrap.sh` · `heartbeat.sh` · `register-node.sh`
+- [Subdirectory Scripts](#subdirectory-scripts) — `bare_metal/setup-macos.sh` · `podman/setup-worker.sh`
 
 ---
 
