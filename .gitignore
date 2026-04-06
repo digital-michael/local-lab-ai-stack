@@ -28,6 +28,10 @@ testing/layer5_distributed/results/
 # Machine-local node profile override (not committed; set by configure.sh recommend)
 configs/node_profile
 
+# Generated artifacts — point-in-time playbooks and other output files
+# Never committed; lives only on the local machine that generated them
+output/
+
 # Meta framework (collaboration protocol — separate repo, symlinked locally)
 docs/meta
 docs/meta_local/dynamics.md
