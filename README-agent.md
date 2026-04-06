@@ -75,7 +75,7 @@ The component guidance in `docs/library/framework_components/` is **normative**.
 │   ├── install.sh                       # One-time system setup
 │   └── validate-system.sh              # Pre-flight environment checks
 └── docs/
-    ├── decisions.md                     # Architecture Decision Records (D-001 … D-035)
+    ├── decisions.md                     # Architecture Decision Records (D-001 … D-038)
     ├── ai_stack_blueprint/              # Architecture, implementation, config, checklist
     └── library/
         ├── framework_components/        # Per-component reference (14 components)

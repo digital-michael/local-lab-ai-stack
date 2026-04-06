@@ -605,3 +605,57 @@ Concrete protocol specification for the **WAN** discovery profile.
 | **Driver** | User-raised discussion; joint design |
 | **Trigger** | Review of D-025 vocabulary during Tier 1 work; user identified need for "unvetted" and "prohibited" states and noted the public/team/private framing was missing "public" and conflating visibility with profiles. |
 | **Commit** | `5cb3679` (Phase 18) |
+
+---
+
+### D-036 — Surrogate UUID Primary Keys for All KI Database Tables
+
+| Field | Value |
+|---|---|
+| **Decision** | All tables in the Knowledge Index database schema use a UUID surrogate primary key (`id TEXT PRIMARY KEY`). Natural keys (e.g., `(name, version)` for `libraries`) become `UNIQUE` constraints. All foreign keys reference the surrogate UUID. This is a mandatory standard for every existing and future KI table. |
+| **Context** | The `libraries` table has a compound natural-key PK `(name, version)`. D-037 adds two more tables referencing `libraries`; D-038 adds three. Compound FK constraints create multi-column FK declarations, increase join complexity, and block clean REST API design (resource IDs must be single opaque values). Surrogates eliminate all of these at zero runtime cost. |
+| **principal_type** | The `entitlements` table (D-038) introduces `principal_id → nodes.node_id`. A `principal_type` column (`node \| user \| org`) is added at the same time — today only `node` is used, but this reserves extensibility for per-user entitlements (post-Authentik) and per-org entitlements without a future structural migration. |
+| **Migration** | Add `id TEXT NOT NULL DEFAULT ''` to existing tables, backfill with `uuid4()`, add `UNIQUE(name, version)` constraint, repoint all FKs. Applied in KAMS Phase A. |
+| **Standard rule** | Any new KI table MUST declare `id TEXT PRIMARY KEY` as its first column. Natural uniqueness is expressed as `UNIQUE`, never as `PRIMARY KEY`. |
+| **Driver** | User preference; joint design session 2026-04-06 |
+| **Trigger** | D-037/D-038 schema growth; user explicitly rejected compound primary keys as a recurring pattern. |
+| **Commit** | TBD — KAMS Phase A |
+
+---
+
+### D-037 — Knowledge Authority Tiers: Source, Policy, Annotation
+
+| Field | Value |
+|---|---|
+| **Decision** | Three tiers of knowledge authority may be attached to any Named Library Source: (1) **Source** — the canonical content (the `.ai-library` package); (2) **Policy** — organization-mandated interpretation overlay, binding, portable; (3) **Annotation** — individual contributor commentary, advisory only, local by default. |
+| **Dependency rule** | Policies and Annotations are dependent entities: they cannot exist without a Source. Both tables carry an FK → `libraries.id` with `CASCADE DELETE`. No orphaned overlays are possible at the database level. |
+| **Policy semantics** | Binding organizational mandate. Travels with the Source during custody sync (it is organizational truth). Fields: `authority` (who authorized), `topic` (what aspect of the source this addresses), `directive` (the mandate text), `rationale`, `scope` (`org-wide \| team \| project`), `supersedes` (optional UUID of a prior policy being replaced). |
+| **Annotation semantics** | Individual contributor opinion. Local by default — sharing is explicit (`shared = true` or admin-promoted). Fields: `author`, `topic`, `objection` (what the author disagrees with or finds insufficient), `suggestion` (recommended alternative), `rationale` (the argument). Must clearly state the topic of concern and the suggested mitigation. |
+| **Package format** | `.ai-library` packages gain two optional directories: `policies/` and `annotations/`, each containing structured YAML files. Freeform markdown is not accepted — YAML enforces field schema and enables machine parsing. |
+| **Search integration** | Qdrant vector payloads gain a `tier` field (`source \| policy \| annotation`). Queries may filter by tier to retrieve only organizational mandates, only source content, or only individual opinions — keeping authority levels clearly demarcated in results. |
+| **Status expansion** | `libraries.status` gains four values: `reserved` (checked out for editing/extending), `under_review` (flagged, pending admin evaluation), `restricted` (access narrowed below visibility default), `retired` (removed from active serving; record preserved for audit). Full set: `active \| unvetted \| reserved \| under_review \| restricted \| retired \| prohibited`. |
+| **Circulation** | Checkout/reserve, checkin/release (with optional policy or annotation attached at checkin — the natural knowledge-capture moment), copy, hold. Flag operations: `review`, `restrict`, `retire`, `reclassify`, `replace` (creates a replacement request linking old version to requested update). |
+| **Driver** | User design session 2026-04-06; need to demarcate definitive policy mandates from individual opinion in knowledge assets. |
+| **Trigger** | Gap in D-025/D-035 custody model: no mechanism to attach org-mandated overrides or individual commentary to a Source with clear authority demarcation. |
+| **Commit** | TBD — KAMS Phase A |
+
+---
+
+### D-038 — Knowledge Federation: Peer and Institutional Tiers (Agreements, Links, Entitlements)
+
+| Field | Value |
+|---|---|
+| **Decision** | The KI supports two tiers of inter-node federation — **Peer** (minimal ceremony, symmetric, free/trial) and **Institutional** (out-of-band agreement, governed, monetization-ready) — using the same underlying tables differentiated by a `tier` field. Three new constructs: `library_agreements` (bilateral access contracts), `library_links` (remote source pointers with cached metadata), `entitlements` (payment-gated access grants). |
+| **Entitlement verifier principle** | The KI is an entitlement verifier, not a payment processor. External payment systems (Stripe, Paddle, etc.) or membership platforms issue entitlements via a webhook to `POST /v1/admin/entitlements` (admin-only). This keeps PCI-DSS compliance scope out of the KI service entirely. |
+| **Principal identity** | Entitlements are keyed to `principal_id → nodes.node_id` (controller or peer node). `principal_type` (`node \| user \| org`) is included per D-036 so per-user entitlements (post-Authentik SSO) and per-org entitlements require no structural migration. |
+| **Peer tier** | Bootstrapped with two symmetric `POST /v1/admin/peers` calls (one on each side). Auto-creates an agreement (`tier = peer`, `scope = public + shared`, `terms.access_model = proxy`, no payload caching). Auto-discovers counterparty's public/shared catalog and creates `library_links`. Two calls, no out-of-band ceremony. |
+| **Institutional tier** | Out-of-band agreement (contract, signed terms) precedes configuration. Admin calls `POST /v1/admin/agreements` with explicit `scope_filter`, `terms`, and encrypted `access_credential`. Links created selectively within scope_filter bounds. Supports subscription, one-time, membership, and metered payment models. |
+| **Access model** | Default: proxy (local KI fetches from remote, serves locally; end user never receives remote credential). Redirect and cached-proxy available per-agreement via `terms.access_model`. Proxy is required for monetized/licensed resources — local KI presents entitlement proof to remote before fetching. |
+| **Origin transparency** | Every catalog and search result always includes an `origin` block: `type` (`local \| linked`), `hosted_by`, `agreement`, `access`, `verified_at`. This block is always present in API responses — non-negotiable. Presentation layer chooses display prominence; the data is never absent. |
+| **Entitlement travel** | Local by default: paying on node A does not grant access on node B. Travel is explicit: `agreement.terms.entitlement_extension = true` plus `terms.extended_models` lists which payment models are portable across that bilateral relationship. |
+| **Policy and annotation travel** | Policies travel with Source during proxy/sync (they are organizational truth). Annotations stay local unless explicitly marked `shared = true` by the author or promoted by an admin. |
+| **Security** | `access_credential` fields encrypted at rest. Proxy validates every request against `scope_filter` before forwarding. Rate limiting enforced per `terms.rate_limit_per_hour`. All proxied requests audited with `agreement_id`, `principal_id`, and timestamp. Credential rotation: `PUT /v1/admin/agreements/{id}/rotate` — updates credential without recreating agreement or changing agreement ID. |
+| **Standards alignment** | `origin` block and catalog metadata align with DCAT vocabulary (W3C). Discovery model aligns with OAI-PMH (pull-harvest) and SRU (federated search). Trust handshake for institutional tier aligns with OAuth 2.0 UMA (User-Managed Access) patterns, though UMA is not implemented — pre-shared keys used at this scale. |
+| **Driver** | User design session 2026-04-06; goal: enable governed resource sharing and monetization across a distributed KI mesh. |
+| **Trigger** | Extension of D-014a/D-014b (discovery profiles) toward active federated access (not just catalog discovery); D-025/D-035 established local custody but made no provision for inter-node access governance. |
+| **Commit** | TBD — KAMS Phase B/C |

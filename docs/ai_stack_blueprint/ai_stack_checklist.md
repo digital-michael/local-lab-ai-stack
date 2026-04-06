@@ -1443,6 +1443,35 @@ These collapse into the configuration system above. Tracked individually for vis
 - [ ] Team-shared chat/context state — shared Postgres or sync protocol so chat history, user accounts, and conversation context are available across nodes (future, extends D-022)
 - [ ] **Federated MCP tool registry** — MCP tools defined on any node are discoverable and callable by agents on any other node without code duplication; single registry synced across the mesh; covers built-in tools (knowledge search, document ingest) and operator-defined custom tools
 
+- [ ] **Knowledge Asset Management System (KAMS) — Phases A/B/C** — Extends the Knowledge Index from a document ingest store into a governed, versionable, distributable knowledge repository with authority tiers, federation, and monetization. Designed in D-036/D-037/D-038 (2026-04-06). Supersedes and expands the stubs "Library access gating" and "Federated RAG across remote library nodes" below.
+  - **Phase A — Content Authority Model (D-036 + D-037):**
+    - Migrate `libraries` table: surrogate UUID PK, `UNIQUE(name, version)`, repoint all FKs (D-036)
+    - Add `library_policies` table: `id`, `library_id` FK, `authority`, `topic`, `directive`, `rationale`, `scope`, `supersedes`, `status`
+    - Add `library_annotations` table: `id`, `library_id` FK, `author`, `topic`, `objection`, `suggestion`, `rationale`, `shared`, `status`
+    - Extend `libraries.status` enum: add `reserved`, `under_review`, `restricted`, `retired`
+    - Extend manifest schema (`configs/library-manifest-schema.json`): `categories[]`, `tags[]`, `source_references[]`, `storage_refs[]`, `contributors[]`
+    - Extend `POST /v1/scan` to discover and ingest `policies/` and `annotations/` sub-directories from packages
+    - Extend Qdrant vector payload with `tier` field (`source | policy | annotation`)
+    - Add `GET /v1/catalog/search` — faceted metadata search (name, categories, status, contributor, source refs, file refs)
+    - Add circulation endpoints: `POST /v1/libraries/{id}/checkout`, `POST /v1/libraries/{id}/checkin`, `POST /v1/libraries/{id}/copy`, `POST /v1/libraries/{id}/hold`, `POST /v1/libraries/{id}/flag`
+    - Update `configure.sh build-library` to scaffold `policies/` and `annotations/` directories
+  - **Phase B — Federation (D-038):**
+    - Add `library_agreements` table: `id`, `name`, `tier` (`peer|institutional`), `remote_ki_url`, `remote_node_id`, `scope_filter`, `terms`, `access_credential` (encrypted), `granted_by`, `expires_at`, `status`
+    - Add `library_links` table: `id`, `local_alias`, `remote_ki_url`, `remote_library_id`, `remote_name`, `remote_version`, `origin_label`, `agreement_id`, `access_credential`, `access_model`, `verified_at`, `status`
+    - Add `POST /v1/admin/peers` — peer bootstrap: 2-call symmetric setup; auto-creates agreement + links
+    - Add `POST /v1/admin/agreements` — institutional agreement management
+    - Implement proxy access model: credential injection, `scope_filter` enforcement, `rate_limit_per_hour`
+    - Inject `origin` block into all `/v1/catalog` and search responses (always present; never absent)
+    - Background liveness job: verify links; flag `broken` after 24 h gap in `verified_at`
+    - Policy sync: policies travel with Source during proxy/custody; annotations stay local unless `shared = true`
+  - **Phase C — Monetization + Governance (D-038):**
+    - Add `entitlements` table: `id`, `principal_id` → `nodes.node_id`, `principal_type` (`node|user|org`), `library_id`, `model` (`subscription|one_time|membership|free|trial`), `granted_at`, `expires_at`, `payment_reference`, `agreement_id`, `status`
+    - Add `POST /v1/admin/entitlements` — admin-only; receives signals from external payment webhooks
+    - Enforce entitlement check on `visibility = licensed` at proxy + query layers; return 402 on missing entitlement
+    - Implement entitlement travel: `agreement.terms.entitlement_extension` + `terms.extended_models`
+    - Audit log: every proxied request recorded with `agreement_id`, `principal_id`, timestamp
+    - Credential rotation: `PUT /v1/admin/agreements/{id}/rotate`, `PUT /v1/admin/peers/{id}/rotate`
+
 - [ ] **Library access gating** — per-library access controls for content type, registered interest, and payment; applied at query and catalog endpoints:
   - Content type gating: mark individual libraries as `public`, `restricted` (authenticated users only), or `private` (author + admin only); enforced at `/v1/query` and `/v1/catalog`
   - Topic interest registration: users declare topics of interest; catalog filters and surfaces libraries matching their profile; enables opt-in discovery without exposing full catalog

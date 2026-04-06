@@ -86,6 +86,8 @@ The stack is designed to grow: new inference nodes can be added to increase capa
 - [Knowledge Library Governance](#d-knowledge-library-governance)
 - [Model A/B Testing](#d-model-ab-testing)
 - [Federated MCP Tool Registry](#d-federated-mcp-tool-registry)
+- [Knowledge Authority Tiers](#d-knowledge-authority-tiers)
+- [Knowledge Federation and Monetization](#d-knowledge-federation-and-monetization)
 
 ---
 
@@ -304,3 +306,22 @@ Route a configurable fraction of requests to a candidate model and compare quali
 ### `[D]` Federated MCP Tool Registry
 Tools (web search, knowledge search, file access, API calls) defined once on any node are automatically discoverable and callable by AI agents running on any other node — a single registry, shared across the mesh, with no per-node duplication.
 - _Tracked: [checklist Future Features](ai_stack_blueprint/ai_stack_checklist.md#4-future-features-architecture-roadmap)_
+
+### `[D]` Knowledge Authority Tiers
+Three explicitly demarcated authority layers can be attached to any Named Library Source: **Source** (canonical content), **Policy** (org-mandated override, binding), and **Annotation** (individual contributor opinion, advisory). Agents querying the knowledge base see results labeled by tier — so an org policy that overrides a source recommendation is never silently treated as just another document, and a personal opinion is never mistaken for a mandate.
+- Policies travel with Sources during custody sync; annotations are local by default (explicit sharing required)
+- Both are dependent entities — cannot exist without a Source (enforced at DB level via FK + CASCADE DELETE)
+- `.ai-library` packages gain optional `policies/` and `annotations/` directories (structured YAML, machine-parseable)
+- Search results carry a `tier` field enabling authority-filtered queries
+- Includes extended circulation model: checkout/reserve, checkin/release (with overlay attachment), copy, hold, and flag operations
+- _Design: D-037 — KAMS Phase A_
+
+### `[D]` Knowledge Federation and Monetization
+Knowledge Index nodes can form bilateral federations to share, mirror, and monetize content — with full source transparency on every result.
+- **Peer tier**: minimal ceremony, symmetric, bootstrapped with two API calls; suitable for nodes operated by the same trusted operator
+- **Institutional tier**: governed by out-of-band agreements; supports subscription, one-time, membership, and metered payment models
+- **Entitlement verifier model**: the KI verifies payment status; payment processing is external (Stripe, Paddle, etc.); PCI-DSS scope stays out of the KI service
+- **Origin transparency**: every catalog and search result always carries an `origin` block identifying whether the content is local or linked, who hosts it, and under which access agreement — not optional, always present
+- **Access model**: default proxy (user never holds remote credentials); redirect and cached-proxy available per-agreement
+- **Entitlement travel**: local by default; opt-in portability via explicit bilateral agreement terms
+- _Design: D-038 — KAMS Phases B + C_
