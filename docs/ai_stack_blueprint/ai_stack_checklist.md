@@ -1354,6 +1354,9 @@ These collapse into the configuration system above. Tracked individually for vis
 
 # 3 Deferrable (address incrementally post-deployment)
 
+- [ ] **Provision groq_api_key** — `groq_api_key` secret is defined in `configs/config.json` for the `llama3-70b-8192` model but not provisioned in the Podman secret store (15/16 secrets present). Fix: `printf '%s' '<key>' | podman secret create groq_api_key -` then `systemctl --user restart litellm.service`. Surfaces as 401 on any LiteLLM request for that model. _(Discovered: 2026-04-06 via playbook generation)_
+- [ ] **Configure Promtail container log scraping** — `configs/promtail/config.yml` has `scrape_configs: []`. Promtail is running but shipping zero container logs to Loki. Fix: add a `scrape_configs` job pointing to the Podman log directory (e.g. `/var/log/containers/` or equivalent bind mount). Until resolved: T-047 (Promtail→Loki e2e) fails; `features.md` Centralized Log Aggregation remains `[-]`. _(Discovered: 2026-04-06 via playbook generation)_
+- [ ] **Provision Grafana dashboards** — `configs/grafana/provisioning/dashboards/` is empty; no dashboards are loaded on first start. Grafana is running and datasources (Prometheus, Loki) are auto-provisioned, but all dashboards are created ad-hoc in the UI. Fix: author or import dashboard JSON files into the provisioning directory and add a dashboard provider YAML. Until resolved: `features.md` Observability remains `[-]`. _(Discovered: 2026-04-06 via playbook generation)_
 - [ ] **Tune resource limits** — CPU/memory/GPU per container after observing baseline (Configuration §3)
 - [x] **Add health checks and readiness probes** — all deployed services now have HealthCmd in config.json; ollama, flowise, prometheus, promtail, authentik health checks confirmed 2026-03-09
 - [x] **Configure GPU passthrough / CDI** — procedure documented in Implementation §4; `nvidia-ctk cdi generate` + `AddDevice=` quadlet directive

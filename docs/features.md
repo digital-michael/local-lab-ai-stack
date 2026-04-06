@@ -109,11 +109,12 @@ Users can have conversations with any available AI model through a browser — n
 - Conversation history preserved across sessions
 - _Powered by: [OpenWebUI](library/framework_components/openwebui/best_practices.md)_
 
-### `[X]` Multi-Model Inference Routing
+### `[-]` Multi-Model Inference Routing
 The stack runs multiple AI models simultaneously and routes requests to the right one automatically. Models can run locally, on remote inference nodes, or on hosted cloud providers — all behind the same single endpoint.
 - A single API endpoint handles all models — callers choose by model name
 - Local models run on the controller or on any registered inference node
-- Hosted cloud models (OpenAI, Groq, Anthropic) can be added via API key — same routing interface, no code changes for callers
+- Hosted cloud models (OpenAI, Anthropic, Mistral) can be added via API key — same routing interface, no code changes for callers
+- Groq cloud routing (`llama3-70b-8192`): **pending** — `groq_api_key` secret not provisioned; model defined in `config.json` but will return 401
 - Transparent routing; callers are unaware of which machine or provider handles the request
 - _Powered by: [LiteLLM](library/framework_components/litellm/best_practices.md)_ · _Defined in: [configs/config.json](../configs/config.json) `models[]`_
 
@@ -145,18 +146,19 @@ All services require login. External identity providers can be connected via SSO
 - Forward-auth at the reverse proxy — no per-service login configuration
 - _Powered by: [Authentik](library/framework_components/authentik/best_practices.md) + [Traefik](library/framework_components/traefik/best_practices.md)_
 
-### `[X]` Observability — Metrics and Dashboards
+### `[-]` Observability — Metrics and Dashboards
 Operators can see the health, performance, and resource usage of every service in real time.
 - Per-service CPU, memory, and request rate metrics
-- Pre-built dashboards out of the box
-- Alerting rules for degraded or failed services
+- Alerting rules for degraded or failed services: **done**
+- Pre-built provisioned dashboards: **pending** — Grafana provisioning directory is empty; no dashboards are loaded on first start
 - _Powered by: [Prometheus](library/framework_components/prometheus/best_practices.md) + [Grafana](library/framework_components/grafana/best_practices.md)_
 
-### `[X]` Centralized Log Aggregation
+### `[-]` Centralized Log Aggregation
 All service logs from all nodes are collected in one place, searchable by service, level, time range, and content.
-- Log shipping from the controller and from all registered inference nodes
-- Structured log queries across the full fleet
-- 7-day retention by default (configurable)
+- Loki running with 7-day retention: **done**
+- Promtail process running and Loki connectivity verified: **done**
+- Container log scraping configured: **pending** — `scrape_configs` is empty; no container logs reach Loki
+- Structured log queries across the full fleet: **pending** (depends on scrape config)
 - _Powered by: [Loki](library/framework_components/loki/best_practices.md) + [Promtail](library/framework_components/promtail/best_practices.md)_
 
 ### `[X]` Secure Reverse Proxy with TLS
