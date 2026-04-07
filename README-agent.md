@@ -75,7 +75,7 @@ The component guidance in `docs/library/framework_components/` is **normative**.
 │   ├── install.sh                       # One-time system setup
 │   └── validate-system.sh              # Pre-flight environment checks
 └── docs/
-    ├── decisions.md                     # Architecture Decision Records (D-001 … D-038)
+    ├── decisions.md                     # Architecture Decision Records (D-001 … D-039)
     ├── ai_stack_blueprint/              # Architecture, implementation, config, checklist
     └── library/
         ├── framework_components/        # Per-component reference (14 components)
@@ -84,7 +84,24 @@ The component guidance in `docs/library/framework_components/` is **normative**.
 
 ---
 
-## 6 Commit Hygiene — Hard Rule
+## 6 Credentials — Hard Rule
+
+No secret values, passwords, API keys, tokens, or credentials may be written into any file tracked by this repository.
+
+**This is unconditional. No exceptions for:**
+- Session notes or debugging logs embedded in docs
+- "Example" values that happen to be the live value
+- Plaintext captured during testing or initial setup
+
+**Permitted:** Secret *names* (`flowise_password`, `litellm_master_key`), placeholder text (`<value from secret>`, `<your-key-here>`), and references to `configs/credentials.local` (which is gitignored).
+
+**When in doubt:** If a string could authenticate to any service — do not write it into a tracked file.
+
+**On discovery:** Redact immediately, amend or rewrite history if the value was committed, rotate the exposed secret.
+
+---
+
+## 7 Commit Hygiene — Hard Rule
 
 Git commit messages MUST contain only content explicitly provided or approved by the operator/user.
 
@@ -97,7 +114,7 @@ Write commit messages as if the human wrote them: type, scope, description, and 
 
 ---
 
-## 7 Rules for Scripts
+## 8 Rules for Scripts
 
 All scripts in `./scripts/` must follow the conventions in [docs/library/framework_components/shell-scripting/guidance.md](docs/library/framework_components/shell-scripting/guidance.md). Key requirements:
 
@@ -112,7 +129,7 @@ See also: [shell-scripting/best_practices.md](docs/library/framework_components/
 
 ---
 
-## 8 Rules for Configuration
+## 9 Rules for Configuration
 
 - **`configs/config.json`** is the machine-readable single source of truth for all service definitions (images, ports, volumes, env vars, secrets, health checks, resources, dependencies).
 - **`docs/ai_stack_blueprint/ai_stack_configuration.md`** documents the schema and rationale. It does not contain the values themselves.
@@ -121,7 +138,7 @@ See also: [shell-scripting/best_practices.md](docs/library/framework_components/
 
 ---
 
-## 9 Rules for Documentation
+## 10 Rules for Documentation
 
 - Do not duplicate content. Cross-reference the canonical source.
 - When adding a new component, create a subdirectory under `docs/library/framework_components/` with `best_practices.md`, `security.md`, and `guidance.md`.
@@ -132,7 +149,7 @@ See also: [shell-scripting/best_practices.md](docs/library/framework_components/
 
 ---
 
-## 10 Deviation Policy
+## 11 Deviation Policy
 
 If a change must deviate from the guidance in `docs/library/framework_components/`, you must:
 
@@ -142,7 +159,7 @@ If a change must deviate from the guidance in `docs/library/framework_components
 
 ---
 
-## 11 File Naming Conventions
+## 12 File Naming Conventions
 
 | Pattern | Audience | Purpose |
 |---|---|---|
@@ -154,7 +171,7 @@ If a change must deviate from the guidance in `docs/library/framework_components
 
 ---
 
-## 12 Session Protocol (Locked-In)
+## 13 Session Protocol (Locked-In)
 
 Every agent session in this repo must establish **Locked-In** status before proceeding. Locked-In means three standing context aspects are engaged: meta framework, lessons learned, and active todo list.
 
