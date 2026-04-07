@@ -1,6 +1,6 @@
 # AI Stack — Feature Status
 
-**Last Updated:** 2026-04-04
+**Last Updated:** 2026-04-07
 
 A human-readable summary of what this stack provides, ordered from most to least foundational. Intended for communicating capabilities to a non-technical audience and tracking progress toward a complete platform.
 
@@ -27,7 +27,7 @@ The stack is designed to grow: new inference nodes can be added to increase capa
 
 ## Technology Stack
 
-15 containerized services, organized by functional layer. All traffic enters through the Edge layer; every upstream is protected by authentication before a request reaches it.
+16 containerized services, organized by functional layer. All traffic enters through the Edge layer; every upstream is protected by authentication before a request reaches it.
 
 | Layer | Component | Primary Responsibility |
 |---|---|---|
@@ -46,6 +46,7 @@ The stack is designed to grow: new inference nodes can be added to increase capa
 | **Observability** | Prometheus ([ref](https://prometheus.io/)) | Metrics scraping and time-series storage across all stack services |
 | **Observability** | Loki ([ref](https://grafana.com/oss/loki/)) | Log aggregation backend; stores structured logs from all containers |
 | **Observability** | Promtail ([ref](https://grafana.com/docs/loki/latest/send-data/promtail/)) | Log shipping agent; collects and forwards container logs to Loki |
+| **Application** | Homepage ([ref](https://gethomepage.dev/)) | Operator dashboard; single-pane service health, status, and navigation |
 
 ---
 
@@ -69,6 +70,8 @@ The stack is designed to grow: new inference nodes can be added to increase capa
 - [Dynamic Node Registration](#x-dynamic-node-registration)
 - [Worker Sleep Inhibitor](#x-worker-sleep-inhibitor)
 - [Inference Node Hardening](#x-inference-node-hardening)
+- [Operator Dashboard](#x-operator-dashboard)
+- [Port Lockdown — Traefik-Only Ingress](#x-port-lockdown--traefik-only-ingress)
 
 **Partially Available**
 - [Local GPU Acceleration](#--local-gpu-acceleration-controller)
@@ -80,7 +83,8 @@ The stack is designed to grow: new inference nodes can be added to increase capa
 
 **Deferred**
 - [Peer Node Topology](#d-peer-node-topology)
-- [Operator Dashboard](#d-operator-dashboard)
+- [Live Throughput Profiling Dashboard](#d-live-throughput-profiling-dashboard)
+- [Recursive Language Model (RLM) Integration](#d-recursive-language-model-rlm-integration)
 - [Federated Knowledge Search](#d-federated-knowledge-search)
 - [Team-Shared Chat and Context](#d-team-shared-chat-and-context)
 - [Knowledge Library Governance](#d-knowledge-library-governance)
@@ -88,6 +92,7 @@ The stack is designed to grow: new inference nodes can be added to increase capa
 - [Federated MCP Tool Registry](#d-federated-mcp-tool-registry)
 - [Knowledge Authority Tiers](#d-knowledge-authority-tiers)
 - [Knowledge Federation and Monetization](#d-knowledge-federation-and-monetization)
+- [Configurable Stack Domain](#d-configurable-stack-domain)
 
 ---
 
@@ -143,9 +148,11 @@ AI inference workload is distributed across multiple machines, increasing throug
 
 ### `[X]` Authentication and Access Control
 All services require login. External identity providers can be connected via SSO.
-- Single sign-on across all web interfaces
+- Single sign-on across all web interfaces via Authentik forwardAuth middleware on every Traefik router
 - OAuth2/OIDC support (Google Workspace, GitHub, LDAP, etc.)
 - Forward-auth at the reverse proxy — no per-service login configuration
+- Machine-to-machine endpoints (MCP, KI API) use API key auth where browser SSO is not applicable
+- Security policy codified in [docs/security-policy.md](../docs/security-policy.md)
 - _Powered by: [Authentik](library/framework_components/authentik/best_practices.md) + [Traefik](library/framework_components/traefik/best_practices.md)_
 
 ### `[-]` Observability — Metrics and Dashboards
@@ -201,6 +208,23 @@ Raw document directories can be packaged into `.ai-library` bundles with a singl
 - Generates `manifest.yaml`, `metadata.json`, and `checksums.txt` automatically
 - Produced packages are immediately consumable by `POST /v1/scan` and `configure.sh sync-libraries`
 - _Powered by: [scripts/configure.sh](../scripts/configure.sh)_ · _Format: D-013_ · _Delivered: [Phase 16](ai_stack_blueprint/ai_stack_checklist.md#phase-16)
+
+### `[X]` Operator Dashboard
+A single-pane operator view at `dashboard.stack.localhost` showing all 16 stack services with health status, live metrics widgets, and direct links to each service's web UI.
+- Deployed as [Homepage](https://gethomepage.dev/) behind Authentik SSO — same session cookie; seamless navigation
+- Live widgets: Authentik user/flow counts, Grafana health, LiteLLM model count, Qdrant collection count, Flowise chatflow count, Loki build info, Prometheus metrics via Promtail widget
+- All service `href` links use `*.stack.localhost` naming convention
+- Credential injection via `HOMEPAGE_VAR_*` env vars in quadlet (no plain-text secrets in config files)
+- _Powered by: [Homepage](https://gethomepage.dev/)_ · _Config: `~/ai-stack/configs/homepage/`_
+
+### `[X]` Port Lockdown — Traefik-Only Ingress
+All services are reachable exclusively through Traefik, which enforces Authentik SSO. Direct host-port bypass is architecturally eliminated.
+- Only traefik (80/443), postgres (5432), and ollama (11434) publish host ports
+- All other service quadlets have no `PublishPort` — container-network only
+- `curl localhost:<port>` → connection refused for every Traefik-routed service
+- Security posture documented in [docs/security-policy.md](../docs/security-policy.md) with 3-tier model
+- Credentials captured to `configs/credentials.local` (git-ignored) via `scripts/capture-credentials.sh`
+- _Enforced by: config.json `"ports": []` + quadlet generation_
 
 ---
 
@@ -283,9 +307,21 @@ Running GPU-optimized large language models on the controller's dedicated GPU fo
 Each node runs the complete stack independently. Nodes share inference capacity, discover each other's knowledge libraries, and continue working in a reduced capacity if any peer goes offline.
 - _Planned: [Phase 10](ai_stack_blueprint/ai_stack_checklist.md#phase-10--full-peer-nodes-and-shared-knowledge)_
 
-### `[D]` Operator Dashboard
-A unified web UI for users, teams, and administrators with tabs for personal contexts, team-shared contexts, system health, node management, and admin operations.
-- _Tracked: [checklist Future Features](ai_stack_blueprint/ai_stack_checklist.md#4-future-features-architecture-roadmap)_
+
+
+### `[D]` Live Throughput Profiling Dashboard
+A real-time dashboard showing where the stack is slowest under load — so capacity planning and optimization effort is directed at the actual bottleneck, not the assumed one.
+- Per-model inference latency and tokens/second across all nodes
+- Knowledge Index query latency (embedding + vector search breakdown)
+- LiteLLM gateway overhead and queue depth
+- Per-node CPU/GPU/memory utilization over time
+- _Tracked: BL-006_
+
+### `[D]` Recursive Language Model (RLM) Integration
+Research and integrate the MIT Recursive Language Model approach — a technique in which the model recursively decomposes complex problems into smaller sub-problems, solving each and composing results back up. Intended to improve multi-step reasoning quality on local models without requiring frontier-scale parameter counts.
+- Requires design decision: prompting strategy (Flowise workflow), LiteLLM hook, or standalone service
+- Evaluate against baseline reasoning test suite (Layer 3 tests) before and after
+- _Tracked: BL-004; pending research — design decision required before implementation_
 
 ### `[D]` Federated Knowledge Search
 A query sent to any node's knowledge base automatically fans out to all peer nodes' libraries and returns a merged result set — the user sees one unified answer regardless of where the relevant content lives.
@@ -315,6 +351,12 @@ Three explicitly demarcated authority layers can be attached to any Named Librar
 - Search results carry a `tier` field enabling authority-filtered queries
 - Includes extended circulation model: checkout/reserve, checkin/release (with overlay attachment), copy, hold, and flag operations
 - _Design: D-037 — KAMS Phase A_
+
+### `[D]` Configurable Stack Domain
+At setup time, the operator is prompted for a custom domain base (e.g. `centauri.localhost`) instead of the hardcoded `stack.localhost` default. The domain is stored once in `config.json` and all generators derive from it — Traefik Host rules, TLS SANs, `/etc/hosts` entries, Authentik external_host/cookie_domain, Homepage ALLOWED_HOSTS, and `status.sh -vv` URL column.
+- Eliminates hardcoded hostname strings scattered across config files
+- Enables machine-named deployments: `auth.centauri.localhost`, `grafana.centauri.localhost`, etc.
+- _Tracked: BL-007_
 
 ### `[D]` Knowledge Federation and Monetization
 Knowledge Index nodes can form bilateral federations to share, mirror, and monetize content — with full source transparency on every result.

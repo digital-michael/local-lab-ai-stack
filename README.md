@@ -10,12 +10,13 @@ This repo contains the architecture, configuration, tooling, and reference docum
 - **Flowise** — low-code AI workflow builder
 - **LiteLLM** — LLM API gateway and model proxy
 - **vLLM** — GPU-accelerated model inference
-- **llama.cpp** — CPU-based GGUF model inference
 - **Qdrant** — vector database for RAG embeddings
 - **PostgreSQL** — relational database for service state
-- **Authentik** — identity provider and SSO (deferrable)
+- **Authentik** — identity provider and SSO; enforces authentication on every service
 - **Prometheus + Grafana** — metrics and dashboards
 - **Loki + Promtail** — log aggregation and shipping
+- **MinIO** — object storage for documents, models, and backups
+- **Homepage** — operator dashboard with live service health widgets
 
 All services run as rootless Podman containers managed by systemd quadlets on a single node.
 
@@ -93,9 +94,10 @@ Start with the **architecture doc** for the full picture, then consult the other
 | [Implementation](docs/ai_stack_blueprint/ai_stack_implementation.md) | Deployment procedures: quadlets, secrets, GPU passthrough, OIDC |
 | [Configuration](docs/ai_stack_blueprint/ai_stack_configuration.md) | Schema documentation for `configs/config.json` |
 | [Checklist](docs/ai_stack_blueprint/ai_stack_checklist.md) | Task tracker with blockers, deferrables, and future iterations |
+| [Security Policy](docs/security-policy.md) | 3-tier authentication model; port binding rules; credential management |
 
 Per-component best practices, security hardening, and project-specific guidance live under `docs/library/framework_components/`.
 
 ## Status
 
-This project is **deployed and operational** on the CENTAURI cluster. All core services are running as rootless Podman containers managed by systemd quadlets. The test suite (layers 0–4) passes. Outstanding items are tracked in the [checklist](docs/ai_stack_blueprint/ai_stack_checklist.md) and [features](docs/features.md).
+This project is **deployed and operational** on the CENTAURI controller. All 16 core services are running as rootless Podman containers managed by systemd quadlets. Every service is behind Authentik SSO via Traefik forwardAuth; no service publishes a bypass host port. The test suite (layers 0–4) passes. Outstanding items are tracked in the [checklist](docs/ai_stack_blueprint/ai_stack_checklist.md) and [features](docs/features.md).

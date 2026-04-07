@@ -180,18 +180,7 @@
       "container_name": "qdrant",
       "dns_alias": "qdrant.ai-stack",
       "depends_on": [],
-      "ports": [
-        {
-          "host": 6333,
-          "container": 6333,
-          "bind": "127.0.0.1"
-        },
-        {
-          "host": 6334,
-          "container": 6334,
-          "bind": "127.0.0.1"
-        }
-      ],
+      "ports": [],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/qdrant",
@@ -227,13 +216,7 @@
         "postgres",
         "qdrant"
       ],
-      "ports": [
-        {
-          "host": 8100,
-          "container": 8100,
-          "bind": "0.0.0.0"
-        }
-      ],
+      "ports": [],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/libraries",
@@ -312,7 +295,8 @@
         "AUTHENTIK_POSTGRESQL__NAME": "aistack",
         "AUTHENTIK_POSTGRESQL__USER": "aistack",
         "AUTHENTIK_ERROR_REPORTING__ENABLED": "false",
-        "AUTHENTIK_LOG_LEVEL": "info"
+        "AUTHENTIK_LOG_LEVEL": "info",
+        "AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS": "10.89.0.0/24,127.0.0.0/8"
       },
       "secrets": [
         {
@@ -345,13 +329,7 @@
       "depends_on": [
         "postgres"
       ],
-      "ports": [
-        {
-          "host": 9000,
-          "container": 4000,
-          "bind": "127.0.0.1"
-        }
-      ],
+      "ports": [],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/configs/litellm/proxy_config.yaml",
@@ -420,12 +398,7 @@
       "depends_on": [
         "litellm"
       ],
-      "ports": [
-        {
-          "host": 8000,
-          "container": 8000
-        }
-      ],
+      "ports": [],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/models",
@@ -507,13 +480,7 @@
         "litellm",
         "qdrant"
       ],
-      "ports": [
-        {
-          "host": 3001,
-          "container": 3000,
-          "bind": "127.0.0.1"
-        }
-      ],
+      "ports": [],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/flowise",
@@ -555,13 +522,7 @@
       "depends_on": [
         "litellm"
       ],
-      "ports": [
-        {
-          "host": 9090,
-          "container": 8080,
-          "bind": "127.0.0.1"
-        }
-      ],
+      "ports": [],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/openwebui",
@@ -597,13 +558,7 @@
       "container_name": "prometheus",
       "dns_alias": "prometheus.ai-stack",
       "depends_on": [],
-      "ports": [
-        {
-          "host": 9091,
-          "container": 9090,
-          "bind": "127.0.0.1"
-        }
-      ],
+      "ports": [],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/configs/prometheus",
@@ -633,13 +588,7 @@
       "depends_on": [
         "prometheus"
       ],
-      "ports": [
-        {
-          "host": 3000,
-          "container": 3000,
-          "bind": "127.0.0.1"
-        }
-      ],
+      "ports": [],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/configs/grafana",
@@ -672,13 +621,7 @@
       "container_name": "loki",
       "dns_alias": "loki.ai-stack",
       "depends_on": [],
-      "ports": [
-        {
-          "host": 3100,
-          "container": 3100,
-          "bind": "127.0.0.1"
-        }
-      ],
+      "ports": [],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/configs/loki",
@@ -746,18 +689,7 @@
       "container_name": "minio",
       "dns_alias": "minio.ai-stack",
       "depends_on": [],
-      "ports": [
-        {
-          "host": 9100,
-          "container": 9000,
-          "bind": "127.0.0.1"
-        },
-        {
-          "host": 9101,
-          "container": 9001,
-          "bind": "127.0.0.1"
-        }
-      ],
+      "ports": [],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/minio",
@@ -777,7 +709,12 @@
         }
       ],
       "command": "server /data --console-address :9001",
-      "buckets": ["documents", "outputs", "research", "libraries"],
+      "buckets": [
+        "documents",
+        "outputs",
+        "research",
+        "libraries"
+      ],
       "service_accounts": [
         {
           "name": "ki-service",
@@ -785,8 +722,14 @@
           "secret_access_key": "minio_ki_access_key",
           "secret_secret_key": "minio_ki_secret_key",
           "policy": {
-            "read":  ["documents", "libraries"],
-            "write": ["outputs", "research"]
+            "read": [
+              "documents",
+              "libraries"
+            ],
+            "write": [
+              "outputs",
+              "research"
+            ]
           }
         }
       ],
@@ -799,6 +742,36 @@
       "resources": {
         "cpus": 1,
         "memory": "1g",
+        "gpu": null
+      }
+    },
+    "homepage": {
+      "image": "ghcr.io/gethomepage/homepage",
+      "tag": "latest",
+      "container_name": "homepage",
+      "dns_alias": "homepage.ai-stack",
+      "depends_on": [],
+      "ports": [],
+      "volumes": [
+        {
+          "host": "$AI_STACK_DIR/configs/homepage",
+          "container": "/app/config",
+          "mode": "ro"
+        }
+      ],
+      "environment": {
+        "HOMEPAGE_ALLOWED_HOSTS": "homepage.ai-stack,homepage.ai-stack:3000,dashboard.stack.localhost,dashboard.localhost,localhost,localhost:3000,127.0.0.1,127.0.0.1:3002"
+      },
+      "secrets": [],
+      "health_check": {
+        "command": "wget -qO- http://localhost:3000/api/healthcheck || exit 1",
+        "interval": "30s",
+        "retries": 3,
+        "timeout": "5s"
+      },
+      "resources": {
+        "cpus": 0.5,
+        "memory": "256m",
         "gpu": null
       }
     }

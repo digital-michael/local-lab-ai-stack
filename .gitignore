@@ -13,6 +13,7 @@ Thumbs.db
 *.crt
 *.env
 secrets/
+configs/credentials.local
 
 # Python
 __pycache__/

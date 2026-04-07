@@ -110,6 +110,28 @@ _svc_port() {
     jq -r --arg s "$svc" '.services[$s].ports[0].host // empty' "$CONFIG_FILE" 2>/dev/null
 }
 
+# Returns the user-facing URL for a service.
+# Traefik-routed services get their *.stack.localhost hostname.
+# Direct-access services get http://localhost:PORT.
+_svc_url() {
+    local svc="$1"
+    case "$svc" in
+        authentik)       echo "https://auth.stack.localhost" ;;
+        openwebui)       echo "https://openwebui.stack.localhost" ;;
+        grafana)         echo "https://grafana.stack.localhost" ;;
+        flowise)         echo "https://flowise.stack.localhost" ;;
+        prometheus)      echo "https://prometheus.stack.localhost" ;;
+        litellm)         echo "https://litellm.stack.localhost" ;;
+        qdrant)          echo "https://qdrant.stack.localhost" ;;
+        minio)           echo "https://minio.stack.localhost" ;;
+        homepage)        echo "https://dashboard.stack.localhost" ;;
+        traefik)         echo "http://localhost:8080" ;;
+        postgres)        echo "localhost:5432" ;;
+        ollama)          echo "http://localhost:11434" ;;
+        *)               echo "-" ;;
+    esac
+}
+
 # Returns container health (only for quadlet-managed active containers)
 _svc_health() {
     local svc="$1" state="$2"
@@ -277,8 +299,7 @@ if ! $QUIET; then
         [[ "$display" != "active" ]] && health_display="-"
         [[ -z "$health_display" ]] && health_display="-"
         if [[ $VERBOSE -ge 2 ]]; then
-            _port_val=$(_svc_port "$svc")
-            _url_val="${_port_val:+http://localhost:${_port_val}}"
+            _url_val=$(_svc_url "$svc")
             printf "  %-${col}s %-10s %-12s %s\n" "$svc" "$display" "$health_display" "${_url_val:--}"
         elif [[ $VERBOSE -eq 1 ]]; then
             _port_val=$(_svc_port "$svc")
