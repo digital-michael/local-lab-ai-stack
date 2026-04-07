@@ -162,7 +162,7 @@ data source, required content, and any special rules.
 
 > **Freshness Contract:** Regenerate this document when any image tag changes, a secret
 > is rotated, a node is added or removed, or `make test-all` shows new failures.
-> Generator: `docs/library/actions/generate-playbook/SKILL.md`
+> Generator: `docs/library/actions/generate-playbook/generate-playbook-SKILL.md`
 
 ---
 ```
@@ -181,7 +181,7 @@ Content:
 - What it does NOT cover: architecture decisions (→ `docs/ai_stack_blueprint/ai_stack_architecture.md`),
   feature roadmap (→ `docs/features.md`), agent API surfaces
 - How to use it: TOC for navigation, §12 Index for keyword lookup
-- How to regenerate: run the skill at `docs/library/actions/generate-playbook/SKILL.md`
+- How to regenerate: run the skill at `docs/library/actions/generate-playbook/generate-playbook-SKILL.md`
 - Security note: no secret values appear in this document; §4.1 shows extraction patterns
 
 ---
