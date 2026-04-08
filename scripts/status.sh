@@ -125,6 +125,7 @@ _svc_url() {
         qdrant)          echo "https://qdrant.stack.localhost" ;;
         minio)           echo "https://minio.stack.localhost" ;;
         homepage)        echo "https://dashboard.stack.localhost" ;;
+        knowledge-index) echo "https://ki.stack.localhost" ;;
         traefik)         echo "http://localhost:8080" ;;
         postgres)        echo "localhost:5432" ;;
         ollama)          echo "http://localhost:11434" ;;

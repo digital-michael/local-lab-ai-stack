@@ -61,10 +61,19 @@ http:
         - secure-headers
       tls: {}
 
-    # Exception: MCP endpoint uses API key auth (machine-to-machine, not browser SSO).
+    # Exception: MCP + admin endpoints use API key auth (machine-to-machine, not browser SSO).
     # Access control: knowledge_index_api_key Podman secret (API_KEY env var in app).
+    knowledge-index-admin:
+      rule: "Host(`ki.stack.localhost`) && PathPrefix(`/admin`)"
+      entryPoints:
+        - websecure
+      service: knowledge-index
+      middlewares:
+        - secure-headers
+      tls: {}
+
     knowledge-index-mcp:
-      rule: "PathPrefix(`/mcp`)"
+      rule: "Host(`ki.stack.localhost`) && PathPrefix(`/mcp`)"
       entryPoints:
         - websecure
       service: knowledge-index
@@ -73,7 +82,7 @@ http:
       tls: {}
 
     knowledge-index-api:
-      rule: "PathPrefix(`/v1`)"
+      rule: "Host(`ki.stack.localhost`) && PathPrefix(`/v1`)"
       entryPoints:
         - websecure
       service: knowledge-index
