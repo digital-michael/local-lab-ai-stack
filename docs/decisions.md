@@ -659,3 +659,19 @@ Concrete protocol specification for the **WAN** discovery profile.
 | **Driver** | User design session 2026-04-06; goal: enable governed resource sharing and monetization across a distributed KI mesh. |
 | **Trigger** | Extension of D-014a/D-014b (discovery profiles) toward active federated access (not just catalog discovery); D-025/D-035 established local custody but made no provision for inter-node access governance. |
 | **Commit** | TBD — KAMS Phase B/C |
+
+---
+
+### D-039 — Content Review: Tiered Guard Model Pattern
+
+| Field | Value |
+|---|---|
+| **Decision** | Content review is implemented as a **three-tier chain of responsibility**, not as a single evaluation path. Tier 1: deterministic regex gates for Categories A (security violations), B (PII/privacy), and C (credential detection) — runs at both the LiteLLM `async_pre_call_hook` and KI ingestion endpoints. Tier 2: stateless, context-isolated guard LLM for Category D (profanity, violence, mature content) — separate Ollama inference call with a fixed classification system prompt, `temperature=0`, and no shared context with the main inference model. Tier 3 (future): dedicated guard-model node profile. |
+| **Rationale** | A single LLM cannot safely evaluate its own inputs for adversarial content — the evaluation surface and execution surface are shared, so a successful manipulation of the evaluation phase is by definition a successful attack. Separating evaluation into a dedicated, context-isolated model with constrained output (`SAFE \| UNSAFE:category`) eliminates this shared-surface risk. Regex is preferred over LLM for A/B/C because it is deterministic, zero-latency, and not susceptible to prompt injection. |
+| **Guard model isolation invariants** | (1) The guard model receives only the content under review — no conversation history, no RAG context, no system prompt from the main workflow. (2) Each call is a fresh stateless inference (clean KV cache). (3) Output format is constrained — the guard returns a classification token, not a prose continuation. (4) The guard model's Ollama endpoint may optionally be on a separate container with no other models loaded (`REVIEW_GUARD_MODEL` env var selects the model; `REVIEW_GUARD_URL` optionally points at a separate Ollama instance). |
+| **Fail behavior** | Guard LLM timeout or error: configurable via `REVIEW_D_FAIL_MODE` — `open` (allow, log warning) or `closed` (reject, log error). Default: `open` for Category D at Phase 2, to prevent a guard availability issue from blocking all inference. Phase 3 review should revisit this default. |
+| **Phasing** | Phase 1 (NOW): Tier 1 regex gates. Phase 2 (NEXT): Tier 2 guard LLM. Phase 3 (LATER): output filtering, RAG injection detection, dedicated guard node. See BL-009. |
+| **Skill** | `docs/library/actions/knowledge-index-review/knowledge-index-review-SKILL.md` |
+| **Driver** | User design session 2026-04-07; concern that using the same LLM to evaluate and execute shared the adversarial surface and weakened the review boundary. |
+| **Trigger** | Planning content ingestion into the Knowledge Index; review layer must be in place before production ingestion expands. |
+| **Commit** | TBD — BL-009 Phase 1 |
