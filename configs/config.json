@@ -216,7 +216,7 @@
         "postgres",
         "qdrant"
       ],
-      "ports": [],
+      "ports": [{"host": 8100, "container": 8100, "bind": "0.0.0.0"}],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/libraries",

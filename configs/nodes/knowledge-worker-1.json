@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.2",
+  "alias": "knowledge-worker-1",
+  "node_id": "CENTAURI-node",
+  "name": "workstation-ki",
+  "address": "SERVICES.mynetworksettings.com",
+  "address_fallback": null,
+  "status": "active",
+  "profile": "knowledge-worker",
+  "os": "linux",
+  "deployment": "podman",
+  "registered_at": "2026-04-08T00:00:00Z",
+  "models": [
+    "llama3.1:8b",
+    "qwen3.5:4b",
+    "qwen3:8b",
+    "llama3.2:3b"
+  ],
+  "capabilities": [
+    "inference",
+    "knowledge-index",
+    "qdrant"
+  ]
+}
