@@ -39,6 +39,7 @@ import json
 import os
 import pathlib
 import re
+import sys
 import uuid
 from typing import Any
 
@@ -504,6 +505,107 @@ def _ingest_chunks(doc_id: str, content: str, metadata: dict, collection: str) -
     return len(points)
 
 # ---------------------------------------------------------------------------
+# Content Review — Category A/B/C regex gates (D-039 Phase 1)
+# ---------------------------------------------------------------------------
+# Applied at ingestion endpoints before any Qdrant write or DB write.
+# Patterns are a subset of those in configs/litellm/hooks.py; email-address
+# is omitted here (legitimate in operator-curated document content).
+# ---------------------------------------------------------------------------
+
+_KI_REVIEW_ENABLED: bool = os.environ.get("REVIEW_ENABLED", "true").lower() not in ("false", "0", "no")
+
+_KI_SEC_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'\bignore\s+(all\s+)?previous\s+instructions?\b', re.I), 'jailbreak:ignore-previous'),
+    (re.compile(r'\b(DAN|developer\s+mode|jailbreak|unrestricted\s+mode)\b', re.I), 'jailbreak:mode-switch'),
+    (re.compile(r'\bpretend\s+(you\s+are|to\s+be)\b', re.I), 'jailbreak:pretend'),
+    (re.compile(r'\byour\s+(true|real|actual|hidden)\s+(self|purpose|instructions?)\b', re.I), 'jailbreak:hidden-self'),
+    (re.compile(r'\b(nsenter|unshare|pivot_root|chroot)\b', re.I), 'escape:container-syscall'),
+    (re.compile(r'/proc/(self|[0-9]+)/(ns|fd|mem|maps)\b'), 'escape:proc-traversal'),
+    (re.compile(r'\b--privileged\b', re.I), 'escape:privileged-flag'),
+    (re.compile(r'\b(cap_sys_admin|cap_net_admin|setuid)\b', re.I), 'escape:capability'),
+    (re.compile(r'\bsudo\s+(-[si]|bash|sh|su\b)', re.I), 'privesc:sudo-shell'),
+    (re.compile(r'\b/etc/(passwd|shadow|sudoers)\b', re.I), 'privesc:sensitive-file'),
+    (re.compile(r'__import__\s*\('), 'injection:dunder-import'),
+    (re.compile(r'\bsubprocess\.(call|run|Popen|check_output)\s*\(', re.I), 'injection:subprocess'),
+    (re.compile(r'\bos\.(system|popen|execv?[ep]?)\s*\(', re.I), 'injection:os-exec'),
+    (re.compile(r'\b(base64|b64decode|atob)\b.*\beval\b', re.I | re.S), 'exfil:encoded-exec'),
+    (re.compile(r'(.)\1{2000,}', re.S), 'dos:repeated-char'),
+    (re.compile(r'\b(pip|pip3)\s+install\s+(?!-r\s)', re.I), 'inject:pip-install'),
+]
+
+_KI_PRIV_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'\b\d{3}-\d{2}-\d{4}\b'), 'pii:ssn'),
+    (re.compile(r'\bsession[_-]?token[s]?\s*[=:]\s*\S{10,}\b', re.I), 'privacy:session-token'),
+]
+
+_KI_CRED_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'\bsk-[A-Za-z0-9]{20,}\b'), 'cred:openai-key'),
+    (re.compile(r'\bAKIA[0-9A-Z]{16}\b'), 'cred:aws-access-key'),
+    (re.compile(r'\bghp_[A-Za-z0-9]{36}\b'), 'cred:github-pat'),
+    (re.compile(r'\bghs_[A-Za-z0-9]{36}\b'), 'cred:github-actions-secret'),
+    (re.compile(r'\bxox[baprs]-[0-9A-Za-z\-]{10,}\b', re.I), 'cred:slack-token'),
+    (re.compile(r'\bAIza[0-9A-Za-z\-_]{35}\b'), 'cred:google-api-key'),
+    (re.compile(r'EYJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}'), 'cred:jwt-token'),
+    (re.compile(r'[a-zA-Z][a-zA-Z0-9+\-.]*://[^:@\s]+:[^@\s]+@'), 'cred:url-with-password'),
+    (re.compile(r'-----BEGIN\s+(?:RSA|EC|DSA|OPENSSH|PGP)?\s*PRIVATE KEY-----'), 'cred:private-key-pem'),
+    (re.compile(r'(?:PASSWORD|SECRET|API_KEY|TOKEN|ACCESS_KEY)\s*=\s*[^\s$\'"]{6,}', re.I), 'cred:env-assignment'),
+    (re.compile(
+        r'(?:litellm_master_key|qdrant_api_key|knowledge_index_api_key|flowise_secret_key)\s*[=:]\s*\S{6,}',
+        re.I), 'cred:stack-secret-leaked'),
+]
+
+
+def _ki_log_review_event(
+    *, category: str, rule: str, source_endpoint: str, full_content: str, matched_segment: str
+) -> None:
+    """Write a structured review event to stderr. Never logs raw content or matched values."""
+    from datetime import datetime, timezone
+    record = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "level": "WARN",
+        "event": "content_review",
+        "enforcement_point": "ki_ingestion",
+        "category": category,
+        "rule": rule,
+        "action": "rejected",
+        "request_id": source_endpoint,
+        "content_hash": hashlib.sha256(full_content[:1024].encode()).hexdigest(),
+        "match_hash": hashlib.sha256(matched_segment.encode()).hexdigest()[:8],
+    }
+    print(json.dumps(record), file=sys.stderr, flush=True)
+
+
+def _review_content(text: str, *, source_endpoint: str) -> None:
+    """
+    Apply Category A/B/C content review to ingested document text.
+    Raises HTTPException(422) with a generic message on any match.
+    Call before any Qdrant write or DB write.
+    """
+    if not _KI_REVIEW_ENABLED:
+        return
+
+    for pattern, rule in _KI_SEC_PATTERNS:
+        m = pattern.search(text)
+        if m:
+            _ki_log_review_event(category="A", rule=rule, source_endpoint=source_endpoint,
+                                 full_content=text, matched_segment=m.group(0))
+            raise HTTPException(status_code=422, detail="Document rejected by content policy.")
+
+    for pattern, rule in _KI_PRIV_PATTERNS:
+        m = pattern.search(text)
+        if m:
+            _ki_log_review_event(category="B", rule=rule, source_endpoint=source_endpoint,
+                                 full_content=text, matched_segment=m.group(0))
+            raise HTTPException(status_code=422, detail="Document rejected by content policy.")
+
+    for pattern, rule in _KI_CRED_PATTERNS:
+        m = pattern.search(text)
+        if m:
+            _ki_log_review_event(category="C", rule=rule, source_endpoint=source_endpoint,
+                                 full_content=text, matched_segment=m.group(0))
+            raise HTTPException(status_code=422, detail="Document rejected by content policy.")
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
@@ -514,6 +616,7 @@ def health() -> dict:
 
 @app.post("/documents", status_code=201)
 def ingest_document(req: IngestRequest) -> dict:
+    _review_content(req.content, source_endpoint="/documents")
     collection = req.metadata.get("collection", "default")
     _db_set_doc(req.id, collection, req.metadata)
     try:
@@ -577,6 +680,7 @@ def query_documents(req: QueryRequest) -> dict:
 def ingest_library(req: LibraryIngestRequest, request: Request) -> dict:
     """Receive a .ai-library package from a worker and store it in custody."""
     _check_api_key(request)
+    _review_content(req.content, source_endpoint="/v1/libraries")
 
     if req.visibility not in _VALID_VISIBILITY:
         raise HTTPException(
