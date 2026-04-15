@@ -1125,6 +1125,286 @@ _check_remote_node_ports() {
     return 0
 }
 
+# ── Full check: controller DNS/interface binding ──────────────────────────────
+# Verifies that the address in the controller node file resolves to an IP that
+# is actually bound to a local interface.  If it doesn't, worker heartbeats will
+# fail even though the controller process itself is running fine.
+# Also validates that controller_url uses HTTPS (not a direct http://host:port).
+
+_check_controller_net_binding() {
+    echo ""
+    echo "  Controller Network Binding"
+    local node_profile
+    node_profile=$(_get_node_profile)
+
+    if [[ "$node_profile" != "controller" ]]; then
+        printf "  [SKIP] %-28s not a controller node\n" "net-binding"
+        return 0
+    fi
+
+    local _nodes_dir ctrl_addr ctrl_url fail=0
+    _nodes_dir="$(dirname "$CONFIG_FILE")/nodes"
+
+    ctrl_addr=$(for _f in "$_nodes_dir"/*.json; do
+        [[ -f "$_f" ]] && jq -r 'select(.profile == "controller") | .address // empty' "$_f"
+    done 2>/dev/null | grep -v '^$' | head -1 || true)
+
+    ctrl_url=$(for _f in "$_nodes_dir"/*.json; do
+        [[ -f "$_f" ]] && jq -r 'select(.profile == "controller") | .controller_url // empty' "$_f"
+    done 2>/dev/null | grep -v '^$' | head -1 || true)
+
+    if [[ -z "$ctrl_addr" ]]; then
+        printf "  [SKIP] %-28s no .address in controller node file\n" "net-binding/dns"
+        return 0
+    fi
+
+    # Resolve the address
+    local resolved_ip=""
+    resolved_ip=$(getent hosts "$ctrl_addr" 2>/dev/null | awk '{print $1}' | head -1 || true)
+    if [[ -z "$resolved_ip" ]] && command -v dig &>/dev/null; then
+        resolved_ip=$(dig +short "$ctrl_addr" 2>/dev/null | grep -E '^[0-9]+\.' | head -1 || true)
+    fi
+
+    if [[ -z "$resolved_ip" ]]; then
+        printf "  [FAIL] %-28s '%s' does not resolve — DNS failure or network down\n" \
+            "net-binding/dns" "$ctrl_addr"
+        printf "         ! Workers cannot reach controller — check DNS and network connectivity\n"
+        fail=$((fail + 1))
+    else
+        # Check that the resolved IP is bound to a local interface
+        local local_ips bound=false
+        local_ips=$(ip -4 addr show 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1 || true)
+        while IFS= read -r lip; do
+            [[ "$lip" == "$resolved_ip" ]] && { bound=true; break; }
+        done <<< "$local_ips"
+
+        if $bound; then
+            printf "  [PASS] %-28s %s → %s (bound locally)\n" \
+                "net-binding/dns" "$ctrl_addr" "$resolved_ip"
+        else
+            printf "  [WARN] %-28s %s → %s — NOT on any local interface\n" \
+                "net-binding/dns" "$ctrl_addr" "$resolved_ip"
+            printf "         ! Interface may be down — worker heartbeats will fail\n"
+            printf "         ! Local IPs: %s\n" "$(echo "$local_ips" | tr '\n' ' ' | xargs)"
+            warn=$((warn + 1))
+        fi
+    fi
+
+    # Validate controller_url format
+    if [[ -n "$ctrl_url" ]]; then
+        if [[ "$ctrl_url" == https://* && "$ctrl_url" != *:[0-9]* ]]; then
+            printf "  [PASS] %-28s controller_url=%s\n" "net-binding/ctrl-url" "$ctrl_url"
+        elif [[ "$ctrl_url" == http://*:* ]]; then
+            printf "  [FAIL] %-28s controller_url='%s' uses direct port — bypasses Traefik/TLS\n" \
+                "net-binding/ctrl-url" "$ctrl_url"
+            printf "         ! Workers joining with this URL will try to reach the internal port\n"
+            printf "         ! Fix: set controller_url to https://<host> in configs/nodes/<controller>.json\n"
+            fail=$((fail + 1))
+        else
+            printf "  [WARN] %-28s controller_url='%s' — unexpected format\n" \
+                "net-binding/ctrl-url" "$ctrl_url"
+            warn=$((warn + 1))
+        fi
+    else
+        printf "  [WARN] %-28s controller_url field missing from node file\n" "net-binding/ctrl-url"
+        printf "         ! generate-join-token will fall back to constructing http://addr:port\n"
+        warn=$((warn + 1))
+    fi
+
+    return $fail
+}
+
+# ── Full check: worker join state files ───────────────────────────────────────
+# On non-controller nodes: verifies that ~/.config/ai-stack/ contains the
+# required state files for heartbeat operation, and that controller_url is in
+# the correct HTTPS format (not http://host:port which bypasses Traefik).
+
+_check_worker_state_files() {
+    echo ""
+    echo "  Worker State Files"
+    local node_profile
+    node_profile=$(_get_node_profile)
+
+    if [[ "$node_profile" == "controller" ]]; then
+        printf "  [SKIP] %-28s controller node has no heartbeat state\n" "worker-state"
+        return 0
+    fi
+
+    local STATE_DIR="$HOME/.config/ai-stack"
+    local fail=0
+
+    # Check each critical state file
+    for _sf in controller_url node_id api_key; do
+        local fpath="$STATE_DIR/$_sf"
+        if [[ ! -f "$fpath" ]]; then
+            printf "  [FAIL] %-28s MISSING: %s\n" "worker-state/$_sf" "$fpath"
+            printf "         ! Run: bash scripts/node.sh join --controller <url> --token <token>\n"
+            fail=$((fail + 1))
+            continue
+        fi
+        local val; val=$(tr -d '[:space:]' < "$fpath" 2>/dev/null || true)
+        if [[ -z "$val" ]]; then
+            printf "  [FAIL] %-28s EMPTY: %s\n" "worker-state/$_sf" "$fpath"
+            fail=$((fail + 1))
+            continue
+        fi
+        printf "  [PASS] %-28s present\n" "worker-state/$_sf"
+    done
+
+    # Validate controller_url format
+    if [[ -f "$STATE_DIR/controller_url" ]]; then
+        local ctrl_url; ctrl_url=$(tr -d '[:space:]' < "$STATE_DIR/controller_url" 2>/dev/null || true)
+        if [[ "$ctrl_url" == http://*:* ]]; then
+            printf "  [FAIL] %-28s controller_url='%s'\n" "worker-state/url-format" "$ctrl_url"
+            printf "         ! Direct port URL — worker heartbeats bypass Traefik/TLS\n"
+            printf "         ! Fix: printf 'https://<controller-host>' > %s/controller_url\n" "$STATE_DIR"
+            printf "         !       systemctl --user restart ai-stack-heartbeat.service\n"
+            fail=$((fail + 1))
+        elif [[ "$ctrl_url" == https://* ]]; then
+            printf "  [PASS] %-28s controller_url is HTTPS (%s)\n" "worker-state/url-format" "$ctrl_url"
+        elif [[ -n "$ctrl_url" ]]; then
+            printf "  [WARN] %-28s controller_url='%s' — unexpected format\n" "worker-state/url-format" "$ctrl_url"
+            warn=$((warn + 1))
+        fi
+
+        # Probe controller reachability
+        if [[ -n "$ctrl_url" ]]; then
+            local reach_rc=0
+            curl -sf --max-time 5 --insecure "${ctrl_url}/health" &>/dev/null || reach_rc=$?
+            if [[ $reach_rc -eq 0 ]]; then
+                printf "  [PASS] %-28s controller /health reachable\n" "worker-state/reach"
+            else
+                printf "  [WARN] %-28s controller /health unreachable at %s\n" \
+                    "worker-state/reach" "$ctrl_url"
+                printf "         ! Heartbeat POSTs will fail until controller is reachable\n"
+                warn=$((warn + 1))
+            fi
+        fi
+    fi
+
+    return $fail
+}
+
+# ── Full check: node heartbeat ages from KI registry ─────────────────────────
+# Controller only.  Queries /admin/v1/nodes and reports last_seen age for each
+# registered node.  Flags nodes in caution/failed/offline state immediately —
+# rather than waiting for a human to run `node.sh list`.
+
+_check_node_heartbeat_ages() {
+    echo ""
+    echo "  Node Heartbeat Ages"
+    local node_profile
+    node_profile=$(_get_node_profile)
+
+    if [[ "$node_profile" != "controller" ]]; then
+        printf "  [SKIP] %-28s not a controller node\n" "heartbeat-ages"
+        return 0
+    fi
+
+    local ki_state
+    ki_state=$(systemctl --user is-active knowledge-index.service 2>/dev/null || true)
+    if [[ "$ki_state" != "active" ]]; then
+        printf "  [SKIP] %-28s knowledge-index not active\n" "heartbeat-ages"
+        return 0
+    fi
+
+    local ki_port ki_url ki_api_key
+    ki_port=$(jq -r '.services["knowledge-index"].ports[0] // "8100"' "$CONFIG_FILE" 2>/dev/null \
+        | grep -oP '^\d+' || echo "8100")
+    ki_url="http://localhost:${ki_port}"
+    ki_api_key=$(podman secret inspect knowledge_index_api_key --showsecret \
+        2>/dev/null | jq -r '.[].SecretData' || true)
+
+    local _auth=()
+    [[ -n "$ki_api_key" ]] && _auth=(-H "Authorization: Bearer ${ki_api_key}")
+
+    local response rc=0
+    response=$(curl -sf --max-time 5 "${_auth[@]}" "${ki_url}/admin/v1/nodes" 2>/dev/null) || rc=$?
+    if [[ $rc -ne 0 ]]; then
+        printf "  [FAIL] %-28s /admin/v1/nodes unreachable\n" "heartbeat-ages"
+        return 1
+    fi
+
+    local node_count fail=0
+    node_count=$(echo "$response" | jq '.nodes | length' 2>/dev/null || echo 0)
+    if [[ "$node_count" -eq 0 ]]; then
+        printf "  [PASS] %-28s no registered nodes\n" "heartbeat-ages"
+        return 0
+    fi
+
+    local now_epoch
+    now_epoch=$(date +%s)
+
+    while IFS= read -r node_json; do
+        [[ -z "$node_json" ]] && continue
+        local label node_status last_seen age_label
+        local nid alias
+        nid=$(echo "$node_json" | jq -r '.node_id // "unknown"')
+        alias=$(echo "$node_json" | jq -r '.alias // empty')
+        node_status=$(echo "$node_json" | jq -r '.status // "unknown"')
+        last_seen=$(echo "$node_json" | jq -r '.last_seen // empty')
+        label="${alias:-$nid}"
+
+        if [[ -z "$last_seen" || "$last_seen" == "null" ]]; then
+            printf "  [WARN] %-28s status=%-8s  last=NEVER\n" "$label" "$node_status"
+            warn=$((warn + 1))
+            continue
+        fi
+
+        # Parse ISO/space timestamp portably via python3
+        local ls_epoch=0
+        ls_epoch=$(python3 -c "
+import sys, datetime
+ts = '${last_seen}'.replace(' ','T').split('.')[0]
+try:
+    dt = datetime.datetime.fromisoformat(ts)
+    print(int(dt.replace(tzinfo=datetime.timezone.utc).timestamp()))
+except Exception:
+    print(0)
+" 2>/dev/null || echo 0)
+
+        if [[ "$ls_epoch" -gt 0 ]]; then
+            local age_s
+            age_s=$(( now_epoch - ls_epoch ))
+            [[ $age_s -lt 0 ]] && age_s=0
+            if   [[ $age_s -lt 60   ]]; then age_label="${age_s}s ago"
+            elif [[ $age_s -lt 3600 ]]; then age_label="$((age_s / 60))m ago"
+            else                             age_label="$((age_s / 3600))h $((age_s % 3600 / 60))m ago"
+            fi
+        else
+            age_label="(parse error: $last_seen)"
+        fi
+
+        case "$node_status" in
+            online)
+                printf "  [PASS] %-28s status=%-8s  last=%s\n" "$label" "$node_status" "$age_label"
+                ;;
+            caution)
+                printf "  [WARN] %-28s status=%-8s  last=%s — heartbeats intermittent\n" \
+                    "$label" "$node_status" "$age_label"
+                warn=$((warn + 1))
+                ;;
+            failed|offline)
+                printf "  [FAIL] %-28s status=%-8s  last=%s\n" "$label" "$node_status" "$age_label"
+                printf "         ! On %s: journalctl --user -u ai-stack-heartbeat.service -n 10\n" "$label"
+                printf "         ! On %s: cat ~/.config/ai-stack/controller_url\n" "$label"
+                fail=$((fail + 1))
+                ;;
+            unregistered)
+                printf "  [WARN] %-28s status=%-8s (unjoin completed or join never ran)\n" \
+                    "$label" "$node_status"
+                warn=$((warn + 1))
+                ;;
+            *)
+                printf "  [WARN] %-28s status=%-8s  last=%s\n" "$label" "$node_status" "$age_label"
+                warn=$((warn + 1))
+                ;;
+        esac
+    done < <(echo "$response" | jq -c '.nodes[]' 2>/dev/null || true)
+
+    return $fail
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 echo ""
@@ -1232,6 +1512,21 @@ if [[ "$PROFILE" == "full" ]]; then
 
     # Remote inference node port accessibility (controller → worker nodes)
     _check_remote_node_ports || true
+
+    # Controller DNS/interface binding (does controller_url resolve to a live interface?)
+    net_bind_fail=0
+    _check_controller_net_binding || net_bind_fail=$?
+    fail=$((fail + net_bind_fail))
+
+    # Worker join state files and controller reachability (non-controller nodes only)
+    worker_state_fail=0
+    _check_worker_state_files || worker_state_fail=$?
+    fail=$((fail + worker_state_fail))
+
+    # Node heartbeat ages from KI registry (controller only)
+    hb_age_fail=0
+    _check_node_heartbeat_ages || hb_age_fail=$?
+    fail=$((fail + hb_age_fail))
 fi
 
 echo ""
