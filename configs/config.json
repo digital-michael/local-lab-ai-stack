@@ -554,7 +554,7 @@
       },
       "resources": {
         "cpus": 1,
-        "memory": "1g",
+        "memory": "2g",
         "gpu": null
       }
     },
