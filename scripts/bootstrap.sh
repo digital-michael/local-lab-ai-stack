@@ -47,7 +47,7 @@ usage() {
 Usage: bootstrap.sh --controller <url> --token <token> [options]
 
 Required:
-  --controller <url>    Controller KI base URL (e.g. https://ai.example.com:8100)
+  --controller <url>    Controller base URL (e.g. https://ai.example.com)
   --token <token>       Join token from: configure.sh generate-join-token
 
 Optional:
@@ -78,7 +78,7 @@ done
 
 if [[ -z "$CONTROLLER_URL" ]]; then
     echo "ERROR: --controller is required" >&2
-    echo "  Example: --controller https://ai.example.com:8100" >&2
+    echo "  Example: --controller https://ai.example.com" >&2
     usage >&2
     exit 1
 fi

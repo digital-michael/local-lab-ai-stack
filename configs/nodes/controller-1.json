@@ -4,6 +4,7 @@
   "node_id": "CENTAURI",
   "name": "workstation",
   "address": "SERVICES.mynetworksettings.com",
+  "controller_url": "https://SERVICES.mynetworksettings.com",
   "address_fallback": null,
   "status": "active",
   "profile": "controller",

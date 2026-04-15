@@ -1715,18 +1715,28 @@ print(ports[0]['host'] if ports else 8100)
     if [[ -z "$controller_url" ]]; then
         local _nodes_dir _ctrl_addr _ctrl_port
         _nodes_dir="$(dirname "$CONFIG_FILE")/nodes"
-        _ctrl_addr=$(for _f in "$_nodes_dir"/*.json; do
-            [[ -f "$_f" ]] && jq -r 'select(.profile == "controller") | .address // empty' "$_f"
+        # Prefer explicit controller_url field (handles Traefik/HTTPS setups)
+        local _ctrl_url_from_file
+        _ctrl_url_from_file=$(for _f in "$_nodes_dir"/*.json; do
+            [[ -f "$_f" ]] && jq -r 'select(.profile == "controller") | .controller_url // empty' "$_f"
         done 2>/dev/null | grep -v '^$' | head -1 || true)
-        _ctrl_port=$(for _f in "$_nodes_dir"/*.json; do
-            [[ -f "$_f" ]] && jq -r 'select(.profile == "controller") | (.ki_port // empty | tostring)' "$_f"
-        done 2>/dev/null | grep -v '^null$\|^$' | head -1 || true)
-        _ctrl_port="${_ctrl_port:-${ki_port:-8100}}"
-        if [[ -n "$_ctrl_addr" && "$_ctrl_addr" != "null" ]]; then
-            controller_url="http://${_ctrl_addr}:${_ctrl_port}"
+        if [[ -n "$_ctrl_url_from_file" ]]; then
+            controller_url="$_ctrl_url_from_file"
         else
-            controller_url="$ki_url"
-            echo "WARN: No controller address in configs/nodes/ — join command will use localhost; use --controller-url to override" >&2
+            local _ctrl_addr _ctrl_port
+            _ctrl_addr=$(for _f in "$_nodes_dir"/*.json; do
+                [[ -f "$_f" ]] && jq -r 'select(.profile == "controller") | .address // empty' "$_f"
+            done 2>/dev/null | grep -v '^$' | head -1 || true)
+            _ctrl_port=$(for _f in "$_nodes_dir"/*.json; do
+                [[ -f "$_f" ]] && jq -r 'select(.profile == "controller") | (.ki_port // empty | tostring)' "$_f"
+            done 2>/dev/null | grep -v '^null$\|^$' | head -1 || true)
+            _ctrl_port="${_ctrl_port:-${ki_port:-8100}}"
+            if [[ -n "$_ctrl_addr" && "$_ctrl_addr" != "null" ]]; then
+                controller_url="http://${_ctrl_addr}:${_ctrl_port}"
+            else
+                controller_url="$ki_url"
+                echo "WARN: No controller address in configs/nodes/ — join command will use localhost; use --controller-url to override" >&2
+            fi
         fi
     fi
 

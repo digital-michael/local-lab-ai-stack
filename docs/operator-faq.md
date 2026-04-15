@@ -83,7 +83,7 @@ On the worker, from the project root:
 
 ```bash
 bash scripts/bootstrap.sh \
-  --controller 'http://<controller-host>:8100' \
+  --controller 'https://<controller-host>' \
   --token '<token>' \
   --node-id '<id>'
 ```
@@ -94,7 +94,7 @@ Or, if the worker is already set up and only needs to join:
 
 ```bash
 bash scripts/node.sh join \
-  --controller 'http://<controller-host>:8100' \
+  --controller 'https://<controller-host>' \
   --token '<token>' \
   --node-id '<id>'
 ```
@@ -652,7 +652,7 @@ bash scripts/configure.sh generate-join-token --node-id <id>
 **On the worker:**
 ```bash
 bash scripts/node.sh join \
-  --controller 'http://<controller-host>:8100' \
+  --controller 'https://<controller-host>' \
   --token '<new-token>' \
   --node-id '<id>'
 ```
