@@ -126,7 +126,7 @@ _curl_admin() {
     local hdr
     hdr=$(_api_key_header)
 
-    local args=(-s -w "\n%{http_code}" -X "$method")
+    local args=(-s -w "\n%{http_code}" -X "$method" --insecure)   # self-signed CA; API key provides endpoint auth
     [[ -n "$hdr" ]] && args+=(-H "$hdr")
     [[ -n "$body" ]] && args+=(-H "Content-Type: application/json" -d "$body")
 
