@@ -141,6 +141,92 @@ _svc_health() {
     fi
 }
 
+# Returns heartbeat status string for worker nodes.
+# Checks timer/launchd state and recent POST failure signals.
+_heartbeat_status() {
+    local STATE_DIR="$HOME/.config/ai-stack"
+
+    if [[ ! -f "$STATE_DIR/controller_url" || ! -f "$STATE_DIR/node_id" ]]; then
+        echo "not joined"
+        return 0
+    fi
+
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        # macOS — launchd
+        local plist="$HOME/Library/LaunchAgents/com.ai-stack.heartbeat.plist"
+        if [[ ! -f "$plist" ]]; then
+            echo "FAIL  (plist missing — re-run: bash scripts/bootstrap.sh)"
+            return 0
+        fi
+        local _uid; _uid=$(id -u)
+        local _lc_state="not loaded" _dom _lc_out
+        for _dom in "gui/$_uid" "user/$_uid"; do
+            _lc_out=$(launchctl print "${_dom}/com.ai-stack.heartbeat" 2>/dev/null || true)
+            if [[ -n "$_lc_out" ]]; then
+                _lc_state=$(awk '/[[:space:]]state[[:space:]]=/{print $3; exit}' <<< "$_lc_out")
+                break
+            fi
+        done
+        # Check log for recent POST failures
+        local log_warn=""
+        local log_file="$STATE_DIR/heartbeat.log"
+        if [[ -f "$log_file" ]]; then
+            log_warn=$(tail -20 "$log_file" 2>/dev/null | grep -i "WARNING" | tail -1 || true)
+        fi
+        if [[ "$_lc_state" == "waiting" || "$_lc_state" == "running" ]]; then
+            if [[ -n "$log_warn" ]]; then
+                echo "WARN  (launchd active, POST failures in log — see $log_file)"
+            else
+                echo "OK  (launchd active, state: ${_lc_state})"
+            fi
+        else
+            echo "FAIL  (launchd state: ${_lc_state:-not loaded} — re-run: bash scripts/bootstrap.sh)"
+        fi
+    else
+        # Linux — systemd
+        local timer_state
+        timer_state=$(systemctl --user is-active ai-stack-heartbeat.timer 2>/dev/null || echo "inactive")
+        if [[ "$timer_state" != "active" ]]; then
+            local enabled
+            enabled=$(systemctl --user is-enabled ai-stack-heartbeat.timer 2>/dev/null || echo "disabled")
+            echo "FAIL  (timer ${timer_state}/${enabled} — run: systemctl --user enable --now ai-stack-heartbeat.timer)"
+            return 0
+        fi
+
+        # Last trigger time (relative)
+        local last_age="never fired"
+        local last_usec
+        last_usec=$(systemctl --user show ai-stack-heartbeat.timer \
+            --property=LastTriggerUSec --value 2>/dev/null || echo "0")
+        if [[ "$last_usec" =~ ^[1-9][0-9]{6,}$ ]]; then
+            local now_usec age_s
+            now_usec=$(date +%s%6N 2>/dev/null || echo "0")
+            if [[ "$now_usec" =~ ^[0-9]+$ && "$now_usec" -gt 0 ]]; then
+                age_s=$(( (now_usec - last_usec) / 1000000 ))
+                [[ $age_s -lt 0 ]] && age_s=0
+                if   [[ $age_s -lt 60   ]]; then last_age="${age_s}s ago"
+                elif [[ $age_s -lt 3600 ]]; then last_age="$((age_s / 60))m ago"
+                else                             last_age="$((age_s / 3600))h ago"
+                fi
+            fi
+        fi
+
+        # Check journal for recent POST failures.
+        # heartbeat.sh exits 0 even on curl fail, so failure is only visible
+        # as a WARNING line in the service output — not in systemd's Result.
+        local warn_line=""
+        warn_line=$(journalctl --user -u ai-stack-heartbeat.service -n 10 \
+            --no-pager --output=cat 2>/dev/null | grep -i "WARNING" | tail -1 || true)
+        if [[ -n "$warn_line" ]]; then
+            echo "WARN  (timer active, POST failures detected, last: ${last_age} — journalctl --user -u ai-stack-heartbeat.service)"
+        elif [[ "$last_usec" == "0" ]]; then
+            echo "WARN  (timer active, no runs recorded yet)"
+        else
+            echo "OK  (timer active, last: ${last_age})"
+        fi
+    fi
+}
+
 # ── Deployment check ──────────────────────────────────────────────────────────
 
 quadlet_count=0
@@ -251,6 +337,12 @@ if ! $QUIET; then
     echo "════════════════════════════════════════"
     printf "  %-${col}s %s\n" "node profile" "$(_get_node_profile)"
     printf "  %-${col}s %s\n" "deploy mode" "$_deploy_mode"
+
+    # Heartbeat (worker nodes only — controller has no heartbeat timer)
+    if [[ "$(_get_node_profile)" != "controller" ]]; then
+        _hb_out=$(_heartbeat_status 2>/dev/null || echo "unavailable")
+        printf "  %-${col}s %s\n" "heartbeat" "$_hb_out"
+    fi
 
     # Network and secrets — only relevant when podman is in use
     if [[ $_quadlet_svc_count -gt 0 ]]; then
