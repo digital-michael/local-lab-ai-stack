@@ -60,6 +60,8 @@ Profiles:
     - Volume / data path existence
     - Container resource pressure (memory near limit, threshold 85%)
     - Per-service API readiness probes (HTTP/app-layer, not just TCP)
+    - Port binding audit (0.0.0.0 vs 127.0.0.1 on all containers)
+    - Remote inference node port accessibility (controller → worker ports)
 
 Options:
   --profile quick|full   Diagnostic profile (default: quick)
@@ -897,6 +899,232 @@ _api_probe() {
     return $rc
 }
 
+# ── Full check: local container port binding (0.0.0.0 vs 127.0.0.1) ─────────
+# Detects containers publishing ports on all interfaces instead of loopback.
+# Also catches drift where config.json specifies 127.0.0.1 but the live
+# container is bound to 0.0.0.0 (quadlet not regenerated/restarted).
+# Traefik ports 80/443 are annotated as expected ingress and counted PASS.
+# Warns contribute directly to outer warn; drift failures are returned.
+
+_check_port_exposure() {
+    echo ""
+    echo "  Port Exposure"
+    local fail=0 svc_with_ports=0
+
+    for svc in "${ordered[@]}"; do
+        local state
+        state=$(systemctl --user is-active "${svc}.service" 2>/dev/null || true)
+        [[ "$state" != "active" ]] && continue
+
+        local port_out
+        port_out=$(podman port "$svc" 2>/dev/null || true)
+        [[ -z "$port_out" ]] && continue
+
+        svc_with_ports=$((svc_with_ports + 1))
+
+        local exposed=() drift=() safe=0
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            # Format: "443/tcp -> 0.0.0.0:443"  or  "443/tcp -> 127.0.0.1:443"
+            local proto_port bind_ip host_port cport
+            proto_port=$(awk '{print $1}' <<< "$line")
+            local after_arrow
+            after_arrow=$(sed 's/.* -> //' <<< "$line")
+            host_port=$(rev <<< "$after_arrow" | cut -d: -f1 | rev)
+            bind_ip=$(rev <<< "$after_arrow" | cut -d: -f2- | rev)
+            cport=$(cut -d/ -f1 <<< "$proto_port")
+            [[ -z "$cport" || ! "$cport" =~ ^[0-9]+$ ]] && continue
+
+            if [[ "$bind_ip" == "0.0.0.0" || "$bind_ip" == "::" ]]; then
+                # Check config.json SSOT: if it says 127.0.0.1, this is drift
+                local cfg_bind
+                cfg_bind=$(jq -r --arg s "$svc" --argjson p "$cport" \
+                    '(.services[$s].ports // [])[] | select(.container == $p) | .bind // ""' \
+                    "$CONFIG_FILE" 2>/dev/null | head -1 || true)
+
+                if [[ "$cfg_bind" == "127.0.0.1" ]]; then
+                    drift+=("${proto_port} live=${bind_ip}:${host_port} but config.json says 127.0.0.1 (quadlet drift)")
+                    fail=$((fail + 1))
+                elif [[ "$svc" == "traefik" && ("$cport" == "80" || "$cport" == "443") ]]; then
+                    safe=$((safe + 1))   # expected: ingress must accept external traffic
+                else
+                    exposed+=("${proto_port} → ${bind_ip}:${host_port}")
+                fi
+            else
+                safe=$((safe + 1))
+            fi
+        done <<< "$port_out"
+
+        if [[ ${#drift[@]} -gt 0 ]]; then
+            printf "  [FAIL] %-20s port binding drifted from config.json\n" "$svc"
+            for msg in "${drift[@]}"; do
+                printf "         ! %s\n" "$msg"
+            done
+            printf "         ! Fix: bash scripts/configure.sh generate-quadlets\n"
+            printf "         !       systemctl --user daemon-reload\n"
+            printf "         !       systemctl --user restart %s.service\n" "$svc"
+        fi
+
+        if [[ ${#exposed[@]} -gt 0 ]]; then
+            printf "  [WARN] %-20s port(s) exposed on all interfaces (0.0.0.0)\n" "$svc"
+            for msg in "${exposed[@]}"; do
+                printf "         ! %s\n" "$msg"
+            done
+            printf "         ! Fix: set \"bind\": \"127.0.0.1\" for this port in configs/config.json\n"
+            printf "         !       bash scripts/configure.sh generate-quadlets\n"
+            printf "         !       systemctl --user daemon-reload\n"
+            printf "         !       systemctl --user restart %s.service\n" "$svc"
+            warn=$((warn + 1))
+        fi
+
+        if [[ ${#exposed[@]} -eq 0 && ${#drift[@]} -eq 0 ]]; then
+            if [[ "$svc" == "traefik" && $safe -gt 0 ]]; then
+                printf "  [PASS] %-20s 80/443 on 0.0.0.0 (expected ingress); all other ports on 127.0.0.1\n" "$svc"
+            else
+                local port_count
+                port_count=$(wc -l <<< "$port_out")
+                printf "  [PASS] %-20s %d port(s) — all bound to 127.0.0.1\n" "$svc" "$port_count"
+            fi
+        fi
+    done
+
+    if [[ $svc_with_ports -eq 0 ]]; then
+        printf "  [PASS] %-20s no published ports on any running service\n" "port-exposure"
+    fi
+
+    return $fail
+}
+
+# ── Full check: remote inference node port accessibility ──────────────────────
+# From the controller, probes inference/KI ports on each registered worker node.
+# A reachable port means it is network-accessible from the controller — verify
+# that OS firewall rules restrict access to trusted sources only.
+# Addresses read from configs/nodes/*.json (primary then fallback).
+# Controller-only: skipped on non-controller node profiles.
+
+_check_remote_node_ports() {
+    echo ""
+    echo "  Remote Node Port Exposure"
+    local node_profile
+    node_profile=$(_get_node_profile)
+
+    if [[ "$node_profile" != "controller" ]]; then
+        printf "  [SKIP] %-28s not a controller node\n" "remote-ports"
+        return 0
+    fi
+
+    local _nodes_dir found_any=0
+    _nodes_dir="$(dirname "$CONFIG_FILE")/nodes"
+
+    # Build same-host identity set: controller node addresses + local hostnames
+    local _same_host_addrs=()
+    local _ctrl_f
+    for _ctrl_f in "$_nodes_dir"/*.json; do
+        [[ -f "$_ctrl_f" ]] || continue
+        local _cp; _cp=$(jq -r '.profile // empty' "$_ctrl_f")
+        [[ "$_cp" != "controller" ]] && continue
+        local _ca _cf
+        _ca=$(jq -r '.address // empty' "$_ctrl_f")
+        _cf=$(jq -r '.address_fallback // empty' "$_ctrl_f")
+        [[ -n "$_ca" ]] && _same_host_addrs+=("$_ca")
+        [[ -n "$_cf" ]] && _same_host_addrs+=("$_cf")
+    done
+    # Also include local hostname variants
+    _same_host_addrs+=("$(hostname -f 2>/dev/null || true)" "$(hostname -s 2>/dev/null || true)" "localhost" "127.0.0.1")
+
+    _is_same_host() {
+        local addr="$1"
+        [[ -z "$addr" ]] && return 1
+        local h
+        for h in "${_same_host_addrs[@]}"; do
+            [[ -z "$h" ]] && continue
+            [[ "$addr" == "$h" ]] && return 0
+        done
+        return 1
+    }
+
+    for _f in "$_nodes_dir"/*.json; do
+        [[ -f "$_f" ]] || continue
+        local node_alias node_profile_f node_address node_fallback node_ki_port
+        node_alias=$(jq -r '.alias // empty' "$_f")
+        node_profile_f=$(jq -r '.profile // empty' "$_f")
+        node_address=$(jq -r '.address // empty' "$_f")
+        node_fallback=$(jq -r '.address_fallback // empty' "$_f")
+        node_ki_port=$(jq -r '.ki_port // 8100' "$_f" 2>/dev/null || echo "8100")
+
+        [[ "$node_profile_f" == "controller" ]] && continue
+        found_any=1
+
+        # Same-host node: skip TCP probe — local sockets don't test firewall exposure
+        if _is_same_host "$node_address" || _is_same_host "$node_fallback"; then
+            printf "  [PASS] %-28s same-host as controller — port exposure N/A (use Port Exposure section above)\n" \
+                "${node_alias}"
+            continue
+        fi
+
+        # Profile → inference ports to probe
+        local ports_to_check=()
+        case "$node_profile_f" in
+            inference-worker)  ports_to_check=(11434 8000) ;;
+            enhanced-worker)   ports_to_check=(11434 8000 "$node_ki_port") ;;
+            knowledge-worker)  ports_to_check=("$node_ki_port") ;;
+            *)                 ports_to_check=(11434 8000 "$node_ki_port") ;;
+        esac
+
+        if [[ -z "$node_address" && -z "$node_fallback" ]]; then
+            printf "  [SKIP] %-28s no address in node file — run diagnose.sh on the node\n" \
+                "${node_alias:-$(basename "$_f" .json)}"
+            continue
+        fi
+
+        for port in "${ports_to_check[@]}"; do
+            local port_label
+            case "$port" in
+                11434) port_label="ollama" ;;
+                8000)  port_label="vllm"   ;;
+                *)     port_label="ki"     ;;
+            esac
+
+            # Try primary address then fallback; report first reachable one
+            local reachable=0 reached_at=""
+            for try_addr in "$node_address" "$node_fallback"; do
+                [[ -z "$try_addr" ]] && continue
+                if command -v nc &>/dev/null; then
+                    nc -zw3 "$try_addr" "$port" &>/dev/null \
+                        && { reachable=1; reached_at="$try_addr"; break; }
+                else
+                    timeout 3 bash -c "echo > /dev/tcp/${try_addr}/${port}" 2>/dev/null \
+                        && { reachable=1; reached_at="$try_addr"; break; }
+                fi
+            done
+
+            if [[ $reachable -eq 1 ]]; then
+                printf "  [WARN] %-28s %s:%d reachable from controller\n" \
+                    "${node_alias}/${port_label}" "$reached_at" "$port"
+                printf "         ! Inference port is network-accessible — restrict via firewall\n"
+                printf "         ! Fix (podman):     PublishPort=127.0.0.1:%d:%d in quadlet\n" "$port" "$port"
+                printf "         !                   systemctl --user daemon-reload && restart <svc>\n"
+                printf "         ! Fix (bare-metal): restrict inbound :%d to controller IP only\n" "$port"
+                printf "         !   Linux:  sudo ufw allow from <controller-ip> to any port %d\n" "$port"
+                printf "         !           sudo ufw deny %d\n" "$port"
+                printf "         !   macOS:  sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add <svc>\n"
+                warn=$((warn + 1))
+            else
+                local tried="$node_address"
+                [[ -n "$node_fallback" ]] && tried+="/${node_fallback}"
+                printf "  [PASS] %-28s %s port %d not reachable (closed or firewalled)\n" \
+                    "${node_alias}/${port_label}" "$tried" "$port"
+            fi
+        done
+    done
+
+    if [[ $found_any -eq 0 ]]; then
+        printf "  [SKIP] %-28s no worker node files in configs/nodes/\n" "remote-ports"
+    fi
+
+    return 0
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 echo ""
@@ -996,6 +1224,14 @@ if [[ "$PROFILE" == "full" ]]; then
     ki_cap_fail=0
     _check_ki_capabilities || ki_cap_fail=$?
     [[ $ki_cap_fail -ne 0 ]] && fail=$((fail + 1))
+
+    # Port binding audit (local containers: 0.0.0.0 vs 127.0.0.1)
+    port_exp_fail=0
+    _check_port_exposure || port_exp_fail=$?
+    fail=$((fail + port_exp_fail))
+
+    # Remote inference node port accessibility (controller → worker nodes)
+    _check_remote_node_ports || true
 fi
 
 echo ""

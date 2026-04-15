@@ -14,28 +14,28 @@
       "backend": "ollama",
       "device": "gpu",
       "num_gpu": -1,
-      "description": "8B — full GPU (RTX 3070 Ti)"
+      "description": "8B \u2014 full GPU (RTX 3070 Ti)"
     },
     {
       "name": "qwen3.5:4b",
       "backend": "ollama",
       "device": "gpu",
       "num_gpu": -1,
-      "description": "4.7B — full GPU (RTX 3070 Ti)"
+      "description": "4.7B \u2014 full GPU (RTX 3070 Ti)"
     },
     {
       "name": "qwen3:8b",
       "backend": "ollama",
       "device": "gpu",
       "num_gpu": -1,
-      "description": "8B — full GPU (RTX 3070 Ti)"
+      "description": "8B \u2014 full GPU (RTX 3070 Ti)"
     },
     {
       "name": "llama3.2:3b",
       "backend": "ollama",
       "device": "gpu",
       "num_gpu": -1,
-      "description": "3B — full GPU (RTX 3070 Ti)"
+      "description": "3B \u2014 full GPU (RTX 3070 Ti)"
     },
     {
       "name": "qwen2.5-1.5b",
@@ -180,7 +180,18 @@
       "container_name": "qdrant",
       "dns_alias": "qdrant.ai-stack",
       "depends_on": [],
-      "ports": [],
+      "ports": [
+        {
+          "host": 6333,
+          "container": 6333,
+          "bind": "127.0.0.1"
+        },
+        {
+          "host": 6334,
+          "container": 6334,
+          "bind": "127.0.0.1"
+        }
+      ],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/qdrant",
@@ -335,7 +346,13 @@
       "depends_on": [
         "postgres"
       ],
-      "ports": [],
+      "ports": [
+        {
+          "host": 9000,
+          "container": 4000,
+          "bind": "127.0.0.1"
+        }
+      ],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/configs/litellm/proxy_config.yaml",
@@ -404,7 +421,12 @@
       "depends_on": [
         "litellm"
       ],
-      "ports": [],
+      "ports": [
+        {
+          "host": 8000,
+          "container": 8000
+        }
+      ],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/models",
@@ -486,7 +508,13 @@
         "litellm",
         "qdrant"
       ],
-      "ports": [],
+      "ports": [
+        {
+          "host": 3001,
+          "container": 3000,
+          "bind": "127.0.0.1"
+        }
+      ],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/flowise",
@@ -528,7 +556,13 @@
       "depends_on": [
         "litellm"
       ],
-      "ports": [],
+      "ports": [
+        {
+          "host": 9090,
+          "container": 8080,
+          "bind": "127.0.0.1"
+        }
+      ],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/openwebui",
@@ -564,7 +598,13 @@
       "container_name": "prometheus",
       "dns_alias": "prometheus.ai-stack",
       "depends_on": [],
-      "ports": [],
+      "ports": [
+        {
+          "host": 9091,
+          "container": 9090,
+          "bind": "127.0.0.1"
+        }
+      ],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/configs/prometheus",
@@ -594,7 +634,13 @@
       "depends_on": [
         "prometheus"
       ],
-      "ports": [],
+      "ports": [
+        {
+          "host": 3000,
+          "container": 3000,
+          "bind": "127.0.0.1"
+        }
+      ],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/configs/grafana",
@@ -627,7 +673,13 @@
       "container_name": "loki",
       "dns_alias": "loki.ai-stack",
       "depends_on": [],
-      "ports": [],
+      "ports": [
+        {
+          "host": 3100,
+          "container": 3100,
+          "bind": "127.0.0.1"
+        }
+      ],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/configs/loki",
@@ -695,7 +747,18 @@
       "container_name": "minio",
       "dns_alias": "minio.ai-stack",
       "depends_on": [],
-      "ports": [],
+      "ports": [
+        {
+          "host": 9100,
+          "container": 9000,
+          "bind": "127.0.0.1"
+        },
+        {
+          "host": 9101,
+          "container": 9001,
+          "bind": "127.0.0.1"
+        }
+      ],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/minio",
@@ -757,7 +820,13 @@
       "container_name": "homepage",
       "dns_alias": "homepage.ai-stack",
       "depends_on": [],
-      "ports": [],
+      "ports": [
+        {
+          "host": 3002,
+          "container": 3000,
+          "bind": "127.0.0.1"
+        }
+      ],
       "volumes": [
         {
           "host": "$AI_STACK_DIR/configs/homepage",

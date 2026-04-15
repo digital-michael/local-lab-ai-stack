@@ -86,6 +86,12 @@ for svc in auth webui grafana flowise prometheus; do
     SANS="${SANS},DNS:${svc}.localhost"
 done
 
+# Optional extra SANs — space or comma separated, e.g.:
+#   EXTRA_SANS="DNS:*.mynetworksettings.com,DNS:SERVICES.mynetworksettings.com"
+if [[ -n "${EXTRA_SANS:-}" ]]; then
+    SANS="${SANS},${EXTRA_SANS// /,}"
+fi
+
 echo "Generating local CA and server certificate"
 echo "  TLS_DIR : $TLS_DIR"
 echo "  DOMAIN  : $DOMAIN"

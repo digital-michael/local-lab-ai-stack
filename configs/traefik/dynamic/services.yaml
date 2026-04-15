@@ -63,8 +63,10 @@ http:
 
     # Exception: MCP + admin endpoints use API key auth (machine-to-machine, not browser SSO).
     # Access control: knowledge_index_api_key Podman secret (API_KEY env var in app).
+    # SERVICES.mynetworksettings.com is the controller's LAN FQDN — needed so worker nodes
+    # (TC25, SOL) can POST heartbeats to /admin/v1/nodes/{id}/heartbeat over the LAN.
     knowledge-index-admin:
-      rule: "Host(`ki.stack.localhost`) && PathPrefix(`/admin`)"
+      rule: "(Host(`ki.stack.localhost`) || Host(`SERVICES.mynetworksettings.com`)) && PathPrefix(`/admin`)"
       entryPoints:
         - websecure
       service: knowledge-index

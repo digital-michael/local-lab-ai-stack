@@ -164,7 +164,8 @@ curl_args=(-s -f -X POST \
     -H "Content-Type: application/json" \
     -d "$payload" \
     --connect-timeout 10 \
-    --max-time 15)
+    --max-time 15 \
+    --insecure)   # self-signed CA on private LAN; API key provides endpoint auth
 [[ -n "$auth_header" ]] && curl_args+=(-H "$auth_header")
 
 response=$(curl "${curl_args[@]}" "$CONTROLLER_URL/admin/v1/nodes/$NODE_ID/heartbeat" 2>&1) || {
