@@ -145,11 +145,11 @@ Exit criteria:
 
 ## 8 Python Client Wrapper (MVP ergonomics)
 
-- [ ] Y8.1 Implement simple Python helper for client credentials token minting
-- [ ] Y8.2 Implement in-memory token cache with near-expiry renewal
-- [ ] Y8.3 Implement heartbeat scheduler helper for long-running jobs
-- [ ] Y8.4 Implement extension request helper with approval-required handling
-- [ ] Y8.5 Provide one sample workflow integration snippet
+- [x] Y8.1 Implement simple Python helper for client credentials token minting
+- [x] Y8.2 Implement in-memory token cache with near-expiry renewal
+- [x] Y8.3 Implement heartbeat scheduler helper for long-running jobs
+- [x] Y8.4 Implement extension request helper with approval-required handling
+- [x] Y8.5 Provide one sample workflow integration snippet
 
 Exit criteria:
 

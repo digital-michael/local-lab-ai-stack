@@ -128,6 +128,35 @@ bash scripts/m2m-authentik-bootstrap.sh \
   --audience local-m2m-gateway
 ```
 
+Python workflow snippet (client wrapper):
+
+```python
+import importlib.util
+from pathlib import Path
+
+client_path = Path("services/m2m-gateway/client.py")
+spec = importlib.util.spec_from_file_location("m2m_client", client_path)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+
+client = mod.M2MGatewayClient(
+    gateway_base_url="http://127.0.0.1:8787",
+    token_url="https://auth.stack.localhost/application/o/<slug>/token/",
+    client_id="svc-ingest",
+    client_secret="<from-podman-secret>",
+    scope="m2m.jobs.start m2m.jobs.heartbeat m2m.jobs.extend m2m.context.attach m2m.infer",
+)
+
+job = client.start_job(workflow_id="wf_ingest_docs", project_id="proj-a", policy_class="sustained")
+job_id = job["job_id"]
+client.send_heartbeat(job_id)
+
+ext = client.request_extension(job_id, requested_minutes=180)
+if ext.get("requires_human_approval"):
+    # Acquire approval_id from /m2m/v1/approval/request path, then retry.
+    pass
+```
+
 ---
 
 ## R: Read / Inspect Identity State
@@ -231,7 +260,7 @@ Keep MinIO/Open WebUI project-bound sources private unless explicitly promoted t
 ## Evidence Checklist Per CRUD Change
 
 - `configure.sh validate` passes
-- security test suite passes (current baseline: 13 tests)
+- security test suite passes (current baseline: 18 tests)
 - token introspect reflects expected `sub`, `wf`, and scope set
 - audit events show expected allow/deny transitions
 - no secret values written to tracked files
@@ -243,7 +272,6 @@ Keep MinIO/Open WebUI project-bound sources private unless explicitly promoted t
 Not fully complete yet:
 
 - Full Authentik client provisioning automation (A2.1-A2.4) is still pending beyond bootstrap wiring.
-- Acceptance rows pending deployed-runtime evidence: T11.1, T11.4, T11.5, T11.7.
-- Trusted template governance controls (Section 13 in MVP checklist) remain open.
+- Remaining closure item is deployed-runtime evidence for BL-011 in target environment.
 
 This guide is therefore operational for current MVP state, but it does not imply full closure of BL-011.
