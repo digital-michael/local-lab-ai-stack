@@ -17,6 +17,14 @@ Options:
   --issuer <url>       OIDC issuer URL (example: https://auth.stack.localhost/application/o/<slug>/)
   --jwks-url <url>     JWKS URL for token verification
   --audience <value>   Gateway audience claim value (default: local-m2m-gateway)
+    --service-id <id>    Service identity to include in generated Authentik client template
+    --workflow-id <id>   Workflow claim to include in generated Authentik client template
+    --token-ttl-seconds <n>
+                                            Access token TTL for generated client template (default: 600)
+    --emit-client-template
+                                            Emit Authentik M2M client template JSON for repeatable provisioning
+    --template-output <path>
+                                            Write emitted client template JSON to file instead of stdout
   --gateway-url <url>  Local M2M gateway URL (default: http://127.0.0.1:8787)
   --apply-config       Write issuer/JWKS/audience into configs/config.json
   -h, --help           Show this help message and exit
@@ -31,6 +39,11 @@ Examples:
 
   M2M_TEST_TOKEN='<jwt>' $(basename "$0") --issuer https://auth.stack.localhost/application/o/m2m-gateway/ \
     --jwks-url https://auth.stack.localhost/application/o/m2m-gateway/jwks/
+
+    $(basename "$0") --issuer https://auth.stack.localhost/application/o/m2m-gateway/ \
+        --jwks-url https://auth.stack.localhost/application/o/m2m-gateway/jwks/ \
+        --service-id svc-ingest --workflow-id wf_ingest_docs --emit-client-template \
+        --template-output /tmp/m2m-client-svc-ingest.json
 EOF
 }
 
@@ -45,6 +58,11 @@ require_cmd() {
 _issuer=""
 _jwks_url=""
 _audience="local-m2m-gateway"
+_service_id=""
+_workflow_id=""
+_token_ttl_seconds="600"
+_emit_client_template="false"
+_template_output=""
 _gateway_url="http://127.0.0.1:8787"
 _apply_config="false"
 
@@ -60,6 +78,26 @@ while [[ $# -gt 0 ]]; do
             ;;
         --audience)
             _audience="${2:-}"
+            shift 2
+            ;;
+        --service-id)
+            _service_id="${2:-}"
+            shift 2
+            ;;
+        --workflow-id)
+            _workflow_id="${2:-}"
+            shift 2
+            ;;
+        --token-ttl-seconds)
+            _token_ttl_seconds="${2:-}"
+            shift 2
+            ;;
+        --emit-client-template)
+            _emit_client_template="true"
+            shift
+            ;;
+        --template-output)
+            _template_output="${2:-}"
             shift 2
             ;;
         --gateway-url)
@@ -96,6 +134,16 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
     exit 1
 fi
 
+if [[ ! "$_token_ttl_seconds" =~ ^[0-9]+$ ]] || [[ "$_token_ttl_seconds" -lt 60 ]]; then
+    echo "ERROR: --token-ttl-seconds must be an integer >= 60." >&2
+    exit 1
+fi
+
+if [[ "$_emit_client_template" == "true" ]] && [[ -z "$_service_id" ]]; then
+    echo "ERROR: --emit-client-template requires --service-id." >&2
+    exit 1
+fi
+
 echo "[1/4] Verifying issuer well-known metadata..."
 issuer_well_known="${_issuer%/}/.well-known/openid-configuration"
 curl -fsS "$issuer_well_known" >/dev/null
@@ -122,6 +170,48 @@ else
     echo "[3/4] Config apply skipped (use --apply-config to write changes)."
 fi
 
+if [[ "$_emit_client_template" == "true" ]]; then
+        echo "[3b/4] Emitting Authentik client template JSON..."
+        workflow_json="null"
+        if [[ -n "$_workflow_id" ]]; then
+                workflow_json="\"$_workflow_id\""
+        fi
+
+        template_json=$(jq -n \
+            --arg service_id "$_service_id" \
+            --arg audience "$_audience" \
+            --argjson token_ttl_seconds "$_token_ttl_seconds" \
+            --argjson workflow_id "$workflow_json" \
+            '{
+                intent: "authentik_m2m_client_template",
+                service_id: $service_id,
+                suggested_client_name: ("m2m-" + $service_id),
+                required_settings: {
+                    grant_type: "client_credentials_only",
+                    audience: $audience,
+                    access_token_ttl_seconds: $token_ttl_seconds,
+                    required_claims: {
+                        sub: $service_id,
+                        wf: $workflow_id
+                    }
+                },
+                notes: [
+                    "Use one confidential client per service identity.",
+                    "Do not store client secret in tracked files; use Podman secrets.",
+                    "Keep scope set minimal and workflow-specific."
+                ]
+            }')
+
+        if [[ -n "$_template_output" ]]; then
+                tmp_file="$(mktemp)"
+                printf '%s\n' "$template_json" > "$tmp_file"
+                mv "$tmp_file" "$_template_output"
+                echo "Template written: $_template_output"
+        else
+                echo "$template_json" | jq .
+        fi
+fi
+
 if [[ -n "${M2M_TEST_TOKEN:-}" ]]; then
     echo "[4/4] Token smoke check against gateway introspection..."
     curl -fsS -X POST \
@@ -138,6 +228,7 @@ cat <<EOF
 Next required operator steps (not automated here):
 1. In Authentik, create one M2M client per service identity with client-credentials grant only.
 2. Set audience to '$_audience' and short token TTL (10 minutes default).
-3. Store each client secret in Podman secret store, never in tracked files.
-4. Restart m2m gateway after deploying updated runtime env.
+3. If needed, use --emit-client-template to produce per-service provisioning templates.
+4. Store each client secret in Podman secret store, never in tracked files.
+5. Restart m2m gateway after deploying updated runtime env.
 EOF

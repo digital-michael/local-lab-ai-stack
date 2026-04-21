@@ -247,6 +247,7 @@ Exit criteria:
 - [x] U0.4 Added runtime bootstrap dependency recovery in local venv (`ensurepip` + pytest install) to unblock test execution (environment deviation; not stack runtime behavior)
 - [x] U0.5 Broadened test fixture workflow source policy (`ki,minio`) to validate project-bound cross-platform boundary denial path; maintained separate negative test using `openwebui` source to preserve deny-by-policy coverage
 - [x] U0.6 Added trusted interoperability template governance baseline: versioned policy/entitlement templates in `configs/m2m/templates/`, scope-to-template enforcement in gateway, and conformance checks in `configure.sh validate`
+- [x] U0.7 Enhanced `scripts/m2m-authentik-bootstrap.sh` to emit per-service Authentik client template JSON (grant/audience/TTL/claim intent) for repeatable provisioning inputs before full API automation
 
 Notes:
 
