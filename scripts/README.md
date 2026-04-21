@@ -75,7 +75,7 @@ Re-run after changing `configs/models.json` to update the LiteLLM model routing 
 ## M2M Auth Wiring
 
 ### `m2m-authentik-bootstrap.sh`
-Validates Authentik OIDC issuer/JWKS endpoints for M2M, optionally writes issuer/JWKS/audience values into `configs/config.json`, and can run an optional token introspection smoke check against the local M2M gateway using `M2M_TEST_TOKEN`.
+Validates Authentik OIDC issuer/JWKS endpoints for M2M, optionally writes issuer/JWKS/audience values into `configs/config.json`, can emit per-service Authentik client template JSON (`--emit-client-template`) for repeatable provisioning inputs, and can run an optional token introspection smoke check against the local M2M gateway using `M2M_TEST_TOKEN`.
 
 ---
 
