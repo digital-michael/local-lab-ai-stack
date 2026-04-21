@@ -1,6 +1,6 @@
 # AI Stack — Feature Status
 
-**Last Updated:** 2026-04-07
+**Last Updated:** 2026-04-21
 
 A human-readable summary of what this stack provides, ordered from most to least foundational. Intended for communicating capabilities to a non-technical audience and tracking progress toward a complete platform.
 
@@ -74,6 +74,7 @@ The stack is designed to grow: new inference nodes can be added to increase capa
 - [Port Lockdown — Traefik-Only Ingress](#x-port-lockdown--traefik-only-ingress)
 
 **Partially Available**
+- [M2M IAM Gateway (Localhost)](#--m2m-iam-gateway-localhost)
 - [Local GPU Acceleration](#--local-gpu-acceleration-controller)
 - [Inference Node Security](#--inference-node-security)
 - [Local/WAN Discovery Profiles](#--localwan-discovery-profiles)
@@ -229,6 +230,18 @@ All services are reachable exclusively through Traefik, which enforces Authentik
 ---
 
 ## Partially Available Features
+
+### `[-]` M2M IAM Gateway (Localhost)
+The stack now includes a localhost-only machine-to-machine gateway for service identities, scoped workflow access, controlled long-running leases, and audited break-glass approvals.
+- JWT validation supports secret and JWKS paths, with strict audience/workflow/scope enforcement
+- Workflow policy gates model/tool/context source access with default-deny dynamic source behavior
+- Long-running jobs use lease + heartbeat + extension controls with approval gates beyond auto-extend thresholds
+- Break-glass approvals are scope-limited, reason-coded, audited, and expiry-bound
+- Cross-platform trusted interoperability is explicit opt-in; project-bound MinIO/Open WebUI context is blocked from cross-platform sharing
+- Publication adapter boundary contract is implemented at `/m2m/v1/publish/transform`
+- Automated security/acceptance coverage currently passes 17 tests in `testing/security/test_m2m_gateway.py`
+- Remaining work: Authentik client provisioning automation, final acceptance matrix closure, and trusted template-governance controls
+- _Implementation: [services/m2m-gateway/app.py](../services/m2m-gateway/app.py)_ · _Checklist: [docs/wip/m2m-localhost-mvp-checklist.md](wip/m2m-localhost-mvp-checklist.md)_ · _Operator how-to: [docs/library/actions/m2m-iam-crud/m2m-iam-crud-SKILL.md](library/actions/m2m-iam-crud/m2m-iam-crud-SKILL.md)_
 
 ### `[-]` Local GPU Acceleration (Controller)
 The controller node's GPU can be used for high-speed inference, enabling larger or faster models to run locally.
