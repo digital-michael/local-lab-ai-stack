@@ -96,6 +96,17 @@ bash scripts/m2m-authentik-bootstrap.sh \
   --template-output /tmp/m2m-client-svc-ingest.json
 ```
 
+To send an endpoint-driven provisioning request directly to Authentik API:
+
+```bash
+AUTHENTIK_API_TOKEN='<token>' bash scripts/m2m-authentik-bootstrap.sh \
+  --issuer https://auth.stack.localhost/application/o/<slug>/ \
+  --jwks-url https://auth.stack.localhost/application/o/<slug>/jwks/ \
+  --provision-url https://auth.stack.localhost/api/v3/<provider-endpoint> \
+  --provision-method POST \
+  --provision-payload-file /tmp/authentik-provider-payload.json
+```
+
 ### C2. Store client secret in Podman secrets
 
 Use secret names only in config. Keep secret values out of git-tracked files.
@@ -284,8 +295,6 @@ Keep MinIO/Open WebUI project-bound sources private unless explicitly promoted t
 
 Not fully complete yet:
 
-- Full Authentik client provisioning automation (A2.1-A2.4) is still pending beyond bootstrap wiring.
-- Bootstrap now emits per-service Authentik client templates for repeatable manual/API provisioning.
 - Remaining closure item is deployed-runtime evidence for BL-011 in target environment.
 
 This guide is therefore operational for current MVP state, but it does not imply full closure of BL-011.

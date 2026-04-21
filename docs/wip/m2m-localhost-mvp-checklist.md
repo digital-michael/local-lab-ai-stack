@@ -58,10 +58,10 @@ Exit criteria:
 
 ## 2 Auth Foundation (use existing Authentik)
 
-- [ ] A2.1 Create M2M OAuth client(s) in Authentik for named service identities
-- [ ] A2.2 Configure client credentials grant only for those clients
-- [ ] A2.3 Set audience to gateway API
-- [ ] A2.4 Set short access token TTL (10m default)
+- [x] A2.1 Create M2M OAuth client(s) in Authentik for named service identities
+- [x] A2.2 Configure client credentials grant only for those clients
+- [x] A2.3 Set audience to gateway API
+- [x] A2.4 Set short access token TTL (10m default)
 - [x] A2.5 Document secret handling path using Podman secrets (no plaintext in tracked files)
 
 Exit criteria:
@@ -248,6 +248,7 @@ Exit criteria:
 - [x] U0.5 Broadened test fixture workflow source policy (`ki,minio`) to validate project-bound cross-platform boundary denial path; maintained separate negative test using `openwebui` source to preserve deny-by-policy coverage
 - [x] U0.6 Added trusted interoperability template governance baseline: versioned policy/entitlement templates in `configs/m2m/templates/`, scope-to-template enforcement in gateway, and conformance checks in `configure.sh validate`
 - [x] U0.7 Enhanced `scripts/m2m-authentik-bootstrap.sh` to emit per-service Authentik client template JSON (grant/audience/TTL/claim intent) for repeatable provisioning inputs before full API automation
+- [x] U0.8 Added endpoint-driven Authentik API provisioning mode to `scripts/m2m-authentik-bootstrap.sh` (`--provision-url`, `--provision-method`, token env, payload file/template path)
 
 Notes:
 

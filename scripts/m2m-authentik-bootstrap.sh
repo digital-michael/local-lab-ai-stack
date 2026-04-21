@@ -25,6 +25,16 @@ Options:
                                             Emit Authentik M2M client template JSON for repeatable provisioning
     --template-output <path>
                                             Write emitted client template JSON to file instead of stdout
+    --provision-url <url>
+                                            Authentik API endpoint for client provisioning (operator supplied)
+    --provision-method <method>
+                                            HTTP method for provisioning request: POST|PUT|PATCH (default: POST)
+    --provision-payload-file <path>
+                                            JSON file payload used for provisioning request
+    --provision-from-template
+                                            Use generated template JSON as provisioning payload
+    --api-token-env <name>
+                                            Env var containing Authentik API token (default: AUTHENTIK_API_TOKEN)
   --gateway-url <url>  Local M2M gateway URL (default: http://127.0.0.1:8787)
   --apply-config       Write issuer/JWKS/audience into configs/config.json
   -h, --help           Show this help message and exit
@@ -44,6 +54,19 @@ Examples:
         --jwks-url https://auth.stack.localhost/application/o/m2m-gateway/jwks/ \
         --service-id svc-ingest --workflow-id wf_ingest_docs --emit-client-template \
         --template-output /tmp/m2m-client-svc-ingest.json
+
+    AUTHENTIK_API_TOKEN='<token>' $(basename "$0") \
+        --issuer https://auth.stack.localhost/application/o/m2m-gateway/ \
+        --jwks-url https://auth.stack.localhost/application/o/m2m-gateway/jwks/ \
+        --service-id svc-ingest --workflow-id wf_ingest_docs --emit-client-template \
+        --provision-from-template --provision-url https://auth.stack.localhost/api/v3/<endpoint>
+
+    AUTHENTIK_API_TOKEN='<token>' $(basename "$0") \
+        --issuer https://auth.stack.localhost/application/o/m2m-gateway/ \
+        --jwks-url https://auth.stack.localhost/application/o/m2m-gateway/jwks/ \
+        --provision-url https://auth.stack.localhost/api/v3/<endpoint> \
+        --provision-method POST \
+        --provision-payload-file /tmp/authentik-provider-payload.json
 EOF
 }
 
@@ -63,6 +86,11 @@ _workflow_id=""
 _token_ttl_seconds="600"
 _emit_client_template="false"
 _template_output=""
+_provision_url=""
+_provision_method="POST"
+_provision_payload_file=""
+_provision_from_template="false"
+_api_token_env="AUTHENTIK_API_TOKEN"
 _gateway_url="http://127.0.0.1:8787"
 _apply_config="false"
 
@@ -98,6 +126,26 @@ while [[ $# -gt 0 ]]; do
             ;;
         --template-output)
             _template_output="${2:-}"
+            shift 2
+            ;;
+        --provision-url)
+            _provision_url="${2:-}"
+            shift 2
+            ;;
+        --provision-method)
+            _provision_method="${2:-}"
+            shift 2
+            ;;
+        --provision-payload-file)
+            _provision_payload_file="${2:-}"
+            shift 2
+            ;;
+        --provision-from-template)
+            _provision_from_template="true"
+            shift
+            ;;
+        --api-token-env)
+            _api_token_env="${2:-}"
             shift 2
             ;;
         --gateway-url)
@@ -144,6 +192,21 @@ if [[ "$_emit_client_template" == "true" ]] && [[ -z "$_service_id" ]]; then
     exit 1
 fi
 
+if [[ "$_provision_method" != "POST" && "$_provision_method" != "PUT" && "$_provision_method" != "PATCH" ]]; then
+    echo "ERROR: --provision-method must be one of: POST, PUT, PATCH." >&2
+    exit 1
+fi
+
+if [[ -n "$_provision_payload_file" && ! -f "$_provision_payload_file" ]]; then
+    echo "ERROR: --provision-payload-file not found: $_provision_payload_file" >&2
+    exit 1
+fi
+
+if [[ -n "$_provision_payload_file" && "$_provision_from_template" == "true" ]]; then
+    echo "ERROR: Use either --provision-payload-file or --provision-from-template, not both." >&2
+    exit 1
+fi
+
 echo "[1/4] Verifying issuer well-known metadata..."
 issuer_well_known="${_issuer%/}/.well-known/openid-configuration"
 curl -fsS "$issuer_well_known" >/dev/null
@@ -170,46 +233,78 @@ else
     echo "[3/4] Config apply skipped (use --apply-config to write changes)."
 fi
 
+template_json=""
 if [[ "$_emit_client_template" == "true" ]]; then
-        echo "[3b/4] Emitting Authentik client template JSON..."
-        workflow_json="null"
-        if [[ -n "$_workflow_id" ]]; then
-                workflow_json="\"$_workflow_id\""
-        fi
+    echo "[3b/4] Emitting Authentik client template JSON..."
+    workflow_json="null"
+    if [[ -n "$_workflow_id" ]]; then
+        workflow_json="\"$_workflow_id\""
+    fi
 
-        template_json=$(jq -n \
-            --arg service_id "$_service_id" \
-            --arg audience "$_audience" \
-            --argjson token_ttl_seconds "$_token_ttl_seconds" \
-            --argjson workflow_id "$workflow_json" \
-            '{
-                intent: "authentik_m2m_client_template",
-                service_id: $service_id,
-                suggested_client_name: ("m2m-" + $service_id),
-                required_settings: {
-                    grant_type: "client_credentials_only",
-                    audience: $audience,
-                    access_token_ttl_seconds: $token_ttl_seconds,
-                    required_claims: {
-                        sub: $service_id,
-                        wf: $workflow_id
-                    }
-                },
-                notes: [
-                    "Use one confidential client per service identity.",
-                    "Do not store client secret in tracked files; use Podman secrets.",
-                    "Keep scope set minimal and workflow-specific."
-                ]
-            }')
+    template_json=$(jq -n \
+      --arg service_id "$_service_id" \
+      --arg audience "$_audience" \
+      --argjson token_ttl_seconds "$_token_ttl_seconds" \
+      --argjson workflow_id "$workflow_json" \
+      '{
+        intent: "authentik_m2m_client_template",
+        service_id: $service_id,
+        suggested_client_name: ("m2m-" + $service_id),
+        required_settings: {
+          grant_type: "client_credentials_only",
+          audience: $audience,
+          access_token_ttl_seconds: $token_ttl_seconds,
+          required_claims: {
+            sub: $service_id,
+            wf: $workflow_id
+          }
+        },
+        notes: [
+          "Use one confidential client per service identity.",
+          "Do not store client secret in tracked files; use Podman secrets.",
+          "Keep scope set minimal and workflow-specific."
+        ]
+      }')
 
-        if [[ -n "$_template_output" ]]; then
-                tmp_file="$(mktemp)"
-                printf '%s\n' "$template_json" > "$tmp_file"
-                mv "$tmp_file" "$_template_output"
-                echo "Template written: $_template_output"
-        else
-                echo "$template_json" | jq .
+    if [[ -n "$_template_output" ]]; then
+        tmp_file="$(mktemp)"
+        printf '%s\n' "$template_json" > "$tmp_file"
+        mv "$tmp_file" "$_template_output"
+        echo "Template written: $_template_output"
+    else
+        echo "$template_json" | jq .
+    fi
+fi
+
+if [[ -n "$_provision_url" ]]; then
+    echo "[3c/4] Sending provisioning request to Authentik API endpoint..."
+    api_token="${!_api_token_env:-}"
+    if [[ -z "$api_token" ]]; then
+        echo "ERROR: Missing API token in env var: $_api_token_env" >&2
+        exit 1
+    fi
+
+    provision_payload=""
+    if [[ -n "$_provision_payload_file" ]]; then
+        provision_payload="$(cat "$_provision_payload_file")"
+    elif [[ "$_provision_from_template" == "true" ]]; then
+        if [[ -z "$template_json" ]]; then
+            echo "ERROR: --provision-from-template requires --emit-client-template in the same run." >&2
+            exit 1
         fi
+        provision_payload="$template_json"
+    else
+        echo "ERROR: provisioning requires --provision-payload-file or --provision-from-template." >&2
+        exit 1
+    fi
+
+    echo "$provision_payload" | jq -e . >/dev/null
+
+    curl -fsS -X "$_provision_method" \
+      -H "Authorization: Bearer ${api_token}" \
+      -H "Content-Type: application/json" \
+      --data "$provision_payload" \
+      "$_provision_url" | jq .
 fi
 
 if [[ -n "${M2M_TEST_TOKEN:-}" ]]; then
@@ -226,7 +321,7 @@ fi
 echo
 cat <<EOF
 Next required operator steps (not automated here):
-1. In Authentik, create one M2M client per service identity with client-credentials grant only.
+1. In Authentik, create one M2M client per service identity with client-credentials grant only (or use --provision-url with approved payload).
 2. Set audience to '$_audience' and short token TTL (10 minutes default).
 3. If needed, use --emit-client-template to produce per-service provisioning templates.
 4. Store each client secret in Podman secret store, never in tracked files.

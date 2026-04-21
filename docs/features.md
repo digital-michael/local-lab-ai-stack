@@ -239,8 +239,9 @@ The stack now includes a localhost-only machine-to-machine gateway for service i
 - Break-glass approvals are scope-limited, reason-coded, audited, and expiry-bound
 - Cross-platform trusted interoperability is explicit opt-in; project-bound MinIO/Open WebUI context is blocked from cross-platform sharing
 - Publication adapter boundary contract is implemented at `/m2m/v1/publish/transform`
-- Automated security/acceptance coverage currently passes 18 tests in `testing/security/test_m2m_gateway.py`
-- Remaining work: Authentik client provisioning automation and deployed-runtime closure evidence
+- Authentik provisioning helper supports issuer/JWKS wiring, per-service client template generation, and endpoint-driven API provisioning requests
+- Automated security/acceptance coverage currently passes 21 tests across `testing/security/test_m2m_gateway.py` and `testing/security/test_m2m_gateway_client.py`
+- Remaining work: deployed-runtime closure evidence
 - _Implementation: [services/m2m-gateway/app.py](../services/m2m-gateway/app.py)_ · _Checklist: [docs/wip/m2m-localhost-mvp-checklist.md](wip/m2m-localhost-mvp-checklist.md)_ · _Operator how-to: [docs/library/actions/m2m-iam-crud/m2m-iam-crud-SKILL.md](library/actions/m2m-iam-crud/m2m-iam-crud-SKILL.md)_
 
 ### `[-]` Local GPU Acceleration (Controller)
