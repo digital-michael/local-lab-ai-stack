@@ -14,6 +14,7 @@ Run any script with `--help` or `-h` for full usage details, options, and exampl
 - [First Deployment](#first-deployment) — `configure.sh` · `deploy.sh` · `pull-models.sh`
 - [Running Operations](#running-operations) — `start.sh` · `status.sh` · `backup.sh` · `inhibit.sh`
 - [Reconfiguration](#reconfiguration)
+- [M2M Auth Wiring](#m2m-auth-wiring) — `m2m-authentik-bootstrap.sh`
 - [Troubleshooting](#troubleshooting) — `diagnose.sh`
 - [Shutdown and Teardown](#shutdown-and-teardown) — `stop.sh` · `undeploy.sh`
 - [Worker Node Scripts](#worker-node-scripts) — `node.sh` · `bootstrap.sh` · `heartbeat.sh` · `register-node.sh`
@@ -70,6 +71,11 @@ Also used mid-lifecycle: `configure.sh detect-hardware` probes GPU/VRAM/RAM and 
 
 ### `pull-models.sh` *(see above)*
 Re-run after changing `configs/models.json` to update the LiteLLM model routing table without redeploying.
+
+## M2M Auth Wiring
+
+### `m2m-authentik-bootstrap.sh`
+Validates Authentik OIDC issuer/JWKS endpoints for M2M, optionally writes issuer/JWKS/audience values into `configs/config.json`, and can run an optional token introspection smoke check against the local M2M gateway using `M2M_TEST_TOKEN`.
 
 ---
 

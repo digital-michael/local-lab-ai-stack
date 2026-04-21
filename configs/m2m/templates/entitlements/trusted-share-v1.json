@@ -1,0 +1,12 @@
+{
+  "template_set_id": "trusted-share-v1",
+  "version": "1.0.0",
+  "type": "entitlement",
+  "description": "Baseline trusted interoperability entitlement template for approved project-pair sharing.",
+  "entitlements": {
+    "required_scope": "m2m.context.attach",
+    "scope_to_template_set": {
+      "m2m.context.attach": "trusted-share-v1"
+    }
+  }
+}

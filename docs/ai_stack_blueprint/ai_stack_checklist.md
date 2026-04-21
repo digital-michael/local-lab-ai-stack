@@ -1433,6 +1433,8 @@ These collapse into the configuration system above. Tracked individually for vis
     - Library entries visible to users/teams (public, non-sensitive — auto-filtered for common auth view)
   - Additional elements to be discovered as the stack matures
 
+- [ ] **Localhost M2M gateway + trusted interoperability profile (D-040)** — in progress: localhost-only gateway, JWT verification (secret/JWKS), scope and workflow policy enforcement, lease/heartbeat/extend + stale reaping, break-glass approval flow with expiry checks, policy trace/logging, LiteLLM/KI/skill route integrations, publication adapter boundary contract, and retention controls (Prometheus-derived default with explicit override) are implemented. Automated security/acceptance checks in `testing/security/test_m2m_gateway.py` cover key deny/allow paths including trusted profile disabled/approved-pair enabled and project-bound cross-platform boundary behavior. Remaining closure: Authentik M2M client provisioning workflow and final deployed-environment acceptance evidence for remaining matrix rows.
+
 - [ ] Service registry and discovery
 - [ ] Distributed vector shards (multi-node Qdrant)
 - [ ] GPU scheduling and multi-tenant inference

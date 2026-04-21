@@ -1,0 +1,18 @@
+{
+  "template_set_id": "trusted-share-v1",
+  "version": "1.0.0",
+  "type": "policy",
+  "description": "Baseline trusted interoperability policy template for approved project-pair sharing.",
+  "rules": {
+    "cross_platform": {
+      "allowed_sources": [
+        "ki"
+      ],
+      "deny_project_bound_sources": [
+        "minio",
+        "openwebui"
+      ],
+      "require_approved_project_pair": true
+    }
+  }
+}

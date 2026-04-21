@@ -780,6 +780,120 @@
         "memory": "256m",
         "gpu": null
       }
+    },
+    "m2m-gateway": {
+      "image": "localhost/m2m-gateway",
+      "tag": "0.1.0",
+      "container_name": "m2m-gateway",
+      "dns_alias": "m2m-gateway.ai-stack",
+      "depends_on": [
+        "authentik",
+        "knowledge-index",
+        "litellm"
+      ],
+      "ports": [
+        {
+          "host": 8787,
+          "container": 8787,
+          "bind": "127.0.0.1"
+        }
+      ],
+      "volumes": [],
+      "environment": {
+        "M2M_JWT_AUDIENCE": "local-m2m-gateway",
+        "M2M_JWT_ALGORITHM": "HS256",
+        "M2M_JWT_ISSUER": "",
+        "M2M_JWKS_URL": "",
+        "M2M_LITELLM_BASE_URL": "http://litellm.ai-stack:4000",
+        "M2M_KI_BASE_URL": "http://knowledge-index.ai-stack:8100",
+        "M2M_SKILL_RUNNER_URL": "",
+        "M2M_REQUEST_TIMEOUT_SECONDS": "20",
+        "M2M_BREAK_GLASS_ALLOWED_SCOPES": "m2m.jobs.extend.high",
+        "M2M_BREAK_GLASS_EXTENSION_SCOPE": "m2m.jobs.extend.high",
+        "M2M_PUBLICATION_ADAPTERS_JSON": "{}",
+        "M2M_AUDIT_RETENTION_SOURCE": "prometheus_default",
+        "M2M_PROMETHEUS_RETENTION_DAYS": "15",
+        "M2M_AUDIT_RETENTION_DAYS_OVERRIDE": "",
+        "M2M_LEASE_DEFAULT_MINUTES": "30",
+        "M2M_LEASE_AUTO_EXTEND_MAX_HOURS": "24",
+        "M2M_LEASE_APPROVAL_MAX_HOURS": "168",
+        "M2M_HEARTBEAT_INTERVAL_SECONDS": "60",
+        "M2M_HEARTBEAT_MISS_GRACE": "3",
+        "M2M_DEFAULT_ALLOW_DYNAMIC_SOURCES": "false",
+        "M2M_TRUSTED_INTEROP_ENABLED": "false",
+        "M2M_TRUSTED_ALLOW_PROJECT_PAIRS": "",
+        "M2M_TRUSTED_TEMPLATE_SET_JSON": "{\"template_set_id\":\"trusted-share-v1\",\"version\":\"1.0.0\",\"policy_template_path\":\"configs/m2m/templates/policies/trusted-share-v1.json\",\"entitlement_template_path\":\"configs/m2m/templates/entitlements/trusted-share-v1.json\",\"approved\":true}",
+        "M2M_TRUSTED_SCOPE_TEMPLATE_MAP_JSON": "{\"m2m.context.attach\":\"trusted-share-v1\"}",
+        "M2M_WORKFLOW_POLICY_JSON": "{\"workflows\":{}}"
+      },
+      "secrets": [
+        {
+          "name": "m2m_jwt_secret",
+          "target": "M2M_JWT_SECRET"
+        },
+        {
+          "name": "litellm_master_key",
+          "target": "M2M_LITELLM_API_KEY"
+        },
+        {
+          "name": "knowledge_index_api_key",
+          "target": "M2M_KI_API_KEY"
+        }
+      ],
+      "health_check": {
+        "command": "wget -qO- http://localhost:8787/health || exit 1",
+        "interval": "30s",
+        "retries": 3,
+        "timeout": "5s"
+      },
+      "resources": {
+        "cpus": 1,
+        "memory": "512m",
+        "gpu": null
+      }
     }
+  },
+  "m2m": {
+    "localhost_only": true,
+    "token_ttl_minutes": 10,
+    "lease_default_minutes": 30,
+    "lease_auto_extend_max_hours": 24,
+    "lease_approval_max_hours": 168,
+    "heartbeat_interval_seconds": 60,
+    "heartbeat_miss_grace": 3,
+    "default_allow_dynamic_sources": false,
+    "retention": {
+      "source": "prometheus_default",
+      "override_days": null
+    },
+    "approvals": {
+      "channel": "web",
+      "require_reason_code": true,
+      "allowed_scopes": [
+        "m2m.jobs.extend.high"
+      ]
+    },
+    "trusted_interop": {
+      "enabled": false,
+      "template_required": true,
+      "allow_project_pairs": [],
+      "template_set": {
+        "template_set_id": "trusted-share-v1",
+        "version": "1.0.0",
+        "policy_template_path": "configs/m2m/templates/policies/trusted-share-v1.json",
+        "entitlement_template_path": "configs/m2m/templates/entitlements/trusted-share-v1.json",
+        "approved": true
+      },
+      "scope_template_map": {
+        "m2m.context.attach": "trusted-share-v1"
+      }
+    },
+    "publication_adapters": {
+      "enabled": true,
+      "registry": []
+    }
+  },
+  "networking": {
+    "mode": "headscale"
   }
 }

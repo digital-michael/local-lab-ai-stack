@@ -176,6 +176,83 @@ cmd_validate() {
         echo "WARN: AI_STACK_DIR=$ai_stack_dir does not exist (run: bash scripts/install.sh)"
     fi
 
+    # Check M2M config sanity (MVP defaults)
+    local m2m_missing
+    m2m_missing=$(jq -r 'has("m2m") | not' "$CONFIG_FILE")
+    if [[ "$m2m_missing" == "true" ]]; then
+        echo "ERROR: Missing top-level .m2m configuration block."
+        errors=$((errors + 1))
+    else
+        local m2m_checks
+        m2m_checks=$(jq -r '
+            [
+              (.m2m.localhost_only | type == "boolean"),
+              (.m2m.default_allow_dynamic_sources | type == "boolean"),
+              (.m2m.token_ttl_minutes >= 1),
+              (.m2m.lease_default_minutes >= 1),
+              (.m2m.lease_auto_extend_max_hours >= 1),
+              (.m2m.lease_approval_max_hours >= .m2m.lease_auto_extend_max_hours),
+              (.m2m.heartbeat_interval_seconds >= 1),
+              (.m2m.heartbeat_miss_grace >= 1),
+                            (.m2m.retention.source == "prometheus_default"),
+                            ((.m2m.retention.override_days == null) or (.m2m.retention.override_days >= 1)),
+                            (.m2m.approvals.channel == "web"),
+                            (.m2m.approvals.allowed_scopes | type == "array"),
+                            (.m2m.approvals.allowed_scopes | length >= 1),
+                            (.m2m.approvals.allowed_scopes | index("m2m.jobs.extend.high") != null),
+                            (.m2m.trusted_interop.enabled | type == "boolean"),
+                            (.m2m.trusted_interop.template_required | type == "boolean"),
+                            (.m2m.trusted_interop.allow_project_pairs | type == "array"),
+                            (.m2m.trusted_interop.template_set | type == "object"),
+                            (.m2m.trusted_interop.scope_template_map | type == "object")
+            ] | all
+          ' "$CONFIG_FILE")
+        if [[ "$m2m_checks" != "true" ]]; then
+            echo "ERROR: .m2m configuration has invalid values."
+                        echo "       Expected positive TTL/lease/heartbeat values, retention.source='prometheus_default' with optional positive override_days, approvals.channel='web', approvals.allowed_scopes including 'm2m.jobs.extend.high', and trusted_interop template objects."
+            errors=$((errors + 1))
+        fi
+
+        local trusted_enabled trusted_template_required
+        trusted_enabled=$(jq -r '.m2m.trusted_interop.enabled' "$CONFIG_FILE")
+        trusted_template_required=$(jq -r '.m2m.trusted_interop.template_required' "$CONFIG_FILE")
+
+        if [[ "$trusted_template_required" == "true" ]]; then
+            local template_set_id template_version policy_template_path entitlement_template_path scope_map_value approved
+            template_set_id=$(jq -r '.m2m.trusted_interop.template_set.template_set_id // ""' "$CONFIG_FILE")
+            template_version=$(jq -r '.m2m.trusted_interop.template_set.version // ""' "$CONFIG_FILE")
+            policy_template_path=$(jq -r '.m2m.trusted_interop.template_set.policy_template_path // ""' "$CONFIG_FILE")
+            entitlement_template_path=$(jq -r '.m2m.trusted_interop.template_set.entitlement_template_path // ""' "$CONFIG_FILE")
+            scope_map_value=$(jq -r '.m2m.trusted_interop.scope_template_map["m2m.context.attach"] // ""' "$CONFIG_FILE")
+            approved=$(jq -r '.m2m.trusted_interop.template_set.approved // false' "$CONFIG_FILE")
+
+            if [[ -z "$template_set_id" || -z "$template_version" || -z "$policy_template_path" || -z "$entitlement_template_path" ]]; then
+                echo "ERROR: trusted_interop.template_set requires template_set_id, version, policy_template_path, and entitlement_template_path."
+                errors=$((errors + 1))
+            fi
+
+            if [[ -n "$scope_map_value" && "$scope_map_value" != "$template_set_id" ]]; then
+                echo "ERROR: trusted_interop.scope_template_map['m2m.context.attach'] must match trusted_interop.template_set.template_set_id."
+                errors=$((errors + 1))
+            fi
+
+            if [[ "$trusted_enabled" == "true" ]]; then
+                if [[ "$approved" != "true" ]]; then
+                    echo "ERROR: trusted_interop.enabled=true requires trusted_interop.template_set.approved=true."
+                    errors=$((errors + 1))
+                fi
+                if [[ ! -f "$PROJECT_DIR/$policy_template_path" ]]; then
+                    echo "ERROR: trusted policy template file not found: $PROJECT_DIR/$policy_template_path"
+                    errors=$((errors + 1))
+                fi
+                if [[ ! -f "$PROJECT_DIR/$entitlement_template_path" ]]; then
+                    echo "ERROR: trusted entitlement template file not found: $PROJECT_DIR/$entitlement_template_path"
+                    errors=$((errors + 1))
+                fi
+            fi
+        fi
+    fi
+
     if [[ $errors -gt 0 ]]; then
         echo "Validation FAILED with $errors error(s)."
         exit 1

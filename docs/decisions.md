@@ -675,3 +675,22 @@ Concrete protocol specification for the **WAN** discovery profile.
 | **Driver** | User design session 2026-04-07; concern that using the same LLM to evaluate and execute shared the adversarial surface and weakened the review boundary. |
 | **Trigger** | Planning content ingestion into the Knowledge Index; review layer must be in place before production ingestion expands. |
 | **Commit** | TBD — BL-009 Phase 1 |
+
+---
+
+### D-040 — Localhost M2M Gateway and Trusted KI Interoperability Profile
+
+| Field | Value |
+|---|---|
+| **Decision** | For localhost machine-to-machine workflows, the M2M gateway is the authoritative authn/authz boundary and KI policy is authoritative for source/content privileges. A separate trusted interoperability profile is introduced for approved project pairs and is included in MVP scope: cross-platform sharing is allowed only when this profile is explicitly enabled and governed by versioned policy/entitlement templates. |
+| **Context** | M2M localhost design established identity, short-lived tokens, per-workflow policy, lease/heartbeat control, and web approval for break-glass. A follow-on interoperability discussion clarified how this should interact with KI library standards and project-bound private context. The risk is policy drift and boundary ambiguity if trusted sharing becomes an implicit default. |
+| **Internal vs external planes** | Internal knowledge plane: KI custody, provenance, retrieval policy, and reusable governed assets. External publication plane: adapters only; transforms for external standards/protocols are decoupled from KI core schema/policy model. |
+| **Domain split** | Reusable governed library assets belong in KI. Specialized/private project lessons and project-bound context belong in MinIO + Open WebUI project scope. This avoids mixed-intent overload in KI and keeps promotion to KI explicit. |
+| **Trusted profile rule** | Trusted sharing mode is explicit opt-in, profile-scoped, and disabled by default. It is never the global default. Less-trusted integrations continue to use strict default-deny posture and no broad sharing assumptions. |
+| **Template governance** | Policy and entitlement templates are mandatory for trusted profile operation. Templates are versioned, reviewed, and approved to reduce semantic drift between projects. |
+| **MVP scope note** | Trusted cross-platform sharing for approved project pairs is implemented in MVP. The default deployment posture remains default-deny and localhost-only unless the trusted profile is explicitly enabled. |
+| **Enforcement split** | Gateway decides who can request and what workflow scope is allowed. KI policy decides what content/source can actually be served. Both checks must pass for access to proceed. |
+| **Non-scope** | This decision does not lock external publication standards or implement cross-org interoperability protocols. Those are deferred to publication adapter design and later federation phases. |
+| **Driver** | User-led M2M localhost + KI interoperability alignment session |
+| **Trigger** | Need to preserve workflow-level design direction from wip interoperability notes without creating a second competing architecture path. |
+| **Commit** | *(pending)* |

@@ -51,6 +51,22 @@ def gateway(monkeypatch):
     monkeypatch.setenv("M2M_DEFAULT_ALLOW_DYNAMIC_SOURCES", "false")
     monkeypatch.setenv("M2M_TRUSTED_INTEROP_ENABLED", "false")
     monkeypatch.setenv("M2M_TRUSTED_ALLOW_PROJECT_PAIRS", "proj-a:proj-b")
+    monkeypatch.setenv(
+        "M2M_TRUSTED_TEMPLATE_SET_JSON",
+        json.dumps(
+            {
+                "template_set_id": "trusted-share-v1",
+                "version": "1.0.0",
+                "policy_template_path": "configs/m2m/templates/policies/trusted-share-v1.json",
+                "entitlement_template_path": "configs/m2m/templates/entitlements/trusted-share-v1.json",
+                "approved": True,
+            }
+        ),
+    )
+    monkeypatch.setenv(
+        "M2M_TRUSTED_SCOPE_TEMPLATE_MAP_JSON",
+        json.dumps({"m2m.context.attach": "trusted-share-v1"}),
+    )
     monkeypatch.setenv("M2M_LEASE_DEFAULT_MINUTES", "30")
     monkeypatch.setenv("M2M_LEASE_AUTO_EXTEND_MAX_HOURS", "1")
     monkeypatch.setenv("M2M_LEASE_APPROVAL_MAX_HOURS", "12")
@@ -482,6 +498,37 @@ def test_trusted_interop_enabled_allows_approved_pair(gateway):
     )
     assert attach.status_code == 200
     assert attach.json()["attached"] is True
+
+
+def test_trusted_interop_requires_approved_template_set(gateway):
+    module, client = gateway
+    module.TRUSTED_INTEROP_ENABLED = True
+    module._trusted_template_set["approved"] = False
+
+    token = _token(sub="svc-a", wf="wf-alpha", scopes=["m2m.jobs.start", "m2m.context.attach"])
+    start = client.post(
+        "/m2m/v1/jobs/start",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"workflow_id": "wf-alpha", "project_id": "proj-a"},
+    )
+    assert start.status_code == 200
+    job_id = start.json()["job_id"]
+
+    attach = client.post(
+        "/m2m/v1/context/attach",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "job_id": job_id,
+            "source_type": "ki",
+            "source_id": "asset-1",
+            "cross_platform": True,
+            "target_project_id": "proj-b",
+            "metadata": {"resolve": False},
+        },
+    )
+    assert attach.status_code == 403
+    detail = attach.json().get("detail", {})
+    assert detail.get("code") == "trusted_template_set_missing_or_unapproved"
 
 
 def test_project_bound_sources_denied_for_cross_platform(gateway):

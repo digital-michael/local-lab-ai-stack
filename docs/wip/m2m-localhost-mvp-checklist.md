@@ -216,11 +216,11 @@ Exit criteria:
 
 ## 13 Trusted Interoperability Controls (MVP Required)
 
-- [ ] T13.1 Define baseline policy templates for trusted project-pair sharing
-- [ ] T13.2 Define baseline entitlement templates for trusted project-pair sharing
-- [ ] T13.3 Add template versioning and approval workflow
-- [ ] T13.4 Add scope-to-template mapping in gateway policy engine
-- [ ] T13.5 Add template conformance checks in CI or validation workflow
+- [x] T13.1 Define baseline policy templates for trusted project-pair sharing
+- [x] T13.2 Define baseline entitlement templates for trusted project-pair sharing
+- [x] T13.3 Add template versioning and approval workflow
+- [x] T13.4 Add scope-to-template mapping in gateway policy engine
+- [x] T13.5 Add template conformance checks in CI or validation workflow
 
 Exit criteria:
 
@@ -246,6 +246,7 @@ Exit criteria:
 - [x] U0.3 Added gateway endpoint `GET /m2m/v1/audit/events` for retained decision log inspection (unplanned but required to make O9 retention behavior observable)
 - [x] U0.4 Added runtime bootstrap dependency recovery in local venv (`ensurepip` + pytest install) to unblock test execution (environment deviation; not stack runtime behavior)
 - [x] U0.5 Broadened test fixture workflow source policy (`ki,minio`) to validate project-bound cross-platform boundary denial path; maintained separate negative test using `openwebui` source to preserve deny-by-policy coverage
+- [x] U0.6 Added trusted interoperability template governance baseline: versioned policy/entitlement templates in `configs/m2m/templates/`, scope-to-template enforcement in gateway, and conformance checks in `configure.sh validate`
 
 Notes:
 
