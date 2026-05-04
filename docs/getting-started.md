@@ -179,6 +179,58 @@ bats testing/layer0_preflight.bats
 
 ---
 
+## Step 13 — Enroll the node in the Headscale tailnet (multi-node deployments)
+
+If this node needs to reach the controller (or peers) across the internet, enroll it in the WireGuard overlay mesh managed by Headscale at `headscale.photondatum.space`.
+
+**Prerequisites:** `tailscale` installed and daemon running. A pre-auth key issued by the Headscale operator.
+
+### 1. Clear any existing Tailscale enrollment
+
+```bash
+sudo tailscale logout
+# A TLS error from the old coordination server is expected — local state is still cleared.
+```
+
+### 2. Enroll
+
+```bash
+sudo tailscale up \
+  --login-server https://headscale.photondatum.space \
+  --authkey <preauthkey> \
+  --hostname <node-alias> \
+  --reset --force-reauth
+```
+
+- `--reset` clears prior non-default flags (e.g. `--exit-node-allow-lan-access`)
+- `--force-reauth` is required when a prior enrollment exists; safe to omit on a fresh node
+- Do **not** pass `--ssh` or `--exit-node-allow-lan-access` — Tailscale cloud-only flags; will error on a Headscale server
+
+### 3. Confirm enrollment
+
+```bash
+tailscale status   # node should show online with a 100.64.x.x IP
+```
+
+The Headscale operator must then tag the node on the server. **Always pass all desired tags in one command** — the `tag` subcommand replaces, not appends:
+
+```bash
+# Standard enrollment — role tag + namespace tag (required for ACL to permit the node):
+sudo headscale nodes tag --identifier <node-ID> \
+  --tags tag:<role>,tag:net-ecotone-000-01
+# Role tags: controller  inference  knowledge
+
+# To additionally expose the node to any peer in the tailnet (e.g. a shared inference worker):
+sudo headscale nodes tag --identifier <node-ID> \
+  --tags tag:<role>,tag:net-ecotone-000-01,tag:net-public
+```
+
+**ACL model:** The tailnet runs namespace-isolated ACLs. Only nodes bearing `tag:net-ecotone-000-01` can communicate by default. Nodes tagged `tag:net-public` are additionally reachable from any enrolled node (all ports). A node with neither tag cannot send or receive tailnet traffic.
+
+For per-node commands specific to this cluster, see the CENTAURI playbook §7.8.
+
+---
+
 ## Quick Reference — Day-to-Day Commands
 
 | Goal | Command |
