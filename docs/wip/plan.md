@@ -2,7 +2,7 @@
 
 **Tracking:** Backlog lives in `docs/meta_local/review_log.md` (Pending Tasks table).
 **Sequence:** Items are worked in backlog listing order unless priority escalation is noted.
-**Last Updated:** 2026-04-09
+**Last Updated:** 2026-05-04
 
 ---
 
@@ -30,7 +30,7 @@ Improves readability on wide node sets and is a prerequisite for BL-003 (--json 
 
 | ID | Priority | Title | Status |
 |---|---|---|---|
-| BL-001 | P2 | CENTAURI-playbook.md | ✅ done — updated 2026-04-08 (commit `918b5df`) |
+| BL-001 | P2 | CENTAURI-playbook.md | ✅ done — updated 2026-04-08 (commit `918b5df`); extended 2026-05-04 with Headscale tailnet runbook (§2.6, §7.8) — output/ gitignored |
 | **BL-002** | P3 | node.sh list: report/subreport layout | ⬅ next |
 | BL-003 | P3 | --json output mode for scripts | not started |
 | BL-004 | P2 | RLM integration research | not started |

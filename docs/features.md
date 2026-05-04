@@ -70,6 +70,7 @@ The stack is designed to grow: new inference nodes can be added to increase capa
 - [Dynamic Node Registration](#x-dynamic-node-registration)
 - [Worker Sleep Inhibitor](#x-worker-sleep-inhibitor)
 - [Inference Node Hardening](#x-inference-node-hardening)
+- [Tailscale SSH — Zero-Config Node Access](#--tailscale-ssh--zero-config-node-access)
 - [Operator Dashboard](#x-operator-dashboard)
 - [Port Lockdown — Traefik-Only Ingress](#x-port-lockdown--traefik-only-ingress)
 
@@ -304,6 +305,16 @@ Prevents worker nodes from sleeping or hibernating while the AI stack is running
 - macOS: prints `pf` anchor file + load commands + `/etc/pf.conf` persistence step
 - `configure.sh security-audit` Check E now includes the exact `harden-worker` remediation command in its CRITICAL finding message
 - _Delivered: [Phase 24](ai_stack_blueprint/ai_stack_checklist.md) · Script: [scripts/node.sh](../scripts/node.sh)_
+
+### `[-]` Tailscale SSH — Zero-Config Node Access
+Any enrolled cluster node can SSH to any other enrolled node without managing SSH keys — the tailnet ACL policy handles authentication.
+- No key distribution required; `tailscale ssh <node>` works immediately after enabling `--ssh`
+- ACL `ssh` block in `/etc/headscale/acl.json` grants `autogroup:nonroot` access between all `tag:net-ecotone-000-01` nodes
+- headscale-host (photondatum.space) self-enrolled as `headscale-host` (`100.64.0.5`) — reach it as `tailscale ssh 3pdx7a@headscale-host`
+- Known-hosts clearing required on first use when re-enrolling from Tailscale cloud (stale ED25519 key — run `ssh-keygen -R <node>` as the SSH user, not root)
+- **TC25 (macOS App Store build):** Tailscale SSH server blocked by sandbox; use `ssh 3pdx7@100.64.0.3` via tailnet IP directly
+- **SELinux (Fedora/RHEL):** `tailscale_use_ssh` boolean absent on Fedora 42; SSH works in practice under `unconfined_service_t`; check `ausearch -m avc` if blocked
+- _Setup: [docs/getting-started.md Step 14](getting-started.md#step-14--enable-tailscale-ssh-optional-multi-node-deployments) · Runbook: CENTAURI playbook §7.9–§7.10_
 
 ---
 

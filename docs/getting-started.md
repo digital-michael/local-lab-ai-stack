@@ -231,6 +231,56 @@ For per-node commands specific to this cluster, see the CENTAURI playbook §7.8.
 
 ---
 
+## Step 14 — Enable Tailscale SSH (optional, multi-node deployments)
+
+Once all nodes are enrolled (Step 13), enable zero-config SSH between them via the Headscale ACL policy. No public key distribution required — authentication is handled by the tailnet.
+
+**Prerequisites:** Step 13 complete on all target nodes; ACL `ssh` block present in `/etc/headscale/acl.json` (see CENTAURI playbook §7.9 for the full block).
+
+### 1. Enable the SSH server on each Linux target node
+
+```bash
+sudo tailscale set --ssh
+```
+
+Repeat on every node that should accept incoming `tailscale ssh` connections. macOS App Store (sandboxed) builds do not support this — use `ssh <user>@<tailnet-ip>` directly for those nodes.
+
+### 2. Clear stale known-hosts entries (re-enrolled nodes only)
+
+If a node was previously enrolled in Tailscale cloud before joining this Headscale tailnet, its old host key is cached and will cause:
+
+```
+No ED25519 host key is known for <node>. Host key verification failed.
+```
+
+Run as the SSH user (**not** as root — `sudo ssh-keygen` writes to `/root/.ssh` and silently fails):
+
+```bash
+ssh-keygen -R <node>        # remove by hostname
+ssh-keygen -R <tailnet-ip>  # remove by 100.64.x.x IP
+# Example:
+ssh-keygen -R sol && ssh-keygen -R 100.64.0.2
+```
+
+### 3. Test
+
+```bash
+# Linux nodes — use tailscale ssh:
+tailscale ssh sol "hostname && tailscale ip -4"
+tailscale ssh 3pdx7a@headscale-host "hostname && tailscale ip -4"
+
+# macOS App Store node (tc25) — plain ssh to tailnet IP:
+ssh 3pdx7@100.64.0.3 "hostname"
+```
+
+### Headscale-host self-enrollment note
+
+The Headscale coordination server (photondatum.space) can self-enroll as a tailnet node — it connects to its own Caddy-proxied HTTPS endpoint. Its SSH username (`3pdx7a`) differs from cluster nodes (`3pdx7`); always specify it explicitly: `tailscale ssh 3pdx7a@headscale-host`.
+
+A SELinux health warning (`SELinux is enabled; Tailscale SSH may not work`) appears on Fedora/RHEL nodes. The `tailscale_use_ssh` boolean does not exist on Fedora 42; SSH operates under `unconfined_service_t` and works in practice. See CENTAURI playbook §7.9 for details.
+
+---
+
 ## Quick Reference — Day-to-Day Commands
 
 | Goal | Command |
