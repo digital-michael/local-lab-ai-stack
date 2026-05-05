@@ -1457,14 +1457,10 @@ def cnc_heartbeat(req: CncHeartbeatRequest, request: Request) -> None:
             },
         )
 
-        # Promote to 'online' if currently unregistered or offline
-        if row[0] in ("unregistered", "offline"):
-            conn.execute(
-                text("UPDATE nodes SET status = 'online' WHERE node_id = :nid"),
-                {"nid": req.node_id},
-            )
-
         conn.commit()
+
+        # Evaluate state transition (caution/failed → online via 2-consecutive-beat rule)
+        _nr._transition_up(req.node_id, conn)
     return None
 
 

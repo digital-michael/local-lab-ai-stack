@@ -17,7 +17,7 @@ _Nothing in flight._
 
 ### BL-011 — Headscale Architecture Migration: Phase 1 (ACL hardening + LAN break-glass)
 **Priority:** P1  
-**Status:** partial — steps 1+2 complete; steps 3+4 blocked by BL-015  
+**Status:** ✅ done — all 4 steps complete 2026-05-05  
 **Decisions:** D-004, D-007, D-008  
 
 **Steps:**
@@ -31,14 +31,16 @@ _Nothing in flight._
 2. ✅ **Document LAN SSH break-glass** — added §7.11 to `output/CENTAURI-playbook.md`.  
    Table: all node LAN IPs, SSH users, key paths. ToC entry added.
 
-3. ⛔ **LAN→tailnet IP migration — controller_url** — **blocked by BL-015.**  
-   Port 8100 is `bind: 127.0.0.1` (intentional). Workers cannot reach the controller API  
-   over the tailnet until BL-015 delivers a tailnet-accessible authenticated endpoint.  
-   `controller_url` remains `https://SERVICES.mynetworksettings.com` on all nodes.
+3. ✅ **LAN→tailnet IP migration — controller_url** — complete 2026-05-05.  
+   Both SOL and TC25: `~/.config/ai-stack/controller_url=https://100.64.0.4:8443`,  
+   `~/.config/ai-stack/network_bearer_token=<64 chars>`. Heartbeats route via  
+   Traefik tailnet entrypoint → `/v1/cnc/heartbeat` with Bearer auth.
 
-4. ⛔ **LAN→tailnet IP migration — workers** — blocked by step 3 / BL-015.
+4. ✅ **LAN→tailnet IP migration — workers** — complete 2026-05-05.  
+   SOL: CNC heartbeats confirmed 2026-05-05 ~13:00. TC25: git pulled to `5a13f15`,  
+   CNC heartbeats confirmed 2026-05-05 ~17:50; status `online`.
 
-**Verification gate (when unblocked):** `node.sh list` shows all nodes online with tailnet IPs; `bash scripts/status.sh -vv` tailnet row shows `connected N/N peers`.
+**Verification gate:** ✅ `node.sh list` shows SOL `online`, TC25 `online`; both posting to `/v1/cnc/heartbeat 204`.
 
 ---
 
@@ -135,7 +137,7 @@ Execute `docs/wip/headplane-remote-deploy.md` as written. Bind to tailnet IP onl
 | BL-002 | P3 | node.sh list: headscale backend + stanza output | ✅ done 2026-05-04 | — |
 | BL-003 | P3 | --json output mode for scripts | ✅ done 2026-05-04 | — |
 | BL-015 | P1 | Tailnet-Accessible KI Endpoint + CNC Foundation | ✅ done 2026-05-05 | D-009 |
-| BL-011 | P1 | Headscale migration: ACL hardening + LAN break-glass + IP migration | partial — steps 1+2 done; **steps 3+4 unblocked** (BL-015 shipped) | D-004, D-007, D-008 |
+| BL-011 | P1 | Headscale migration: ACL hardening + LAN break-glass + IP migration | ✅ done 2026-05-05 | D-004, D-007, D-008 |
 | BL-012 | P1 | Distributed node config: node.sh configure + --refresh | ✅ done `7813139` — verification gate complete 2026-05-05 | D-005 |
 | BL-009 | P1 | Content Review Layer Phase 2 (guard LLM) | Phase 1 done (`9d33dce`) | D-039 |
 | BL-013 | P2 | node-exporter-ai: per-node Prometheus metrics exporter | not started | D-006 |
