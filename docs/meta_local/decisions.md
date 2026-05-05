@@ -71,3 +71,115 @@ Project-scoped conventions and deliberate choices that should be applied consist
 - Refactor is low-urgency until a third node or new deployment forces the issue.
 
 **When to promote:** Adding a third inference node, onboarding a new deployment, or any failing skip-storm on a peer system.
+
+---
+
+## D-004 — Headscale as Authoritative Presence and Identity Layer
+
+**Date:** 2026-05-04
+**Status:** Active — supersedes LAN-IP assumption in D-002
+
+**Decision:** Headscale is the authoritative source for node presence, identity (hostname, tailnet IP, tags), and network-layer authentication. WireGuard mutual auth replaces the mTLS discussion in D-002 at the network layer. The admin API's per-node API-key join mechanism is deprecated as the primary auth path once all nodes are enrolled.
+
+**Consequences:**
+- `node.sh list` reads headscale REST API as primary source; `configs/nodes/*.json` worker files are deprecated (see D-005).
+- Node join = `tailscale up` enrollment. Node unjoin = `headscale nodes delete`. Node rename = `headscale nodes rename`.
+- `scripts/heartbeat.sh` and its systemd timer are deprecated — headscale `online`/`lastSeen` replaces the network-presence function.
+
+**SPOF mitigation (three-tier fallback — all must remain available):**
+1. **Short-term / local outage:** LAN SSH to each node's LAN IP. Every node must have an operator SSH key in `authorized_keys` independent of tailscale. This is break-glass tier 1.
+2. **Prolonged / VPS outage:** Migrate headscale to run locally on CENTAURI (or a local VM). Target: before any production use. Eliminates VPS dependency for intranet traffic.
+3. **Production fallback:** LAN SSH as documented operational fallback documented in operator runbook. Photondatum.space headscale remains as off-site coordination for roaming nodes.
+
+**TODO (must do before production):** Move headscale to local host (option 2). Document LAN SSH break-glass procedure in CENTAURI-playbook.md.
+
+---
+
+## D-005 — Distributed Node Configuration (Pull Model)
+
+**Date:** 2026-05-04
+**Status:** Active — supersedes static `configs/nodes/*.json` for worker nodes
+
+**Decision:** Each node is its own authoritative source of configuration. Nodes publish their config locally at `~/.config/ai-stack/node-config.json` (written by `node.sh configure` at bootstrap). The controller pulls config on demand via `tailscale ssh <node> cat ~/.config/ai-stack/node-config.json` and caches it at `~/.config/ai-stack/nodes/<hostname>.json`.
+
+**Data flow:**
+```
+node enrolls → tailscale up
+             → node.sh configure  (writes ~/.config/ai-stack/node-config.json)
+controller   → node.sh list --refresh
+             → per online node: ssh pull node-config.json
+             → merge: headscale presence + node config → local cache
+```
+
+**Cache semantics:** Cache serves fast reads. Invalidated by: `node.sh list --refresh`, node join/unjoin/model-pull lifecycle events. Stale tolerance: operator-configurable, default 10 minutes.
+
+**`configs/nodes/*.json` fate:**
+- Worker files (`inference-worker-*.json`, `knowledge-worker-*.json`) → deprecated; removed once all nodes are migrated to distributed config.
+- `controller-1.json` → retained; controller describes itself, not a remote node.
+- D-034's `/admin/v1/nodes` API surface is preserved but its data source changes from static files to the controller cache. No API change visible to consumers.
+
+**TODO (must do before deprecating static files):** Implement `node.sh configure` (writes node-config.json) and `node.sh list --refresh` (pulls and caches). Update `testing/layer2_remote_nodes.bats` to read from cache not static files (see D-003).
+
+---
+
+## D-006 — Pull-Based Metrics via node-exporter-ai
+
+**Date:** 2026-05-04
+**Status:** Active — supersedes heartbeat telemetry POST
+
+**Decision:** Application-layer metrics (CPU, memory, GPU VRAM, Ollama models loaded) are exposed by a lightweight Python process (`node-exporter-ai`) on each worker node. Prometheus on the controller scrapes each node's metrics endpoint over the tailnet. Workers are passive — they need no knowledge of the controller address.
+
+**Exporter shape:**
+- Binds to tailnet IP only (`100.64.x.x:9200`) — never `0.0.0.0`.
+- Exposes Prometheus text format at `/metrics`.
+- Sources: `/proc/meminfo`, `nvidia-smi`, `ollama /api/metrics`, local `node-config.json` for label injection (profile, alias, namespace).
+- Runs as a systemd user service on Linux nodes.
+
+**Prometheus scrape targets:** Dynamic — generated from `node.sh list --json` output filtered to online nodes. Controller-side script updates `configs/prometheus/prometheus.yml` scrape targets on `--refresh`.
+
+**TC25 exception:** App Store sandbox may block listener port binding. TC25 uses Prometheus Pushgateway as fallback if `:9200` bind fails. Isolated exception; does not affect architecture.
+
+**TODO (must do):** Implement `services/node-exporter-ai/`; add scrape target generation to `node.sh list --refresh`; update `configs/prometheus/prometheus.yml` template.
+
+---
+
+## D-007 — Tailscale SSH as Command-and-Control Transport (Transitional)
+
+**Date:** 2026-05-04
+**Status:** Active — transitional; see TODO for target state
+
+**Decision:** Operator command delivery to worker nodes uses `tailscale ssh <node> <command>` invoked from the controller via a new `node.sh remote <node> <cmd>` wrapper. This replaces the heartbeat response channel (suggestions, rename_to) and the `_curl_admin` POST pattern for write operations.
+
+**Headplane role:** Network-layer visibility only — node enrollment, tag management, pre-auth key lifecycle, ACL policy editing. Headplane does NOT execute commands on application nodes.
+
+**ACL hardening (must do in rapid succession):**
+- Tighten headscale ACL from full-mesh SSH to directional: `tag:controller` → `tag:inference|tag:knowledge` only.
+- Workers cannot SSH to each other or back to the controller.
+- Apply before `node.sh remote` is in production use.
+
+**Target state (must not remain SSH-based long-term):** Replace `tailscale ssh` CNC with an isolated, purpose-built control channel — likely a lightweight authenticated HTTPS endpoint per node (not reusing SSH). SSH across the tailnet should be disabled once the replacement is in place.
+
+**TODO (must do before production — HIGH PRIORITY):**
+1. Tighten ACL to directional controller→worker immediately.
+2. Design and implement non-SSH CNC transport (BL-new, P1).
+3. Disable `tailscale ssh` on all nodes once CNC transport is live.
+
+---
+
+## D-008 — LAN→Tailnet IP Migration Strategy
+
+**Date:** 2026-05-04
+**Status:** Active
+
+**Decision:** Migrate each node's `controller_url` (and all inter-node references) from LAN IPs to headscale tailnet IPs (`100.64.x.x`) one node at a time, controller-first. Verify each node's tailnet connectivity and stack health before proceeding to the next.
+
+**Migration order:**
+1. Controller (CENTAURI) — update its own state files; verify `node.sh list` and `status.sh` show correct tailnet data.
+2. Each worker in turn — use `node.sh remote <node>` to update `controller_url` atomically; verify heartbeat (until deprecated) and node-config pull succeed.
+3. TC25 last — highest risk (App Store SSH constraints); use direct tailnet IP SSH if `tailscale ssh` fails.
+
+**Risk:** Workers mid-operation during controller migration will see transient `_curl_admin` failures (exit 0, silent). Acceptable given heartbeat is being deprecated. Any `node.sh` command on a worker during the window will fail; re-run after worker migration completes.
+
+**Verification gate per node:** `bash scripts/status.sh -vv` on controller shows tailnet row `connected`, node appears `online` in `node.sh list`, and `node.sh remote <node> bash scripts/status.sh` returns exit 0.
+
+**TODO:** Execute migration as part of BL-new headscale-migration backlog item. Update CENTAURI-playbook.md with LAN SSH break-glass procedure before starting.
