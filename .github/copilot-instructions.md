@@ -36,6 +36,37 @@ Full protocol definition (tooling-agnostic): `docs/meta/meta_context_protocol.md
 
 ---
 
+## Session Protocol: Flush-to-Disk
+
+The agent cannot predict compaction. Durable knowledge MUST be written to disk proactively — do not rely on the conversation summary to carry architectural decisions, lessons, or status changes forward.
+
+### Narrow Flush — trigger immediately, no announcement
+
+| What happened | Write to |
+|---|---|
+| New architecture decision reached | `docs/meta_local/decisions.md` |
+| BL item status changes (started / blocked / done) | `docs/wip/plan.md` |
+| Bug, workaround, or non-obvious lesson discovered | `/memories/repo/lessons-learned.md` |
+| New operational procedure established or changed | `output/CENTAURI-playbook.md` |
+| Feature shipped or scope changed | `docs/features.md` |
+
+Write the narrow flush inline as part of completing the work — not as a separate step.
+
+### Broad Flush — required before every git commit
+
+Before staging any commit, verify all of the following are current. Announce: `"Flushing session state before commit..."` and list which files were updated.
+
+1. `docs/meta_local/decisions.md` — all decisions made in session recorded
+2. `docs/wip/plan.md` — all BL status changes reflected
+3. `docs/meta_local/review_log.md` — session entry written (what was done, decided, and is pending)
+4. `/memories/repo/lessons-learned.md` — all new lessons captured
+5. `output/CENTAURI-playbook.md` — new procedures or updated runbooks included
+6. `docs/features.md` — if features shipped or changed
+
+**Never commit without a broad flush.** If the broad flush surfaces new content, include those files in the commit.
+
+---
+
 ## This Repository
 
 - **Default profile for this repo:** `standard`

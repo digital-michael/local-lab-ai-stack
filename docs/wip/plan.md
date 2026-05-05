@@ -16,32 +16,29 @@ _Nothing in flight._
 ## Next (selected)
 
 ### BL-011 — Headscale Architecture Migration: Phase 1 (ACL hardening + LAN break-glass)
-**Priority:** P1 — must precede any command-delivery work  
-**Status:** not started  
+**Priority:** P1  
+**Status:** partial — steps 1+2 complete; steps 3+4 blocked by BL-015  
 **Decisions:** D-004, D-007, D-008  
 
-Phase 1 establishes the security and resilience prerequisites before any further tailnet-dependent work.
+**Steps:**
 
-**Steps (in order, each verified before next):**
+1. ✅ **Tighten ACL to directional controller→worker** — deployed 2026-05-04.  
+   `ssh` block changed from full-mesh (`tag:net-ecotone-000-01` → self) to directional  
+   (`tag:controller` → `tag:inference`, `tag:knowledge`). Headscale restarted. Verified:  
+   `tailscale ssh sol` from CENTAURI exits 0. Node 1 (stale ghost enrollment) deleted;  
+   node 5 retags to `tag:controller,tag:knowledge,tag:net-ecotone-000-01`.
 
-1. **Tighten ACL to directional controller→worker**  
-   Edit `/etc/headscale/acl.json` on `photondatum.space`: replace full-mesh SSH allow with  
-   `src: [tag:controller] → dst: [tag:inference, tag:knowledge]` only.  
-   Verify: `tailscale ssh sol` from CENTAURI works; `tailscale ssh centauri` from SOL is denied.
+2. ✅ **Document LAN SSH break-glass** — added §7.11 to `output/CENTAURI-playbook.md`.  
+   Table: all node LAN IPs, SSH users, key paths. ToC entry added.
 
-2. **Document LAN SSH break-glass in CENTAURI-playbook.md**  
-   Add §: each node's LAN IP, SSH user, and key location. Verify SSH login to each node via LAN IP independent of tailscale. This must work before any migration step.
+3. ⛔ **LAN→tailnet IP migration — controller_url** — **blocked by BL-015.**  
+   Port 8100 is `bind: 127.0.0.1` (intentional). Workers cannot reach the controller API  
+   over the tailnet until BL-015 delivers a tailnet-accessible authenticated endpoint.  
+   `controller_url` remains `https://SERVICES.mynetworksettings.com` on all nodes.
 
-3. **LAN→tailnet IP migration — controller-first**  
-   Update CENTAURI's own `~/.config/ai-stack/controller_url` to tailnet IP `100.64.0.1`.  
-   Verify: `bash scripts/status.sh -vv` shows tailnet row `connected`; `node.sh list` shows correct data.
+4. ⛔ **LAN→tailnet IP migration — workers** — blocked by step 3 / BL-015.
 
-4. **LAN→tailnet IP migration — workers one at a time**  
-   For each worker (SOL → workstation-ki → macbook-m1/TC25 last):  
-   - `node.sh remote <node> 'printf "http://100.64.0.1" > ~/.config/ai-stack/controller_url'`  
-   - Verify: `node.sh list` shows node online; `node.sh remote <node> bash scripts/status.sh` exits 0.
-
-**Verification gate (all nodes):** `node.sh list` shows all nodes online with tailnet IPs; `bash scripts/status.sh -vv` tailnet row shows `connected N/N peers`.
+**Verification gate (when unblocked):** `node.sh list` shows all nodes online with tailnet IPs; `bash scripts/status.sh -vv` tailnet row shows `connected N/N peers`.
 
 ---
 
@@ -125,10 +122,10 @@ Execute `docs/wip/headplane-remote-deploy.md` as written. Bind to tailnet IP onl
 | BL-001 | P2 | CENTAURI-playbook.md | ✅ done 2026-05-04 | — |
 | BL-002 | P3 | node.sh list: headscale backend + stanza output | ✅ done 2026-05-04 | — |
 | BL-003 | P3 | --json output mode for scripts | ✅ done 2026-05-04 | — |
-| BL-011 | P1 | Headscale migration: ACL hardening + LAN break-glass + IP migration | not started | D-004, D-007, D-008 |
+| BL-011 | P1 | Headscale migration: ACL hardening + LAN break-glass + IP migration | partial — steps 1+2 done; steps 3+4 blocked by BL-015 | D-004, D-007, D-008 |
+| BL-015 | P1 | Non-SSH CNC transport (replace tailscale SSH) | not started — design first; **unblocks BL-011 steps 3+4** | D-007 |
 | BL-012 | P1 | Distributed node config: node.sh configure + --refresh | not started | D-005 |
 | BL-009 | P1 | Content Review Layer Phase 2 (guard LLM) | Phase 1 done (`9d33dce`) | D-039 |
-| BL-015 | P1 | Non-SSH CNC transport (replace tailscale SSH) | not started — design first | D-007 |
 | BL-013 | P2 | node-exporter-ai: per-node Prometheus metrics exporter | not started | D-006 |
 | BL-014 | P2 | node.sh remote: SSH command delivery wrapper | not started | D-007 |
 | BL-016 | P2 | Headplane deployment | not started | D-007 |
