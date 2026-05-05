@@ -221,6 +221,22 @@ Embeddings stored in Qdrant. Image versions and model parameters are in [ai_stac
 
 # 7 Distributed Node Architecture
 
+## Node Management Layers
+
+Five distinct concerns govern how the controller and workers interact. Each is handled by a specific subsystem and must be understood independently:
+
+| Layer | Concern | Handled By | Status |
+|---|---|---|---|
+| **Presence** | Is the node online? What is its stable IP? | Headscale — WireGuard keep-alive + `tailscale status` | Live (D-004) |
+| **Node Configuration** | What profile, capabilities, and models does the node have? | `node.sh configure` (local write) + `node.sh list --refresh` (controller SSH-pull) | BL-012 |
+| **Command/Control (CNC)** | Send directives from controller to worker (pull models, restart, config reload) | BL-015 (design pending); heartbeat response today handles rename only | BL-015 |
+| **Registry Read** | Query node state, capabilities, and status | `node.sh list`, `GET /admin/v1/nodes` | Live |
+| **Registry Write** | Register, join, rename, purge, deregister nodes | `configure.sh generate-join-token` + `node.sh join/unjoin/purge` + `POST /admin/v1/nodes` | Live |
+
+These layers are intentionally decoupled. Presence is owned entirely by Headscale — the application layer never manages WireGuard keys or DERP routing. CNC is isolated from the heartbeat path so that heartbeat failures remain non-blocking and low-stakes.
+
+---
+
 ```mermaid
 flowchart LR
 
