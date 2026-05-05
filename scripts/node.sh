@@ -24,6 +24,7 @@ set -euo pipefail
 #   suggestions show   <suggestion-id> [--node-id <id>]
 #   suggestions apply  <suggestion-id> [--node-id <id>]
 #                                 Manage controller suggestions for this node
+#   configure                      Write ~/.config/ai-stack/node-config.json from local state + Ollama
 #   harden-worker --alias <alias> [--controller-ip <ip>]
 #                                 Print OS-appropriate firewall rules to restrict Ollama :11434
 #                                 on an inference-worker to controller access only
@@ -59,15 +60,19 @@ Commands:
           [--new-id <new>]        New node id (applied on next heartbeat via heartbeat.sh auto-update)
           [--display-name <text>] New display name (applied immediately)
   pause                          Stub: pause heartbeats temporarily
+  configure                      Write node-config.json from local environment (run on each worker)
   list    [--headscale-url <url>] [--headscale-key <key>]  List nodes from headscale (preferred)
           [--controller <url>] [--api-key <key>]           Or from KI controller (legacy)
           [--namespace <tag>]                              Filter by namespace tag
+          [--refresh]                                      SSH-pull node-config.json from each online node
+          [--cache-dir <dir>]                              Override cache dir (default: ~/.config/ai-stack/nodes/)
           [--json]                                         Machine-readable JSON output
           [-v] [-m]                                        -v: verbose, -m: names+messages only
   status  [--node-id <id>]       Show node status from controller
   suggestions list               List pending suggestions
   suggestions show <id>          Show suggestion detail
   suggestions apply <id>         Mark suggestion consumed
+  configure                      Write node-config.json from local environment (run on each worker)
   harden-worker --alias <alias> \
           [--controller-ip <ip>] Print OS-appropriate firewall rules to restrict Ollama :11434
                                  on the target inference-worker to controller access only
@@ -476,12 +481,120 @@ print(json.dumps(obj))
     fi
 }
 
+# ---------------------------------------------------------------------------
+# cmd_configure — write node-config.json from local state
+# ---------------------------------------------------------------------------
+
+cmd_configure() {
+    _load_state
+    _require_node_id
+
+    local out_file="$STATE_DIR/node-config.json"
+    mkdir -p "$STATE_DIR"
+
+    # --- Determine OS ---
+    local os_type="linux"
+    [[ "$(uname -s)" == "Darwin" ]] && os_type="darwin"
+
+    # --- Load alias from state (written by node.sh join) ---
+    local alias_val=""
+    [[ -f "$STATE_DIR/alias" ]] && alias_val="$(cat "$STATE_DIR/alias" 2>/dev/null || true)"
+
+    # --- Detect profile from state, then static node file, then default ---
+    local profile_val="inference-worker"
+    if [[ -f "$STATE_DIR/profile" ]]; then
+        profile_val="$(cat "$STATE_DIR/profile" 2>/dev/null || true)"
+    else
+        # Try to match from configs/nodes/ by alias or node_id
+        local _nodes_dir="$SCRIPT_DIR/../configs/nodes"
+        local _matched_profile=""
+        if [[ -d "$_nodes_dir" ]]; then
+            _matched_profile=$(python3 - "$_nodes_dir" "${alias_val:-}" "${NODE_ID:-}" <<'PYEOF2' 2>/dev/null
+import glob, json, sys
+ndir, alias_val, nid = sys.argv[1], sys.argv[2], sys.argv[3]
+for f in glob.glob(ndir + '/*.json'):
+    try:
+        d = json.load(open(f))
+        if (alias_val and d.get('alias') == alias_val) or (nid and d.get('node_id') == nid):
+            print(d.get('profile', ''))
+            break
+    except Exception:
+        pass
+PYEOF2
+            )
+        fi
+        [[ -n "$_matched_profile" ]] && profile_val="$_matched_profile"
+    fi
+
+    # --- Detect deployment mode ---
+    local deployment="bare_metal"
+    if command -v systemctl &>/dev/null && systemctl --user list-units --type=service 2>/dev/null | grep -q 'knowledge-index'; then
+        deployment="container"
+    fi
+
+    # --- Probe Ollama models ---
+    local models_json="[]"
+    if command -v curl &>/dev/null; then
+        local ollama_resp
+        ollama_resp=$(curl -s --connect-timeout 3 http://localhost:11434/api/tags 2>/dev/null || echo '')
+        if [[ -n "$ollama_resp" ]]; then
+            models_json=$(echo "$ollama_resp" | python3 -c "
+import json,sys
+try:
+    d=json.load(sys.stdin)
+    print(json.dumps([m['name'] for m in d.get('models',[])]))
+except:
+    print('[]')
+" 2>/dev/null || echo '[]')
+        fi
+    fi
+
+    # --- Derive capabilities from profile ---
+    local caps_json
+    case "$profile_val" in
+        controller)         caps_json='["inference","knowledge","routing"]' ;;
+        knowledge-worker)   caps_json='["inference","knowledge"]' ;;
+        inference-worker)   caps_json='["inference"]' ;;
+        enhanced-worker)    caps_json='["inference","knowledge"]' ;;
+        *)                  caps_json='[]' ;;
+    esac
+
+    local ts
+    ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || python3 -c "import datetime; print(datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'))")
+
+    python3 - > "$out_file" <<PYEOF
+import json
+out = {
+    "schema_version": "1.2",
+    "node_id":    "${NODE_ID}",
+    "alias":      "${alias_val}",
+    "profile":    "${profile_val}",
+    "os":         "$os_type",
+    "deployment": "$deployment",
+    "capabilities": ${caps_json},
+    "models":     ${models_json},
+    "version":    "1",
+    "updated_at": "$ts",
+}
+print(json.dumps(out, indent=2))
+PYEOF
+
+    echo "[configure] wrote $out_file"
+    cat "$out_file"
+}
+
+# ---------------------------------------------------------------------------
+# cmd_list
+# ---------------------------------------------------------------------------
+
 cmd_list() {
     _load_state
     local verbose=0
     local msg_only=0
     local json_out=0
     local namespace_filter=""
+    local do_refresh=0
+    local cache_dir="$STATE_DIR/nodes"
     local HS_URL="${HS_URL:-}"
     local HS_KEY="${HS_KEY:-}"
 
@@ -500,6 +613,8 @@ cmd_list() {
             --headscale-url) HS_URL="$2";            shift 2 ;;
             --headscale-key) HS_KEY="$2";            shift 2 ;;
             --namespace)     namespace_filter="$2";  shift 2 ;;
+            --refresh)       do_refresh=1;           shift   ;;
+            --cache-dir)     cache_dir="$2";         shift 2 ;;
             --json)          json_out=1;             shift   ;;
             -v)              verbose=1;              shift   ;;
             -m)              msg_only=1;             shift   ;;
@@ -532,11 +647,68 @@ cmd_list() {
         exit 1
     fi
 
+    # ---------------------------------------------------------------------------
+    # --refresh: SSH-pull node-config.json from each online headscale node
+    # ---------------------------------------------------------------------------
+    if [[ "$do_refresh" -eq 1 ]]; then
+        if [[ "$use_headscale" -eq 0 ]]; then
+            echo "ERROR: --refresh requires --headscale-url (or saved headscale state)" >&2
+            exit 1
+        fi
+        mkdir -p "$cache_dir"
+        local ts_stale
+        ts_stale=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || python3 -c "import datetime; print(datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'))")
+        echo "[refresh] cache dir: $cache_dir"
+        # Extract online node names from the headscale response
+        local online_names
+        online_names=$(echo "$body_part" | python3 -c "
+import json,sys
+data=json.load(sys.stdin)
+for n in data.get('nodes',[]):
+    name=n.get('givenName') or n.get('given_name') or n.get('name','')
+    if n.get('online',False) and name:
+        print(name)
+" 2>/dev/null || true)
+        local refreshed=0 failed=0
+        local local_hostname; local_hostname=$(hostname -s 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)
+        while IFS= read -r node_name; do
+            [[ -z "$node_name" ]] && continue
+            local dest="$cache_dir/${node_name}.json"
+            local node_lower; node_lower=$(echo "$node_name" | tr '[:upper:]' '[:lower:]')
+            # Self: copy local node-config.json directly without SSH
+            if [[ "$node_lower" == "$local_hostname" ]] || tailscale ip -4 2>/dev/null | grep -qF "$(tailscale ip -4 2>/dev/null | head -1)"; then
+                # More precise self-check: compare tailscale self name
+                local self_name; self_name=$(tailscale status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('Self',{}).get('HostName',''))" 2>/dev/null | tr '[:upper:]' '[:lower:]' || echo '')
+                if [[ "$node_lower" == "$self_name" ]]; then
+                    if [[ -f "$STATE_DIR/node-config.json" ]]; then
+                        cp "$STATE_DIR/node-config.json" "$dest"
+                        echo "[refresh] $node_name local-copy OK → $dest"
+                        (( refreshed++ )) || true
+                    else
+                        echo "[refresh] $node_name local-copy SKIPPED (run: node.sh configure first)"
+                        (( failed++ )) || true
+                    fi
+                    continue
+                fi
+            fi
+            if tailscale ssh "${node_name}" cat '~/.config/ai-stack/node-config.json' > "$dest" 2>/dev/null; then
+                echo "[refresh] $node_name OK → $dest"
+                (( refreshed++ )) || true
+            else
+                echo "[refresh] $node_name FAILED (node-config.json absent or SSH denied)"
+                (( failed++ )) || true
+            fi
+        done <<< "$online_names"
+        echo "[refresh] done: $refreshed refreshed, $failed failed"
+        # Write a staleness marker
+        printf '%s' "$ts_stale" > "$cache_dir/.refreshed_at"
+    fi
+
     local nodes_dir="$SCRIPT_DIR/../configs/nodes"
     local _tmp; _tmp=$(mktemp)
     echo "$body_part" > "$_tmp"
 
-    python3 - "$_tmp" "$nodes_dir" "$verbose" "$msg_only" "$namespace_filter" "$json_out" "$use_headscale" <<'PYEOF'
+    python3 - "$_tmp" "$nodes_dir" "$verbose" "$msg_only" "$namespace_filter" "$json_out" "$use_headscale" "$cache_dir" <<'PYEOF'
 import glob, json, sys
 
 data_file     = sys.argv[1]
@@ -546,6 +718,7 @@ msg_only      = len(sys.argv) > 4 and sys.argv[4] == '1'
 namespace_raw = sys.argv[5] if len(sys.argv) > 5 else ''
 json_out      = len(sys.argv) > 6 and sys.argv[6] == '1'
 use_headscale = len(sys.argv) > 7 and sys.argv[7] == '1'
+cache_dir     = sys.argv[8] if len(sys.argv) > 8 else ''
 
 data = json.load(open(data_file))
 
@@ -567,25 +740,54 @@ ns_tag = normalize_ns_tag(namespace_raw)
 
 # ------------------------------------------------------------------
 # Load node-file data: build lookup maps
+#   Priority order: cache dir (from --refresh) > configs/nodes/ (static fallback)
 #   nf_alias_map    — keyed by .alias  (stable — preferred for KI)
 #   nf_nodeid_map   — keyed by .node_id (backward compat)
 #   nf_hostname_map — keyed by .node_id.lower() (headscale name match)
 # ------------------------------------------------------------------
+import os, datetime as dt
+
 nf_alias_map    = {}
 nf_nodeid_map   = {}
 nf_hostname_map = {}
-for path in sorted(glob.glob(nodes_dir + "/*.json")):
+
+# Check staleness of cache
+cache_stale_warn = ''
+if cache_dir and os.path.isfile(os.path.join(cache_dir, '.refreshed_at')):
     try:
-        nf = json.load(open(path))
+        ts_raw = open(os.path.join(cache_dir, '.refreshed_at')).read().strip()
+        ts     = dt.datetime.fromisoformat(ts_raw.replace('Z', '+00:00'))
+        age    = dt.datetime.now(dt.timezone.utc) - ts
+        if age.total_seconds() > 600:
+            mins = int(age.total_seconds() / 60)
+            cache_stale_warn = f'[warn] node cache is {mins}m old — run: node.sh list --refresh'
     except Exception:
-        continue
-    a   = nf.get("alias", "")
-    nid = nf.get("node_id", "")
-    if a:
-        nf_alias_map[a] = nf
-    if nid:
-        nf_nodeid_map[nid] = nf
-        nf_hostname_map[nid.lower()] = nf
+        pass
+
+# Load: cache dir first, then static configs/nodes/
+search_paths = []
+if cache_dir and os.path.isdir(cache_dir):
+    search_paths.append(cache_dir)
+search_paths.append(nodes_dir)
+
+for sdir in search_paths:
+    for path in sorted(glob.glob(sdir + '/*.json')):
+        try:
+            nf = json.load(open(path))
+        except Exception:
+            continue
+        a   = nf.get('alias', '')
+        nid = nf.get('node_id', '')
+        # Cache takes priority — do not overwrite with static file
+        if a and a not in nf_alias_map:
+            nf_alias_map[a] = nf
+        if nid and nid not in nf_nodeid_map:
+            nf_nodeid_map[nid] = nf
+            nf_hostname_map[nid.lower()] = nf
+        # Also index by the filename stem (headscale givenName is the hostname)
+        stem = os.path.splitext(os.path.basename(path))[0].lower()
+        if stem and stem not in nf_hostname_map:
+            nf_hostname_map[stem] = nf
 
 def fmt_list(lst):
     return ", ".join(str(x) for x in lst) if lst else "-"
@@ -685,6 +887,10 @@ else:
 # ------------------------------------------------------------------
 if ns_tag:
     rows = [r for r in rows if ns_tag in r.get('tags', [])]
+
+if cache_stale_warn:
+    print(cache_stale_warn)
+    print()
 
 if not rows:
     suffix = f" (filter: {ns_tag})" if ns_tag else ""
@@ -1058,14 +1264,15 @@ cmd_harden_worker() {
 _load_state
 
 case "${1:-help}" in
-    deploy)      cmd_deploy ;;
-    join)        shift; cmd_join "$@" ;;
-    unjoin)      shift; cmd_unjoin "$@" ;;
-    pause)       cmd_pause ;;
-    purge)       shift; cmd_purge "$@" ;;
-    rename)      shift; cmd_rename "$@" ;;
-    list)        shift; cmd_list "$@" ;;
-    status)      shift; cmd_status "$@" ;;
+    deploy)         cmd_deploy ;;
+    configure)      cmd_configure ;;
+    join)           shift; cmd_join "$@" ;;
+    unjoin)         shift; cmd_unjoin "$@" ;;
+    pause)          cmd_pause ;;
+    purge)          shift; cmd_purge "$@" ;;
+    rename)         shift; cmd_rename "$@" ;;
+    list)           shift; cmd_list "$@" ;;
+    status)         shift; cmd_status "$@" ;;
     suggestions)    shift; cmd_suggestions "$@" ;;
     undeploy)       cmd_undeploy ;;
     harden-worker)  shift; cmd_harden_worker "$@" ;;
