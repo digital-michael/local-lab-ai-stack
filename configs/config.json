@@ -99,6 +99,11 @@
           "host": 8080,
           "container": 8080,
           "bind": "127.0.0.1"
+        },
+        {
+          "host": 8443,
+          "container": 8443,
+          "bind": "100.64.0.4"
         }
       ],
       "volumes": [
@@ -241,7 +246,9 @@
         "QDRANT_PORT": "6333",
         "ROUTE_CACHE_TTL": "60",
         "LISTEN_PORT": "8100",
-        "NODE_PROFILE": "controller"
+        "NODE_PROFILE": "controller",
+        "TAILNET_CONTROLLER_URL": "https://100.64.0.4:8443",
+        "TAILNET_DOMAIN": "ecotone-000-01"
       },
       "secrets": [
         {
@@ -263,6 +270,10 @@
         {
           "name": "minio_ki_secret_key",
           "target": "MINIO_SECRET_KEY"
+        },
+        {
+          "name": "knowledge_index_cnc_token",
+          "target": "CNC_BEARER_TOKEN"
         }
       ],
       "health_check": {
@@ -891,6 +902,17 @@
     "publication_adapters": {
       "enabled": true,
       "registry": []
+    }
+  },
+  "tailnet": {
+    "controller_ip": "100.64.0.4",
+    "port": 8443,
+    "tls": true,
+    "controller_url": "https://100.64.0.4:8443"
+  },
+  "network_domains": {
+    "ecotone-000-01": {
+      "tag": "tag:net-ecotone-000-01"
     }
   },
   "networking": {

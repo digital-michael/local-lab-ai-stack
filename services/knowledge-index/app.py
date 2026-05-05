@@ -77,6 +77,7 @@ DISCOVERY_PROFILE = os.environ.get("DISCOVERY_PROFILE", "localhost")  # comma-se
 REGISTRY_URL  = os.environ.get("REGISTRY_URL", "")         # WAN discovery: federation registry base URL (D-014b)
 NODES_DIR     = os.environ.get("NODES_DIR", "")            # path to configs/nodes/ for peer discovery
 KI_ADMIN_KEY  = os.environ.get("KI_ADMIN_KEY", "")         # admin bearer token; enables unvetted catalog view (D-035)
+CNC_BEARER_TOKEN = os.environ.get("CNC_BEARER_TOKEN", "")  # shared tailnet bearer token for /v1/cnc/* (BL-015)
 
 # ---------------------------------------------------------------------------
 # HTTP clients (module-level singletons; closed on shutdown if needed)
@@ -1302,6 +1303,169 @@ def _check_api_key(request: Request) -> None:
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer ") or auth[7:] != API_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _check_cnc_bearer(request: Request) -> None:
+    """Raise HTTP 401 if CNC_BEARER_TOKEN is configured and the request does not supply it."""
+    if not CNC_BEARER_TOKEN:
+        return
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer ") or auth[7:] != CNC_BEARER_TOKEN:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+# ---------------------------------------------------------------------------
+# BL-015: Tailnet bootstrap + CNC namespace
+# ---------------------------------------------------------------------------
+
+@app.get("/v1/config")
+def tailnet_config() -> dict:
+    """Public bootstrap endpoint — no auth required.
+    Workers call this at configure time to discover controller_url and capabilities.
+    Accessible on the tailnet entrypoint (100.64.0.4:8443); not gated by API_KEY.
+    """
+    import json as _json
+    import pathlib as _pathlib
+
+    # Prefer env vars injected by configure.sh from config.json (non-secret, no file mount needed)
+    controller_url = os.environ.get("TAILNET_CONTROLLER_URL", "")
+    domain = os.environ.get("TAILNET_DOMAIN", "")
+    schema_version = "1.2"
+
+    # Fallback: try to read from config.json if mounted
+    if not controller_url:
+        for candidate in [
+            "/etc/ai-stack/config.json",
+            os.path.join(os.environ.get("AI_STACK_DIR", ""), "configs", "config.json"),
+        ]:
+            if candidate and _pathlib.Path(candidate).exists():
+                try:
+                    cfg = _json.loads(_pathlib.Path(candidate).read_text())
+                    controller_url = cfg.get("tailnet", {}).get("controller_url", "")
+                    schema_version = cfg.get("schema_version", "1.2")
+                    domain = next(iter(cfg.get("network_domains", {})), "")
+                except Exception:
+                    pass
+                break
+
+    if not controller_url:
+        controller_url = os.environ.get("CONTROLLER_URL", "https://100.64.0.4:8443")
+
+    return {
+        "controller_url": controller_url,
+        "schema_version": schema_version,
+        "domain": domain,
+        "capabilities": ["inference", "knowledge", "routing"],
+    }
+
+
+class CncRegisterRequest(BaseModel):
+    node_id:      str
+    alias:        str             = ""
+    profile:      str             = "inference-worker"
+    os:           str             = ""
+    deployment:   str             = ""
+    capabilities: list[str]       = []
+    models:       list[str]       = []
+    version:      str             = ""
+    updated_at:   str             = ""
+
+
+class CncHeartbeatRequest(BaseModel):
+    node_id:   str
+    alias:     str                   = ""
+    timestamp: str                   = ""
+    metrics:   dict[str, Any]        = {}
+    messages:  list[dict[str, Any]]  = []
+    message:   str                   = ""
+
+
+@app.post("/v1/cnc/register", status_code=201)
+def cnc_register(req: CncRegisterRequest, request: Request) -> dict:
+    """Register or refresh a worker node over the tailnet (BL-015).
+    Requires CNC_BEARER_TOKEN bearer auth.
+    Body is the node-config.json schema; mirrors /admin/v1/nodes POST.
+    """
+    _check_cnc_bearer(request)
+    caps_json = json.dumps(req.capabilities)
+    with _db.connect() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO nodes (node_id, display_name, profile, address, capabilities, status)"
+                " VALUES (:nid, :name, :profile, :addr, :caps, 'unregistered')"
+                " ON CONFLICT(node_id) DO UPDATE SET"
+                " display_name = excluded.display_name,"
+                " profile      = excluded.profile,"
+                " capabilities = excluded.capabilities"
+            ),
+            {
+                "nid":     req.node_id,
+                "name":    req.alias or req.node_id,
+                "profile": req.profile,
+                "addr":    "",
+                "caps":    caps_json,
+            },
+        )
+        # Also update alias column (added by migration)
+        conn.execute(
+            text("UPDATE nodes SET alias = :alias WHERE node_id = :nid"),
+            {"alias": req.alias, "nid": req.node_id},
+        )
+        conn.commit()
+    return {"node_id": req.node_id, "status": "registered"}
+
+
+@app.post("/v1/cnc/heartbeat", status_code=204)
+def cnc_heartbeat(req: CncHeartbeatRequest, request: Request) -> None:
+    """Receive a worker heartbeat over the tailnet (BL-015).
+    Requires CNC_BEARER_TOKEN bearer auth.
+    Updates last_seen; records heartbeat metrics; evaluates state transitions.
+    Returns 204 No Content on success.
+    """
+    _check_cnc_bearer(request)
+    with _db.connect() as conn:
+        row = conn.execute(
+            text("SELECT status FROM nodes WHERE node_id = :nid"),
+            {"nid": req.node_id},
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Node not found — run node.sh configure first")
+
+        conn.execute(
+            text("UPDATE nodes SET last_seen = CURRENT_TIMESTAMP WHERE node_id = :nid"),
+            {"nid": req.node_id},
+        )
+
+        metrics = req.metrics or {}
+        conn.execute(
+            text(
+                "INSERT INTO node_heartbeats"
+                " (id, node_id, recorded_at, cpu_percent, mem_used_gb, mem_total_gb,"
+                "  gpu_vram_used_mb, requests_last_60s, messages)"
+                " VALUES (:id, :nid, CURRENT_TIMESTAMP, :cpu, :mem_used, :mem_total,"
+                "         :gpu, :reqs, :msgs)"
+            ),
+            {
+                "id":        str(uuid.uuid4()),
+                "nid":       req.node_id,
+                "cpu":       float(metrics.get("cpu_percent", 0)),
+                "mem_used":  float(metrics.get("mem_used_gb", 0)),
+                "mem_total": float(metrics.get("mem_total_gb", 0)),
+                "gpu":       int(metrics.get("gpu_vram_used_mb", 0)),
+                "reqs":      int(metrics.get("requests_last_60s", 0)),
+                "msgs":      json.dumps(req.messages),
+            },
+        )
+
+        # Promote to 'online' if currently unregistered or offline
+        if row[0] in ("unregistered", "offline"):
+            conn.execute(
+                text("UPDATE nodes SET status = 'online' WHERE node_id = :nid"),
+                {"nid": req.node_id},
+            )
+
+        conn.commit()
+    return None
 
 
 @app.get("/mcp/sse")

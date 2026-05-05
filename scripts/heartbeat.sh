@@ -160,15 +160,29 @@ rm -f "$_hb_msg_file"
 auth_header=""
 [[ -n "${API_KEY_STATE:-}" ]] && auth_header="Authorization: Bearer $API_KEY_STATE"
 
+# BL-015: prefer CNC bearer token over legacy API key for tailnet endpoint
+BEARER_TOKEN="${BEARER_TOKEN:-}"
+[[ -f "$STATE_DIR/network_bearer_token" ]] && \
+    BEARER_TOKEN="${BEARER_TOKEN:-$(cat "$STATE_DIR/network_bearer_token" 2>/dev/null || echo '')}"
+[[ -n "${BEARER_TOKEN:-}" ]] && auth_header="Authorization: Bearer $BEARER_TOKEN"
+
 curl_args=(-s -f -X POST \
     -H "Content-Type: application/json" \
     -d "$payload" \
     --connect-timeout 10 \
     --max-time 15 \
-    --insecure)   # self-signed CA on private LAN; API key provides endpoint auth
+    --insecure)   # self-signed CA on private tailnet; bearer token provides endpoint auth
 [[ -n "$auth_header" ]] && curl_args+=(-H "$auth_header")
 
-response=$(curl "${curl_args[@]}" "$CONTROLLER_URL/admin/v1/nodes/$NODE_ID/heartbeat" 2>&1) || {
+# BL-015: use /v1/cnc/heartbeat when a bearer token is available (tailnet path);
+# fall back to legacy /admin/v1/nodes/$NODE_ID/heartbeat for LAN-only workers.
+if [[ -n "${BEARER_TOKEN:-}" ]]; then
+    _hb_endpoint="$CONTROLLER_URL/v1/cnc/heartbeat"
+else
+    _hb_endpoint="$CONTROLLER_URL/admin/v1/nodes/$NODE_ID/heartbeat"
+fi
+
+response=$(curl "${curl_args[@]}" "$_hb_endpoint" 2>&1) || {
     logger -t "$LOG_TAG" "WARNING: heartbeat POST failed — $response" 2>/dev/null || true
     echo "[$LOG_TAG] WARNING: heartbeat POST failed" >&2
     exit 0  # non-fatal: timer will retry in 30s

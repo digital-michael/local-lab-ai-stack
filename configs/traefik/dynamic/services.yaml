@@ -93,6 +93,29 @@ http:
         - secure-headers
       tls: {}
 
+    # Tailnet: /v1/* — worker queries, ingest, and /v1/cnc/* CNC namespace.
+    # /v1/cnc/* is covered by this PathPrefix; no separate router needed (auth is
+    # handled in app.py via CNC_BEARER_TOKEN, not a Traefik middleware).
+    # Accessible only on the tailnet entrypoint (100.64.0.4:8443).
+    knowledge-index-tailnet-api:
+      rule: "Host(`100.64.0.4`) && PathPrefix(`/v1`)"
+      entryPoints:
+        - tailnet
+      service: knowledge-index
+      middlewares:
+        - secure-headers
+      tls: {}
+
+    # Tailnet: /mcp/* — MCP tool server for future agentic worker access.
+    knowledge-index-tailnet-mcp:
+      rule: "Host(`100.64.0.4`) && PathPrefix(`/mcp`)"
+      entryPoints:
+        - tailnet
+      service: knowledge-index
+      middlewares:
+        - secure-headers
+      tls: {}
+
     litellm:
       rule: "Host(`litellm.stack.localhost`)"
       entryPoints:

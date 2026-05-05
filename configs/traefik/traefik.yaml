@@ -24,6 +24,15 @@ entryPoints:
   traefik:
     address: ":8080"
 
+  # Tailnet entrypoint — bound to the controller's Headscale CGNAT address.
+  # Accessible only to nodes enrolled in the tailnet (WireGuard provides transport security).
+  # TLS enabled; workers connect with --insecure (self-signed cert is acceptable on tailnet).
+  # Changes to this block require a container restart (static config).
+  tailnet:
+    address: ":8443"   # container-internal wildcard; host binds to 100.64.0.4:8443 via PublishPort
+    http:
+      tls: {}
+
 # Dynamic configuration provider
 providers:
   file:

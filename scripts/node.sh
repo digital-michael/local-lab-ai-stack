@@ -490,6 +490,15 @@ cmd_configure() {
     _require_node_id
 
     local out_file="$STATE_DIR/node-config.json"
+    local _cli_controller_url=""
+    local _cli_bearer_token=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --controller-url) _cli_controller_url="$2"; shift 2 ;;
+            --bearer-token)   _cli_bearer_token="$2";   shift 2 ;;
+            *) shift ;;
+        esac
+    done
     mkdir -p "$STATE_DIR"
 
     # --- Determine OS ---
@@ -562,6 +571,51 @@ except:
     local ts
     ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || python3 -c "import datetime; print(datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'))")
 
+    # --- Resolve controller_url (BL-015) ---
+    # Priority: --controller-url flag → config.json tailnet.controller_url → GET /v1/config discovery
+    local controller_url_val=""
+    if [[ -n "$_cli_controller_url" ]]; then
+        controller_url_val="$_cli_controller_url"
+    else
+        # Try config.json (controller node only)
+        local _cfg_controller_url=""
+        local _cfg_path="$SCRIPT_DIR/../configs/config.json"
+        if [[ -f "$_cfg_path" ]]; then
+            _cfg_controller_url=$(python3 -c "
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    print(d.get('tailnet', {}).get('controller_url', ''))
+except Exception:
+    print('')
+" "$_cfg_path" 2>/dev/null || true)
+        fi
+        if [[ -n "$_cfg_controller_url" ]]; then
+            controller_url_val="$_cfg_controller_url"
+        else
+            # Attempt GET /v1/config discovery from hardcoded bootstrap IP
+            local _discovery_resp
+            _discovery_resp=$(curl -sk --connect-timeout 5 \
+                https://100.64.0.4:8443/v1/config 2>/dev/null || true)
+            if [[ -n "$_discovery_resp" ]]; then
+                controller_url_val=$(echo "$_discovery_resp" | python3 -c "
+import json, sys
+try: print(json.load(sys.stdin).get('controller_url', ''))
+except: print('')
+" 2>/dev/null || true)
+            fi
+        fi
+    fi
+
+    # Write bearer token to state if provided (workers provision this manually)
+    if [[ -n "$_cli_bearer_token" ]]; then
+        printf '%s' "$_cli_bearer_token" > "$STATE_DIR/network_bearer_token"
+    fi
+    # Read saved bearer token for inclusion in node-config.json
+    local network_bearer_token_val=""
+    [[ -f "$STATE_DIR/network_bearer_token" ]] && \
+        network_bearer_token_val="$(cat "$STATE_DIR/network_bearer_token" 2>/dev/null || true)"
+
     python3 - > "$out_file" <<PYEOF
 import json
 out = {
@@ -575,6 +629,10 @@ out = {
     "models":     ${models_json},
     "version":    "1",
     "updated_at": "$ts",
+    "network": {
+        "controller_url":  "${controller_url_val}",
+        "bearer_token":    "${network_bearer_token_val}",
+    },
 }
 print(json.dumps(out, indent=2))
 PYEOF
@@ -1265,7 +1323,7 @@ _load_state
 
 case "${1:-help}" in
     deploy)         cmd_deploy ;;
-    configure)      cmd_configure ;;
+    configure)      cmd_configure "$@" ;;
     join)           shift; cmd_join "$@" ;;
     unjoin)         shift; cmd_unjoin "$@" ;;
     pause)          cmd_pause ;;

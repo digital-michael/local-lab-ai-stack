@@ -60,6 +60,7 @@ capture() {
 
     _header "Knowledge Index"
     echo "KNOWLEDGE_INDEX_API_KEY=$(_read_secret knowledge_index_api_key)"
+    echo "CNC_BEARER_TOKEN=$(_read_secret knowledge_index_cnc_token)"
 
     _header "Flowise"
     echo "FLOWISE_PASSWORD=$(_read_secret flowise_password)"

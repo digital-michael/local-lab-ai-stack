@@ -95,7 +95,7 @@ _Nothing in flight._
 
 ### BL-015 — Tailnet-Accessible KI Endpoint + CNC Foundation
 **Priority:** P1 — unblocks BL-011 steps 3+4 (LAN→tailnet IP migration)  
-**Status:** spec complete (`docs/wip/bl-015-spec.md`), ready for implementation  
+**Status:** ✅ done — all 8 steps implemented; verification gate passed 2026-05-05  
 **Decisions:** D-009
 
 **Problem:** `knowledge-index` binds `127.0.0.1:8100`. Workers can't reach it over the tailnet. `controller_url` still points to LAN hostname. This is the last LAN dependency for worker→controller traffic.
@@ -134,8 +134,8 @@ Execute `docs/wip/headplane-remote-deploy.md` as written. Bind to tailnet IP onl
 | BL-001 | P2 | CENTAURI-playbook.md | ✅ done 2026-05-04 | — |
 | BL-002 | P3 | node.sh list: headscale backend + stanza output | ✅ done 2026-05-04 | — |
 | BL-003 | P3 | --json output mode for scripts | ✅ done 2026-05-04 | — |
-| BL-015 | P1 | Tailnet-Accessible KI Endpoint + CNC Foundation | spec complete — ready to implement; **unblocks BL-011 steps 3+4** | D-009 |
-| BL-011 | P1 | Headscale migration: ACL hardening + LAN break-glass + IP migration | partial — steps 1+2 done; steps 3+4 blocked by BL-015 | D-004, D-007, D-008 |
+| BL-015 | P1 | Tailnet-Accessible KI Endpoint + CNC Foundation | ✅ done 2026-05-05 | D-009 |
+| BL-011 | P1 | Headscale migration: ACL hardening + LAN break-glass + IP migration | partial — steps 1+2 done; **steps 3+4 unblocked** (BL-015 shipped) | D-004, D-007, D-008 |
 | BL-012 | P1 | Distributed node config: node.sh configure + --refresh | ✅ done `7813139` — verification gate complete 2026-05-05 | D-005 |
 | BL-009 | P1 | Content Review Layer Phase 2 (guard LLM) | Phase 1 done (`9d33dce`) | D-039 |
 | BL-013 | P2 | node-exporter-ai: per-node Prometheus metrics exporter | not started | D-006 |
