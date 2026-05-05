@@ -44,18 +44,15 @@ _Nothing in flight._
 
 ### BL-012 — Distributed Node Config: node.sh configure + --refresh
 **Priority:** P1 — unblocks node-exporter-ai and deprecation of static node files  
-**Status:** not started  
+**Status:** code complete `2b51980`; verification gate pending (workers offline at commit time)  
 **Decisions:** D-005  
-**WIP reference:** `docs/wip/headscale-proposal.md` (§ distributed config)
 
 **Steps:**
-1. Define `node-config.json` schema: `node_id`, `alias`, `profile`, `capabilities`, `models` (from Ollama), `version`, `updated_at`.
-2. Implement `node.sh configure` — writes `~/.config/ai-stack/node-config.json` on the local node.
-3. Implement `node.sh list --refresh` — for each online headscale node, SSH-pulls `node-config.json`, merges with headscale presence data, writes to controller cache `~/.config/ai-stack/nodes/<hostname>.json`.
-4. Update `node.sh list` (display path) to read from cache when `--headscale-url` is set and no `--refresh` flag. Show staleness warning if cache is >10 min old.
-5. Run `node.sh configure` on each enrolled node. Verify `node.sh list --refresh` populates cache correctly.
-
-**Verification gate:** `node.sh list --refresh` shows fresh data; removing a static `configs/nodes/*.json` file does not break the list output.
+1. ✅ Define `node-config.json` schema (schema_version 1.2): `node_id`, `alias`, `profile`, `os`, `deployment`, `capabilities`, `models`, `version`, `updated_at`.
+2. ✅ Implement `node.sh configure` — writes `~/.config/ai-stack/node-config.json`. Profile resolved from state file → static `configs/nodes/` lookup → default. Models from Ollama API. Tested on CENTAURI.
+3. ✅ Implement `node.sh list --refresh` — for each online headscale node, SSH-pulls `node-config.json`; self-node uses local copy. Cache written to `~/.config/ai-stack/nodes/<name>.json` with `.refreshed_at` staleness marker.
+4. ✅ `node.sh list` reads from cache dir first (priority over static files); staleness warning printed at >10 min.
+5. ⏳ **Verification gate:** Run `node.sh configure` on SOL + TC25 when online, then `node.sh list --refresh` on controller. Expect fresh cache with live data.
 
 ---
 
