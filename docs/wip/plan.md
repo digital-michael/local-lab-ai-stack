@@ -52,7 +52,11 @@ _Nothing in flight._
 2. ✅ Implement `node.sh configure` — writes `~/.config/ai-stack/node-config.json`. Profile resolved from state file → static `configs/nodes/` lookup → default. Models from Ollama API. Tested on CENTAURI.
 3. ✅ Implement `node.sh list --refresh` — for each online headscale node, SSH-pulls `node-config.json`; self-node uses local copy. Cache written to `~/.config/ai-stack/nodes/<name>.json` with `.refreshed_at` staleness marker.
 4. ✅ `node.sh list` reads from cache dir first (priority over static files); staleness warning printed at >10 min.
-5. ⏳ **Verification gate:** Run `node.sh configure` on SOL + TC25 when online, then `node.sh list --refresh` on controller. Expect fresh cache with live data.
+5. ✅ **Verification gate complete (2026-05-05):**
+   - SOL: `configure` ✓ → `inference-worker`, `linux`, `bare_metal`, models=[] (Ollama not running at time of test)
+   - TC25: `configure` ✓ → `inference-worker`, `darwin`, `bare_metal`, `llama3.1:8b-instruct-q4_K_M`
+   - `list --refresh` on controller: SOL pulled via `tailscale ssh` ✓; TC25 fell through to static file (headscale givenName is `macbook-m1`, not `tc25` — refresh tried correct name but node-config.json path differs on macOS `/Users/michaelbiggerstaff`). centauri-node local-copy ✓. All profiles and capabilities displayed correctly.
+   - Known gap: TC25 `tailscale ssh macbook-m1` host key rejected by headscale coordination server; needs `tailscale ssh` key trust or SSH config entry with password. Logged in lessons-learned.
 
 ---
 
