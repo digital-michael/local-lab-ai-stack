@@ -599,11 +599,12 @@ ctrl_count = 0
 if use_headscale:
     hs_nodes = data.get('nodes', [])
     for n in hs_nodes:
-        # headscale v0.28 uses camelCase protobuf JSON; handle both forms
+        # headscale v0.28 REST API field names (verified against /api/v1/node)
         name      = n.get('givenName') or n.get('given_name') or n.get('name', '')
         ips       = n.get('ipAddresses') or n.get('ip_addresses') or []
-        # validTags are ACL-resolved; fall back to forcedTags
-        tags      = (n.get('validTags') or n.get('valid_tags') or
+        # REST API returns merged tag list as 'tags'; proto path uses validTags/forcedTags
+        tags      = (n.get('tags') or
+                     n.get('validTags') or n.get('valid_tags') or
                      n.get('forcedTags') or n.get('forced_tags') or [])
         online    = n.get('online', False)
         last_seen = (n.get('lastSeen') or n.get('last_seen') or '')[:19]
