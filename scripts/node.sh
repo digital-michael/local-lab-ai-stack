@@ -16,7 +16,9 @@ set -euo pipefail
 #   rename  --node-id <id> [--new-id <id>] [--display-name <text>]
 #                                 Rename a node's id and/or display name (admin)
 #   pause                         (stub) Pause heartbeats without unjoining
-#   list    [--controller <url>] [--api-key <key>] [-v] [-m]  List all registered nodes and their status
+#   list    [--headscale-url <url>] [--headscale-key <key>]   List nodes (headscale backend, preferred)
+#           [--controller <url>] [--api-key <key>]             List nodes (KI backend, legacy)
+#           [--namespace <tag>] [--json] [-v] [-m]             Filter/format flags
 #   status  [--node-id <id>]      Show this node's status from the controller
 #   suggestions list   [--node-id <id>]
 #   suggestions show   <suggestion-id> [--node-id <id>]
@@ -57,8 +59,11 @@ Commands:
           [--new-id <new>]        New node id (applied on next heartbeat via heartbeat.sh auto-update)
           [--display-name <text>] New display name (applied immediately)
   pause                          Stub: pause heartbeats temporarily
-  list    [--controller <url>] \
-          [--api-key <key>] [-v] [-m]  List nodes (-v: show messages, -m: names+messages only)
+  list    [--headscale-url <url>] [--headscale-key <key>]  List nodes from headscale (preferred)
+          [--controller <url>] [--api-key <key>]           Or from KI controller (legacy)
+          [--namespace <tag>]                              Filter by namespace tag
+          [--json]                                         Machine-readable JSON output
+          [-v] [-m]                                        -v: verbose, -m: names+messages only
   status  [--node-id <id>]       Show node status from controller
   suggestions list               List pending suggestions
   suggestions show <id>          Show suggestion detail
@@ -475,22 +480,49 @@ cmd_list() {
     _load_state
     local verbose=0
     local msg_only=0
+    local json_out=0
+    local namespace_filter=""
+    local HS_URL="${HS_URL:-}"
+    local HS_KEY="${HS_KEY:-}"
+
+    # Load headscale state if saved
+    if [[ -f "$STATE_DIR/headscale_url" ]]; then
+        HS_URL="${HS_URL:-$(cat "$STATE_DIR/headscale_url")}"
+    fi
+    if [[ -f "$STATE_DIR/headscale_key" ]]; then
+        HS_KEY="${HS_KEY:-$(cat "$STATE_DIR/headscale_key")}"
+    fi
+
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --controller) CONTROLLER_URL="$2"; shift 2 ;;
-            --api-key)    API_KEY_STATE="$2";  shift 2 ;;
-            -v)           verbose=1;           shift   ;;
-            -m)           msg_only=1;          shift   ;;
-            *)            echo "Unknown option: $1" >&2; exit 1 ;;
+            --controller)    CONTROLLER_URL="$2";    shift 2 ;;
+            --api-key)       API_KEY_STATE="$2";     shift 2 ;;
+            --headscale-url) HS_URL="$2";            shift 2 ;;
+            --headscale-key) HS_KEY="$2";            shift 2 ;;
+            --namespace)     namespace_filter="$2";  shift 2 ;;
+            --json)          json_out=1;             shift   ;;
+            -v)              verbose=1;              shift   ;;
+            -m)              msg_only=1;             shift   ;;
+            *)               echo "Unknown option: $1" >&2; exit 1 ;;
         esac
     done
 
-    _require_controller
+    local response http_code body_part use_headscale=0
 
-    local response http_code body_part
-    response=$(_curl_admin GET "/admin/v1/nodes") || {
-        echo "ERROR: Failed to reach controller at ${CONTROLLER_URL}" >&2; exit 1
-    }
+    if [[ -n "$HS_URL" ]]; then
+        use_headscale=1
+        local hs_args=(-s -w "\n%{http_code}" -X GET)
+        [[ -n "$HS_KEY" ]] && hs_args+=(-H "Authorization: Bearer $HS_KEY")
+        response=$(curl "${hs_args[@]}" "${HS_URL}/api/v1/node") || {
+            echo "ERROR: Failed to reach headscale at ${HS_URL}" >&2; exit 1
+        }
+    else
+        _require_controller
+        response=$(_curl_admin GET "/admin/v1/nodes") || {
+            echo "ERROR: Failed to reach controller at ${CONTROLLER_URL}" >&2; exit 1
+        }
+    fi
+
     http_code=$(echo "$response" | tail -1)
     body_part=$(echo "$response" | sed '$d')
 
@@ -504,23 +536,44 @@ cmd_list() {
     local _tmp; _tmp=$(mktemp)
     echo "$body_part" > "$_tmp"
 
-    python3 - "$_tmp" "$nodes_dir" "$verbose" "$msg_only" <<'PYEOF'
+    python3 - "$_tmp" "$nodes_dir" "$verbose" "$msg_only" "$namespace_filter" "$json_out" "$use_headscale" <<'PYEOF'
 import glob, json, sys
 
-data      = json.load(open(sys.argv[1]))
-db_nodes  = data.get('nodes', [])
-nodes_dir = sys.argv[2]
-verbose   = len(sys.argv) > 3 and sys.argv[3] == '1'
-msg_only  = len(sys.argv) > 4 and sys.argv[4] == '1'
+data_file     = sys.argv[1]
+nodes_dir     = sys.argv[2]
+verbose       = len(sys.argv) > 3 and sys.argv[3] == '1'
+msg_only      = len(sys.argv) > 4 and sys.argv[4] == '1'
+namespace_raw = sys.argv[5] if len(sys.argv) > 5 else ''
+json_out      = len(sys.argv) > 6 and sys.argv[6] == '1'
+use_headscale = len(sys.argv) > 7 and sys.argv[7] == '1'
+
+data = json.load(open(data_file))
 
 # ------------------------------------------------------------------
-# Load node-file data: build two lookup maps
-#   nf_alias_map  — keyed by .alias  (stable — preferred)
-#   nf_nodeid_map — keyed by .node_id (backward compat for un-aliased nodes)
+# Namespace filter normalization
+# Accepts: 'ecotone-000-01', 'net-ecotone-000-01', 'tag:net-ecotone-000-01'
 # ------------------------------------------------------------------
-nf_alias_map  = {}
-nf_nodeid_map = {}
-ctrl_rows = []
+def normalize_ns_tag(raw):
+    if not raw:
+        return None
+    s = raw.strip()
+    if s.startswith('tag:'):
+        s = s[4:]
+    if not s.startswith('net-'):
+        s = 'net-' + s
+    return 'tag:' + s
+
+ns_tag = normalize_ns_tag(namespace_raw)
+
+# ------------------------------------------------------------------
+# Load node-file data: build lookup maps
+#   nf_alias_map    — keyed by .alias  (stable — preferred for KI)
+#   nf_nodeid_map   — keyed by .node_id (backward compat)
+#   nf_hostname_map — keyed by .node_id.lower() (headscale name match)
+# ------------------------------------------------------------------
+nf_alias_map    = {}
+nf_nodeid_map   = {}
+nf_hostname_map = {}
 for path in sorted(glob.glob(nodes_dir + "/*.json")):
     try:
         nf = json.load(open(path))
@@ -532,119 +585,170 @@ for path in sorted(glob.glob(nodes_dir + "/*.json")):
         nf_alias_map[a] = nf
     if nid:
         nf_nodeid_map[nid] = nf
-    if nf.get("profile") == "controller":
-        caps = nf.get("capabilities", [])
-        ctrl_rows.append({
-            "node_id":      nid or a,
-            "display_name": nf.get("name", nid or a),
-            "profile":      "controller",
-            "status":       "local",
-            "last_seen":    "",
-            "capabilities": caps,
-            "models":       nf.get("models", []),
+        nf_hostname_map[nid.lower()] = nf
+
+def fmt_list(lst):
+    return ", ".join(str(x) for x in lst) if lst else "-"
+
+# ------------------------------------------------------------------
+# Build rows — headscale path
+# ------------------------------------------------------------------
+rows = []
+ctrl_count = 0
+
+if use_headscale:
+    hs_nodes = data.get('nodes', [])
+    for n in hs_nodes:
+        # headscale v0.28 uses camelCase protobuf JSON; handle both forms
+        name      = n.get('givenName') or n.get('given_name') or n.get('name', '')
+        ips       = n.get('ipAddresses') or n.get('ip_addresses') or []
+        # validTags are ACL-resolved; fall back to forcedTags
+        tags      = (n.get('validTags') or n.get('valid_tags') or
+                     n.get('forcedTags') or n.get('forced_tags') or [])
+        online    = n.get('online', False)
+        last_seen = (n.get('lastSeen') or n.get('last_seen') or '')[:19]
+
+        # Match node config by hostname (case-insensitive node_id comparison)
+        nf      = nf_hostname_map.get(name.lower()) or nf_alias_map.get(name) or {}
+        profile = nf.get('profile', '')
+        if profile == 'controller':
+            ctrl_count += 1
+
+        rows.append({
+            'node_id':      name,
+            'display_name': nf.get('name', name),
+            'profile':      profile,
+            'ip_addresses': ips,
+            'tags':         tags,
+            'status':       'online' if online else 'offline',
+            'last_seen':    last_seen,
+            'capabilities': nf.get('capabilities', []),
+            'models':       nf.get('models', []),
+            'last_message': '',
         })
 
-# Merge DB rows with node-file models.
-# Prefer alias-based lookup; fall back to node_id for nodes that haven't
-# sent their alias yet (pre-upgrade heartbeat).
-all_rows = []
-for n in db_nodes:
-    nid        = n.get("node_id", "")
-    node_alias = n.get("alias", "")
-    nf = (nf_alias_map.get(node_alias) or nf_nodeid_map.get(nid)) or {}
-    caps = n.get("capabilities", [])
-    if isinstance(caps, dict):
-        caps = list(caps.keys())
-    all_rows.append({
-        "node_id":      nid,
-        "display_name": n.get("display_name", ""),
-        "profile":      n.get("profile", ""),
-        "status":       n.get("status", ""),
-        "last_seen":    (n.get("last_seen") or "")[:19],
-        "capabilities": caps,
-        "models":       nf.get("models", []),
-        "last_message": n.get("last_message", ""),
-    })
+else:
+    # ------------------------------------------------------------------
+    # Build rows — KI controller path (original)
+    # ------------------------------------------------------------------
+    db_nodes  = data.get('nodes', [])
 
-# Controller row(s) prepended (not in DB)
-rows = ctrl_rows + all_rows
+    ctrl_rows = []
+    for path in sorted(glob.glob(nodes_dir + "/*.json")):
+        try:
+            nf = json.load(open(path))
+        except Exception:
+            continue
+        if nf.get("profile") == "controller":
+            a   = nf.get("alias", "")
+            nid = nf.get("node_id", "")
+            ctrl_rows.append({
+                "node_id":      nid or a,
+                "display_name": nf.get("name", nid or a),
+                "profile":      "controller",
+                "ip_addresses": [],
+                "tags":         [],
+                "status":       "local",
+                "last_seen":    "",
+                "capabilities": nf.get("capabilities", []),
+                "models":       nf.get("models", []),
+                "last_message": "",
+            })
+    ctrl_count = len(ctrl_rows)
+
+    worker_rows = []
+    for n in db_nodes:
+        nid        = n.get("node_id", "")
+        node_alias = n.get("alias", "")
+        nf = (nf_alias_map.get(node_alias) or nf_nodeid_map.get(nid)) or {}
+        caps = n.get("capabilities", [])
+        if isinstance(caps, dict):
+            caps = list(caps.keys())
+        worker_rows.append({
+            "node_id":      nid,
+            "display_name": n.get("display_name", ""),
+            "profile":      n.get("profile", ""),
+            "ip_addresses": [],
+            "tags":         [],
+            "status":       n.get("status", ""),
+            "last_seen":    (n.get("last_seen") or "")[:19],
+            "capabilities": caps,
+            "models":       nf.get("models", []),
+            "last_message": n.get("last_message", ""),
+        })
+
+    rows = ctrl_rows + worker_rows
+
+# ------------------------------------------------------------------
+# Namespace filter (meaningful only with headscale data; tags=[] in KI mode)
+# ------------------------------------------------------------------
+if ns_tag:
+    rows = [r for r in rows if ns_tag in r.get('tags', [])]
 
 if not rows:
-    print("No nodes found.")
+    suffix = f" (filter: {ns_tag})" if ns_tag else ""
+    print(f"No nodes found.{suffix}")
     sys.exit(0)
 
+# ------------------------------------------------------------------
+# JSON output
+# ------------------------------------------------------------------
+if json_out:
+    out = []
+    for r in rows:
+        out.append({
+            'name':         r['node_id'],
+            'display_name': r['display_name'],
+            'profile':      r['profile'],
+            'ip_addresses': r['ip_addresses'],
+            'tags':         r['tags'],
+            'status':       r['status'],
+            'last_seen':    r['last_seen'],
+            'capabilities': r['capabilities'],
+            'models':       r['models'],
+        })
+    print(json.dumps(out, indent=2))
+    sys.exit(0)
+
+# ------------------------------------------------------------------
+# msg_only output
+# ------------------------------------------------------------------
 if msg_only:
     for r in rows:
-        name = r.get("display_name") or r.get("node_id", "")
-        msg  = r.get("last_message", "")
+        name = r.get('display_name') or r.get('node_id', '')
+        msg  = r.get('last_message', '')
         print(f"{name}")
         if msg:
             print(f"   Message: {msg}")
         print()
     sys.exit(0)
 
-def fmt_list(lst):
-    return ",".join(lst) if lst else "-"
-
-COLS = [
-    ("NODE ID",       "node_id",      16),
-    ("DISPLAY NAME",  "display_name", 16),
-    ("PROFILE",       "profile",      16),
-    ("STATUS",        "status",        9),
-    ("CAPABILITIES",  "capabilities", 28),
-    ("MODELS",        "models",       28),
-]
-SEP = "  "
-
-def wrap_cell(text, width):
-    """Split comma-delimited text into lines of at most width chars.
-    Breaks preferentially at comma boundaries; falls back to hard breaks
-    only when a single token exceeds width."""
-    if len(text) <= width:
-        return [text] if text else [""]
-    tokens = text.split(",")
-    lines = []
-    current = ""
-    for tok in tokens:
-        candidate = current + ("," if current else "") + tok
-        if len(candidate) <= width:
-            current = candidate
-        else:
-            if current:
-                lines.append(current + ",")
-            # Token itself may exceed width — hard-break it
-            while len(tok) > width:
-                lines.append(tok[:width])
-                tok = tok[width:]
-            current = tok
-    if current:
-        lines.append(current)
-    return lines or [""]
-
-hdr = SEP.join(f"{h:<{w}}" for h, _, w in COLS)
-sep = SEP.join("-" * w     for _, _, w in COLS)
-print(hdr)
-print(sep)
+# ------------------------------------------------------------------
+# Stanza output (human-readable)
+# ------------------------------------------------------------------
 for r in rows:
-    # Build wrapped lines per column
-    col_lines = []
-    for _, key, w in COLS:
-        v = r.get(key, "")
-        if isinstance(v, list):
-            v = fmt_list(v)
-        col_lines.append(wrap_cell(str(v), w))
-    row_height = max(len(lines) for lines in col_lines)
-    for line_idx in range(row_height):
-        parts = []
-        for i, (_, _, w) in enumerate(COLS):
-            chunk = col_lines[i][line_idx] if line_idx < len(col_lines[i]) else ""
-            parts.append(f"{chunk:<{w}}")
-        print(SEP.join(parts))
-    msg = r.get("last_message", "")
-    if verbose and msg:
-        print(f"   Message: {msg}")
+    label = r.get('display_name') or r.get('node_id', '')
+    print(label)
+    if r.get('profile'):
+        print(f"  profile:      {r['profile']}")
+    if r.get('ip_addresses'):
+        print(f"  ip:           {fmt_list(r['ip_addresses'])}")
+    if r.get('tags'):
+        print(f"  tags:         {fmt_list(r['tags'])}")
+    print(f"  status:       {r['status']}")
+    if r.get('last_seen'):
+        print(f"  last_seen:    {r['last_seen']}")
+    if r.get('capabilities'):
+        print(f"  capabilities: {fmt_list(r['capabilities'])}")
+    if r.get('models'):
+        mnames = [m if isinstance(m, str) else m.get('name', str(m)) for m in r['models']]
+        print(f"  models:       {fmt_list(mnames)}")
+    if verbose and r.get('last_message'):
+        print(f"  message:      {r['last_message']}")
     print()
-print(f"Total: {len(rows)} node(s)  ({len(ctrl_rows)} controller, {len(all_rows)} registered)")
+
+worker_count = len(rows) - ctrl_count
+print(f"Total: {len(rows)} node(s)  ({ctrl_count} controller, {worker_count} registered)")
 PYEOF
     rm -f "$_tmp"
 }

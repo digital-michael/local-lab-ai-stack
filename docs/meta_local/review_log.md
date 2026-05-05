@@ -1,5 +1,5 @@
 # Project Review Log — llm-agent-local-2
-**Last Updated:** 2026-04-04 UTC
+**Last Updated:** 2026-05-04 UTC
 **Target Audience:** LLM Agents
 
 ---
@@ -31,8 +31,8 @@ This file captures raw reinforcement workflow review log data for this project. 
 | ID | Priority | Title | Notes |
 |---|---|---|---|
 | BL-001 | P2 | CENTAURI-playbook.md | Full operational how-to for the established stack. Sections: first-time standup, stop/restart, component upgrades, security audit + hardening, status monitoring, log/metric monitoring. File: `docs/CENTAURI-playbook.md`. |
-| BL-002 | P3 | node.sh list: report/subreport layout | Replace flat columnar output with a per-node stanza: node name as heading, then indented key\tvalue lines for display_name, profile, status, last_seen, capabilities, etc. Improves readability on wide node sets. |
-| BL-003 | P3 | --json output mode for scripts | Add `--json` flag to select (or all) scripts in `scripts/` so output is well-formed JSON. Priority candidates: `node.sh list`, `status.sh`, `diagnose.sh`. Enables scripted consumption and piping into other tools. |
+| BL-002 | P3 | node.sh list: stanza layout + headscale backend | ✅ done 2026-05-04. Stanza output, `--headscale-url/key` flags (calls `GET /api/v1/node`), `--namespace` filter with tag normalization (accepts bare slug, `net-` prefixed, or full `tag:net-*`), `--json` for machine-readable output. Node-config enrichment (profile/capabilities/models) matched case-insensitively by hostname. State persisted to `~/.config/ai-stack/headscale_{url,key}`. **Known gap:** all nodes show `tags:[]` — headscale nodes not tagged in DB; requires `headscale nodes tag --identifier <id> --tags tag:net-ecotone-000-01` per node before `--namespace` filter is useful. |
+| BL-003 | P3 | --json output mode for scripts | ✅ done 2026-05-04 (merged into BL-002 for `node.sh list`). Remaining scripts (status.sh, diagnose.sh) deferred to Phase 3 standardization pass. |
 | BL-004 | P2 | RLM (Recursive Language Model) integration | Research MIT's RLM approach and design integration into the inference/knowledge layer. Clarify whether this is a prompting strategy, a model architecture, or a workflow pattern; then map to the appropriate layer (LiteLLM hook, Flowise workflow, or new service). |
 | BL-005 | P2 | Internal operator dashboard | Single-pane operator view: all services with health status, uptime, and direct link/iframe into each service's own web UI (Grafana, Flowise, Authentik, MinIO, etc.). Expands the deferred Operator Dashboard feature (features.md). |
 | BL-006 | P2 | Live throughput + profiling dashboard | Grafana dashboard (or dedicated view) showing end-to-end inference latency, token/s per model, per-node utilization, KI query latency, and queue depth. Goal: identify the slowest component in the chain under load. |

@@ -14,15 +14,11 @@ _Nothing in flight._
 
 ## Next (selected)
 
-### BL-002 — node.sh list: report/subreport layout
-**Priority:** P3  
+### BL-004 — RLM integration research
+**Priority:** P2  
 **Status:** not started  
 
-Replace flat columnar output with a per-node stanza: node name as heading, then indented
-key/value lines for `display_name`, `profile`, `status`, `last_seen`, `capabilities`, `models`, etc.
-Improves readability on wide node sets and is a prerequisite for BL-003 (--json output mode).
-
-**Files in scope:** `scripts/node.sh` (Python inline block ~line 510–620)
+Research MIT's RLM approach and design integration into the inference/knowledge layer.
 
 ---
 
@@ -31,8 +27,8 @@ Improves readability on wide node sets and is a prerequisite for BL-003 (--json 
 | ID | Priority | Title | Status |
 |---|---|---|---|
 | BL-001 | P2 | CENTAURI-playbook.md | ✅ done — updated 2026-04-08 (commit `918b5df`); extended 2026-05-04 with Headscale tailnet runbook (§2.6, §7.8) — output/ gitignored |
-| **BL-002** | P3 | node.sh list: report/subreport layout | ⬅ next |
-| BL-003 | P3 | --json output mode for scripts | not started |
+| BL-002 | P3 | node.sh list: stanza layout + headscale backend | ✅ done 2026-05-04 — stanza output, `--headscale-url/key` backend, `--namespace` filter (normalization: with/without `net-`), `--json` output; state persisted to `~/.config/ai-stack/headscale_{url,key}`. **Known gap:** headscale nodes not tagged in DB — `--namespace` filter functional but returns no matches until `headscale nodes tag` is run per-node. |
+| BL-003 | P3 | --json output mode for scripts | ✅ done 2026-05-04 — merged into BL-002 (`node.sh list --json`); remaining scripts (status.sh, diagnose.sh) deferred to Phase 3 standardization pass |
 | BL-004 | P2 | RLM integration research | not started |
 | BL-005 | P2 | Internal operator dashboard | not started |
 | BL-006 | P2 | Live throughput + profiling dashboard | not started |
