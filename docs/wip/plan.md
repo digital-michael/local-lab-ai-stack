@@ -93,16 +93,27 @@ _Nothing in flight._
 
 ---
 
-### BL-015 — Non-SSH CNC transport (replace tailscale SSH for command delivery)
-**Priority:** P1 — must not remain SSH-based in production  
-**Status:** not started — design phase  
-**Decisions:** D-007 (TODO section)
+### BL-015 — Tailnet-Accessible KI Endpoint + CNC Foundation
+**Priority:** P1 — unblocks BL-011 steps 3+4 (LAN→tailnet IP migration)  
+**Status:** spec complete (`docs/wip/bl-015-spec.md`), ready for implementation  
+**Decisions:** D-009
 
-This is the design-then-implement item that retires `tailscale ssh` as the CNC transport. Likely shape: a minimal authenticated HTTPS endpoint per node (e.g. a tiny FastAPI process, tailnet-IP-bound, with a pre-shared bearer token from `node-config.json`). Controller POSTs a command envelope; node executes from a restricted allow-list; response returned in HTTP body.
+**Problem:** `knowledge-index` binds `127.0.0.1:8100`. Workers can't reach it over the tailnet. `controller_url` still points to LAN hostname. This is the last LAN dependency for worker→controller traffic.
 
-**Design gate (do before implementation):** Write a one-page spec in `docs/wip/` covering: command allow-list, auth mechanism, response format, timeout handling. Review before coding.
+**Steps:**
+1. Traefik: add `tailnet` entrypoint at `100.64.0.4:8443`; `PublishPort` in quadlet; TLS on by default (`config.json → tailnet_tls` toggle)
+2. Traefik: add `knowledge-index-tailnet-api` and `knowledge-index-tailnet-mcp` routers in `services.yaml`
+3. `config.json`: add `tailnet.*` block + `network_domains.ecotone-000-01.bearer_token` (generate token)
+4. KI `app.py`: add `verify_bearer_token` FastAPI dependency; apply to `/v1/*` + `/mcp/*` (not `/v1/config`)
+5. KI `app.py`: add `GET /v1/config` public bootstrap endpoint (returns `controller_url`, domain, schema, capabilities)
+6. KI `app.py`: add `POST /v1/cnc/register` + `POST /v1/cnc/heartbeat` (additive — `/admin/*` unchanged)
+7. `node.sh configure`: add `controller_url` resolution (flag → config.json → `/v1/config` discovery); write to `node-config.json`
+8. `heartbeat.sh`: migrate POST to `/v1/cnc/heartbeat` with `Authorization: Bearer` header
+9. LAN cleanup: remove `SERVICES.mynetworksettings.com` from `services.yaml` after workers verified on tailnet
 
-**Blocked by:** BL-014 (need operational SSH path first to understand what commands need transport).
+**Verification gate:** see `docs/wip/bl-015-spec.md` § Verification Gate
+
+**Non-goals:** Authentik on tailnet, MCP client on workers (agentic executor BL), node-exporter-ai (BL-013)
 
 ---
 
@@ -123,9 +134,9 @@ Execute `docs/wip/headplane-remote-deploy.md` as written. Bind to tailnet IP onl
 | BL-001 | P2 | CENTAURI-playbook.md | ✅ done 2026-05-04 | — |
 | BL-002 | P3 | node.sh list: headscale backend + stanza output | ✅ done 2026-05-04 | — |
 | BL-003 | P3 | --json output mode for scripts | ✅ done 2026-05-04 | — |
+| BL-015 | P1 | Tailnet-Accessible KI Endpoint + CNC Foundation | spec complete — ready to implement; **unblocks BL-011 steps 3+4** | D-009 |
 | BL-011 | P1 | Headscale migration: ACL hardening + LAN break-glass + IP migration | partial — steps 1+2 done; steps 3+4 blocked by BL-015 | D-004, D-007, D-008 |
-| BL-015 | P1 | Non-SSH CNC transport (replace tailscale SSH) | not started — design first; **unblocks BL-011 steps 3+4** | D-007 |
-| BL-012 | P1 | Distributed node config: node.sh configure + --refresh | not started | D-005 |
+| BL-012 | P1 | Distributed node config: node.sh configure + --refresh | ✅ done `7813139` — verification gate complete 2026-05-05 | D-005 |
 | BL-009 | P1 | Content Review Layer Phase 2 (guard LLM) | Phase 1 done (`9d33dce`) | D-039 |
 | BL-013 | P2 | node-exporter-ai: per-node Prometheus metrics exporter | not started | D-006 |
 | BL-014 | P2 | node.sh remote: SSH command delivery wrapper | not started | D-007 |
@@ -155,5 +166,5 @@ Execute `docs/wip/headplane-remote-deploy.md` as written. Bind to tailnet IP onl
 ## Notes
 
 - **BL-009 Phase 2** (guard LLM) remains P1; held in order after BL-011/BL-012 so guard LLM deployment runs on a stable network layer.
-- **BL-015** (non-SSH CNC) must not be blocked indefinitely. If BL-014 SSH path takes >2 sprints to stabilize, promote BL-015 design phase in parallel.
+- **BL-015** (tailnet KI endpoint) spec is complete. Implement before BL-013 (node-exporter-ai) — BL-013 depends on tailnet connectivity being proven.
 - **configs/nodes/*.json** worker files are deprecated by D-005 but must not be deleted until BL-012 `--refresh` is verified working on all nodes.

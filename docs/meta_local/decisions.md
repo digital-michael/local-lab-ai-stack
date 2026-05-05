@@ -183,3 +183,67 @@ controller   → node.sh list --refresh
 **Verification gate per node:** `bash scripts/status.sh -vv` on controller shows tailnet row `connected`, node appears `online` in `node.sh list`, and `node.sh remote <node> bash scripts/status.sh` returns exit 0.
 
 **TODO:** Execute migration as part of BL-new headscale-migration backlog item. Update CENTAURI-playbook.md with LAN SSH break-glass procedure before starting.
+
+---
+
+## D-009 — Tailnet-Accessible Knowledge-Index Endpoint (BL-015)
+
+**Date:** 2026-05-05
+**Status:** Active — spec approved, implementation pending
+
+**Decision:** Expose the knowledge-index to worker nodes over the tailnet via a dedicated Traefik entrypoint bound exclusively to the controller's tailnet IP. Workers use this endpoint as `controller_url` for all CNC and query traffic, replacing the LAN hostname dependency entirely.
+
+### Architecture
+
+```
+[Worker: SOL / TC25]  ──tailnet──►  Traefik tailnet entrypoint (100.64.0.4:8443)
+                                           │
+                              PathPrefix /v1/*   → bearer token (tag:net-*)
+                              PathPrefix /mcp/*  → bearer token (tag:net-*)
+                              PathPrefix /v1/cnc/* → bearer token (tag:net-*)
+                                           │
+                                  knowledge-index (127.0.0.1:8100)
+```
+
+`/admin/*` is **excluded** from the tailnet route. It remains operator/localhost only (API-key gated, unchanged).
+
+### Traefik entrypoint
+
+- Name: `tailnet`
+- Bind: `100.64.0.4:8443` (tailnet IP only — never `0.0.0.0`)
+- Container publish: `PublishPort=100.64.0.4:8443:8443` in the Traefik quadlet
+- TLS: enabled by default; toggle via `config.json → tailnet_tls: true`; rendered into `traefik.yaml` by `configure.sh`
+
+### Authentication
+
+- **Automated (worker/AI tasks):** Bearer token per `tag:net-*` domain. Token stored in `config.json → network_domains.<domain>.bearer_token` and propagated to `node-config.json → network.bearer_token` at configure time. Validated in KI application layer; Traefik is routing + TLS only.
+- **Operator/on-demand CNC (deferred):** Second Traefik router on the tailnet entrypoint using Authentik forward-auth middleware, scoped to `/v1/cnc/operator/*`. No impact on worker routes.
+
+### CNC namespace
+
+New path group `/v1/cnc/*` in knowledge-index replaces LAN `/admin/v1/nodes/*` for worker-initiated operations:
+- `POST /v1/cnc/register` — replaces `/admin/v1/nodes` (POST) for tailnet workers
+- `POST /v1/cnc/heartbeat` — replaces `/admin/v1/nodes/{id}/heartbeat` for tailnet workers
+- Future: `/v1/cnc/pull-model`, `/v1/cnc/reindex`, operator CNC commands
+
+`/admin/*` retained, unchanged, for operator/localhost access only. Its data remains the system of record for node registration.
+
+### Bootstrap and discovery
+
+Two-layer model:
+1. **Initial provisioning:** `node.sh configure --controller-url <url>` (or derived from `config.json`) writes `controller_url` into `node-config.json` at join time.
+2. **Runtime discovery:** `GET /v1/config` (public within tailnet, no bearer token required) returns `{ "controller_url", "schema_version", "domain", "capabilities" }`. Workers call this at startup and on `node.sh configure --refresh-config`. Enables controller IP changes without re-joining every worker.
+
+### MCP on tailnet
+
+`/mcp/*` is exposed on the tailnet route (same bearer token as `/v1/*`). Workers do not implement MCP client capability as part of base bootstrap — that capability is deferred to the agentic executor feature (future BL). The route costs nothing and avoids a retroactive architecture change when agentic workers are introduced.
+
+**TODO (agentic executor):** When workers need to call back to KI as an MCP tool server from within an agent loop, implement MCP client in `services/node-exporter-ai/` or a new `services/agent-executor/`. HTTP SSE transport assumed (works over tailnet unchanged). stdio transport deferred.
+
+### LAN cleanup (after BL-015 migration verified)
+
+- Remove `Host('SERVICES.mynetworksettings.com')` from `knowledge-index-admin` router in `services.yaml`
+- Update `controller_url` on all workers to `https://100.64.0.4:8443` via `node.sh configure`
+- Deprecate LAN hostname as routing target for worker traffic
+
+**Rationale:** Eliminates the last LAN hostname dependency for worker→controller traffic. Tailnet IP is the single canonical address for all remote node communication, consistent with D-004 (headscale as authoritative presence). LAN IP retained only for colocated services where tailnet adds no value.
