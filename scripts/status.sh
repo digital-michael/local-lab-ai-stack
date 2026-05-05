@@ -227,6 +227,31 @@ _heartbeat_status() {
     fi
 }
 
+# Returns a one-line tailnet connectivity summary using tailscale status --json.
+# Shows BackendState, this node's tailnet IP, and online-peer count.
+_tailnet_status() {
+    if ! command -v tailscale &>/dev/null; then
+        echo "not installed"
+        return 0
+    fi
+    local ts_json
+    ts_json=$(tailscale status --json 2>/dev/null || true)
+    if [[ -z "$ts_json" ]]; then
+        echo "unavailable (tailscaled not running?)"
+        return 0
+    fi
+    local backend self_ip online_peers total_peers
+    backend=$(jq -r '.BackendState // "unknown"' <<< "$ts_json")
+    self_ip=$(jq -r '(.Self.TailscaleIPs // ["?"])[0]' <<< "$ts_json")
+    online_peers=$(jq '[.Peer // {} | to_entries[] | select(.value.Online == true)] | length' <<< "$ts_json")
+    total_peers=$(jq '[.Peer // {} | keys[]] | length' <<< "$ts_json")
+    if [[ "$backend" == "Running" ]]; then
+        echo "connected  ${online_peers}/${total_peers} peers online  (${self_ip})"
+    else
+        echo "${backend}  (${self_ip})"
+    fi
+}
+
 # ── Deployment check ──────────────────────────────────────────────────────────
 
 quadlet_count=0
@@ -268,8 +293,14 @@ case "$(_get_node_profile)" in
     *)                         _profile_svcs='null' ;;  # controller/peer: all services
 esac
 
+# TODO(m2m-gateway): remove _SKIP_SVCS exclusion once m2m-gateway is complete
+# To restore: delete the two _SKIP_SVCS lines and the select() filters below,
+# then revert the jq expressions to their original forms.
+_SKIP_SVCS='["m2m-gateway"]'
+
 if [[ "$_profile_svcs" == "null" ]]; then
-    mapfile -t services < <(jq -r '.services | keys[]' "$CONFIG_FILE")
+    mapfile -t services < <(jq -r --argjson skip "$_SKIP_SVCS" \
+        '.services | keys[] | select(. as $k | $skip | index($k) == null)' "$CONFIG_FILE")
 else
     mapfile -t services < <(jq -r --argjson svcs "$_profile_svcs" \
         '.services | keys[] | select(. as $k | $svcs | index($k) != null)' "$CONFIG_FILE")
@@ -352,9 +383,11 @@ if ! $QUIET; then
             printf "  %-${col}s %s\n" "network/${net_name}" "MISSING"
         fi
 
-        # Secrets summary — scoped to profile services
+        # Secrets summary — scoped to profile services (excludes _SKIP_SVCS)
         if [[ "$_profile_svcs" == "null" ]]; then
-            mapfile -t all_secrets < <(jq -r '[.services[].secrets[]?.name] | unique[]' "$CONFIG_FILE" 2>/dev/null || true)
+            mapfile -t all_secrets < <(jq -r --argjson skip "$_SKIP_SVCS" \
+                '[.services | to_entries[] | select(.key as $k | $skip | index($k) == null) | .value.secrets[]?.name] | unique[]' \
+                "$CONFIG_FILE" 2>/dev/null || true)
         else
             mapfile -t all_secrets < <(jq -r --argjson svcs "$_profile_svcs" \
                 '[.services | to_entries[] | select(.key as $k | $svcs | index($k) != null) | .value.secrets[]?.name] | unique[]' \
@@ -369,6 +402,10 @@ if ! $QUIET; then
         done
         printf "  %-${col}s %s\n" "secrets" "${present_secrets}/${total_secrets} present"
     fi
+
+    # Tailnet connectivity (headscale)
+    _ts_out=$(_tailnet_status 2>/dev/null || echo "unavailable")
+    printf "  %-${col}s %s\n" "tailnet" "$_ts_out"
 
     echo ""
     # sep_width tracks the visual width of the separator line (excludes 2-space indent)
