@@ -1632,6 +1632,9 @@ cmd_security_audit() {
         local val="${entry#*=}"
         local lower_path
         lower_path=$(echo "$path_val" | tr '[:upper:]' '[:lower:]')
+        # Skip metadata fields — .name and .target are identifiers, not credential values
+        local last_component="${path_val##*.}"
+        [[ "$last_component" == "name" || "$last_component" == "target" ]] && continue
         for field in "${secret_fields[@]}"; do
             if [[ "$lower_path" == *"$field"* ]]; then
                 # Heuristic: if value looks like a real secret (>6 chars, not a path/URL)
@@ -1693,6 +1696,84 @@ cmd_security_audit() {
                         "Ollama on $alias ($address:${ollama_port_w}) returned HTTP $worker_code"
                 fi
             done < <(find "$nodes_dir" -maxdepth 1 -name '*.json' -print0 2>/dev/null)
+        fi
+    fi
+
+    # -----------------------------------------------------------------------
+    # F. Podman secret strength — detect known-weak values
+    # (requires podman; skipped automatically if podman is unavailable)
+    # -----------------------------------------------------------------------
+
+    $json_mode || echo "[F] Checking Podman secret strength..."
+
+    if ! command -v podman &>/dev/null; then
+        _finding INFO "SECRET-STRENGTH-PODMAN" "podman not available — skipping secret strength check"
+    else
+        local -a _weak_list=(
+            "" "changeme" "change-me" "change_me" "changemeplease"
+            "password" "password1" "password123" "passwd"
+            "admin" "admin123" "admin1234" "administrator"
+            "secret" "supersecret" "mysecret"
+            "test" "testing" "test123"
+            "letmein" "letmein123"
+            "default" "defaults"
+            "postgres" "postgres123"
+            "qwerty" "qwerty123"
+            "12345678" "1234567890"
+            "abc123"
+        )
+
+        # Provider-issued keys: externally provisioned, skip strength check
+        local -a _provider_keys=("openai_api_key" "anthropic_api_key" "groq_api_key" "mistral_api_key")
+
+        local _secret_names
+        _secret_names=$(jq -r '[.services[].secrets[]?.name] | unique[]' "$CONFIG_FILE" 2>/dev/null)
+
+        local _checked=0
+        while IFS= read -r sname; do
+            [[ -z "$sname" ]] && continue
+
+            local _skip=false
+            for _pk in "${_provider_keys[@]}"; do
+                [[ "$sname" == "$_pk" ]] && { _skip=true; break; }
+            done
+            $_skip && continue
+
+            local _sval
+            _sval=$(podman secret inspect "$sname" --showsecret 2>/dev/null \
+                | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['SecretData'])" 2>/dev/null) || {
+                _finding WARNING "SECRET-MISSING-${sname^^}" \
+                    "Podman secret '$sname' listed in config.json but not found in secret store — run: bash scripts/bootstrap.sh"
+                continue
+            }
+
+            (( _checked++ )) || true
+
+            local _lower_val
+            _lower_val=$(echo "$_sval" | tr '[:upper:]' '[:lower:]')
+
+            local _is_weak=false
+            for _w in "${_weak_list[@]}"; do
+                if [[ "$_lower_val" == "$_w" ]]; then
+                    _is_weak=true
+                    break
+                fi
+            done
+
+            if $_is_weak; then
+                _finding CRITICAL "SECRET-WEAK-${sname^^}" \
+                    "Podman secret '$sname' contains a known-weak value — rotate immediately: podman secret rm $sname && printf '%s' '<new-value>' | podman secret create $sname -"
+            elif [[ "${#_sval}" -lt 12 ]]; then
+                _finding WARNING "SECRET-SHORT-${sname^^}" \
+                    "Podman secret '$sname' is shorter than 12 characters (${#_sval} chars) — consider rotating"
+            else
+                _finding OK "SECRET-STRENGTH-${sname^^}" \
+                    "Secret '$sname' passes strength check"
+            fi
+        done <<< "$_secret_names"
+
+        if [[ $_checked -eq 0 ]] && ! grep -q "SECRET-MISSING" <<< "${_findings[*]:-}"; then
+            _finding INFO "SECRET-STRENGTH" "No checkable secrets found in config.json"
         fi
     fi
 

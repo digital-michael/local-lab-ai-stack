@@ -145,7 +145,7 @@ Headplane v0.6.2 deployed on photondatum.space as a Podman quadlet. Bound to tai
 | 2 | BL-015 step 9 | P1 | LAN cleanup — remove SERVICES hostname from services.yaml | ✅ done 2026-05-05 | **Auto** | D-009 |
 | 3 | BL-014 | P2 | node.sh remote: SSH command delivery wrapper | ✅ done 2026-05-06 | Sonnet | D-007 |
 | 4 | BL-016 | P2 | Headplane deployment on photondatum.space | ✅ done 2026-05-06 | Sonnet | D-007 |
-| 5 | BL-008 | P2 | Default credential policy | not started | Sonnet | — |
+| 5 | BL-008 | P2 | Default credential policy | ✅ done 2026-05-06 | Sonnet | — |
 | 6 | m2m track | P2 | m2m-gateway + localhost MVP | on hold — now unblocked | Sonnet | — |
 | 7 | BL-004 | P2 | RLM integration research | not started | Sonnet | — |
 | 8 | BL-007 | P2 | Configurable domain in setup | not started | Sonnet | — |

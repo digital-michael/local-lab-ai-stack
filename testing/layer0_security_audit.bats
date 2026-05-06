@@ -77,6 +77,18 @@ EOF
   "admin_api_key": "supersecretvalue1234"
 }
 EOF
+
+    # Config with one non-provider secret (used by T-117/118/119)
+    cat > "${FIXTURES_DIR}/config_one_secret.json" <<'EOF'
+{
+  "services": {
+    "postgres": {
+      "ports": [{"host": 5432, "container": 5432, "bind": "127.0.0.1"}],
+      "secrets": [{"name": "postgres_password", "target": "POSTGRES_PASSWORD"}]
+    }
+  }
+}
+EOF
 }
 
 teardown_file() {
@@ -159,6 +171,90 @@ teardown_file() {
     fi
     if [[ "$output" == *"CRITICAL"* ]]; then
         echo "Unexpected CRITICAL finding in clean config" >&3
+        echo "Output: $output" >&3
+        return 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# T-117: weak Podman secret value triggers CRITICAL (BL-008 / Check F)
+# ---------------------------------------------------------------------------
+
+@test "T-117: weak podman secret triggers CRITICAL finding" {
+    local fake_bin="${BATS_TMPDIR}/fake_bin_117"
+    mkdir -p "$fake_bin"
+    cat > "${fake_bin}/podman" <<'PODMAN'
+#!/usr/bin/env bash
+echo '[{"SecretData":"changeme"}]'
+exit 0
+PODMAN
+    chmod +x "${fake_bin}/podman"
+
+    run env PATH="${fake_bin}:${PATH}" CONFIG_FILE="${FIXTURES_DIR}/config_one_secret.json" \
+        bash "${CONFIGURE}" security-audit --skip-network
+    if [[ "$status" -ne 2 ]]; then
+        echo "Expected exit 2 (CRITICAL), got $status" >&3
+        echo "Output: $output" >&3
+        return 1
+    fi
+    if [[ "$output" != *"SECRET-WEAK"* ]]; then
+        echo "Expected SECRET-WEAK in output" >&3
+        echo "Output: $output" >&3
+        return 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# T-118: strong Podman secret produces no CRITICAL (BL-008 / Check F)
+# ---------------------------------------------------------------------------
+
+@test "T-118: strong podman secret produces no CRITICAL finding" {
+    local fake_bin="${BATS_TMPDIR}/fake_bin_118"
+    mkdir -p "$fake_bin"
+    cat > "${fake_bin}/podman" <<'PODMAN'
+#!/usr/bin/env bash
+echo '[{"SecretData":"aV3ryStr0ngRandomPassphrase42!"}]'
+exit 0
+PODMAN
+    chmod +x "${fake_bin}/podman"
+
+    run env PATH="${fake_bin}:${PATH}" CONFIG_FILE="${FIXTURES_DIR}/config_one_secret.json" \
+        bash "${CONFIGURE}" security-audit --skip-network
+    if [[ "$status" -eq 2 ]]; then
+        echo "Expected no CRITICAL findings, got exit 2" >&3
+        echo "Output: $output" >&3
+        return 1
+    fi
+    if [[ "$output" == *"SECRET-WEAK"* ]]; then
+        echo "Unexpected SECRET-WEAK in output" >&3
+        echo "Output: $output" >&3
+        return 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# T-119: secret in config.json missing from Podman store produces WARNING (BL-008 / Check F)
+# ---------------------------------------------------------------------------
+
+@test "T-119: secret listed in config.json but missing from podman store produces WARNING" {
+    local fake_bin="${BATS_TMPDIR}/fake_bin_119"
+    mkdir -p "$fake_bin"
+    cat > "${fake_bin}/podman" <<'PODMAN'
+#!/usr/bin/env bash
+# Simulate 'secret not found'
+exit 1
+PODMAN
+    chmod +x "${fake_bin}/podman"
+
+    run env PATH="${fake_bin}:${PATH}" CONFIG_FILE="${FIXTURES_DIR}/config_one_secret.json" \
+        bash "${CONFIGURE}" security-audit --skip-network
+    if [[ "$status" -ne 1 ]]; then
+        echo "Expected exit 1 (WARNING), got $status" >&3
+        echo "Output: $output" >&3
+        return 1
+    fi
+    if [[ "$output" != *"SECRET-MISSING"* ]]; then
+        echo "Expected SECRET-MISSING in output" >&3
         echo "Output: $output" >&3
         return 1
     fi
