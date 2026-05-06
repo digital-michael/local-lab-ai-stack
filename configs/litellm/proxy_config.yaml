@@ -4,9 +4,10 @@
 # Settings here supplement environment variable configuration (secrets, DATABASE_URL, etc.).
 #
 # Callbacks (execution order matters — reviewed before RAG query):
-#   1. ContentReviewHook: regex gates A/B/C per D-039 Phase 1; rejects on violation
+#   1. ContentReviewHook: regex gates A/B/C per D-039 Phase 1, then guard LLM D per Phase 2; rejects on violation
 #   2. AsyncRAGHook: KI context injection per D-030
 # Controlled by REVIEW_ENABLED env var — no-op when 'false'.
+# Category D guard enabled when REVIEW_GUARD_MODEL env var is set (empty = skip).
 #
 # Reference: https://docs.litellm.ai/docs/proxy/config_settings
 
@@ -15,5 +16,6 @@ litellm_settings:
   callbacks:
     - hooks.content_review_hook
     - hooks.async_rag_hook
+    - prometheus
 
 general_settings: {}

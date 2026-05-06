@@ -3,15 +3,19 @@
 # LiteLLM hooks — content review (D-039) + ambient RAG injection (D-030).
 #
 # Execution order (registered in proxy_config.yaml):
-#   1. ContentReviewHook.async_pre_call_hook  — regex gates A/B/C; raises on violation
+#   1. ContentReviewHook.async_pre_call_hook  — regex gates A/B/C + guard LLM D; raises on violation
 #   2. AsyncRAGHook.async_pre_call_hook       — KI context injection
 #
-# ContentReviewHook (D-039 Phase 1):
-#   Evaluates all user/system message content against three categories of
-#   deterministic regex patterns before any inference or KI query occurs.
-#   Category A: security violations (jailbreak, container escape, code injection, exfil)
-#   Category B: privacy / PII (SSN, payment card, cross-user data references)
-#   Category C: credential detection (API keys, private keys, env assignments)
+# ContentReviewHook (D-039 Phase 1 + Phase 2):
+#   Phase 1 — deterministic regex gates A/B/C:
+#     Category A: security violations (jailbreak, container escape, code injection, exfil)
+#     Category B: privacy / PII (SSN, payment card, cross-user data references)
+#     Category C: credential detection (API keys, private keys, env assignments)
+#   Phase 2 — guard LLM (Category D):
+#     Category D: profanity, violence, sexual, hate-speech, self-harm
+#     Separate, context-isolated Ollama call with temperature=0 and constrained output.
+#     Output token: SAFE | UNSAFE:<category>. Enabled when REVIEW_GUARD_MODEL is set.
+#     Fail behavior: REVIEW_D_FAIL_MODE=open (allow+log on guard error) or closed (reject).
 #   Hard-rejects with a generic error on any match. Logs event to stderr as
 #   structured JSON (captured by Promtail → Loki). Never logs matched values.
 #   Controlled by REVIEW_ENABLED env var (default: true).
@@ -23,9 +27,12 @@
 #   No-op when KI_BASE_URL is unset or empty. RAG failure is always non-fatal.
 #
 # Environment:
-#   REVIEW_ENABLED — set to 'false' to disable content review (not for production)
-#   KI_BASE_URL    — base URL of the Knowledge Index (e.g. http://knowledge-index.ai-stack:8100)
-#   KI_API_KEY     — Bearer token for Knowledge Index API access (from knowledge_index_api_key secret)
+#   REVIEW_ENABLED      — set to 'false' to disable content review (not for production)
+#   REVIEW_GUARD_MODEL  — Ollama model name for Category D guard (e.g. llama3.2:3b); empty = skip D
+#   REVIEW_GUARD_URL    — Ollama base URL for guard model; falls back to OLLAMA_BASE_URL then localhost
+#   REVIEW_D_FAIL_MODE  — 'open' (allow+warn on guard error) or 'closed' (reject on guard error); default: open
+#   KI_BASE_URL         — base URL of the Knowledge Index (e.g. http://knowledge-index.ai-stack:8100)
+#   KI_API_KEY          — Bearer token for Knowledge Index API access (from knowledge_index_api_key secret)
 
 import hashlib
 import json
@@ -118,6 +125,111 @@ _CREDENTIAL_PATTERNS: list[tuple[re.Pattern, str]] = [
 
 _REVIEW_ENABLED: bool = os.environ.get("REVIEW_ENABLED", "true").lower() not in ("false", "0", "no")
 
+# ---------------------------------------------------------------------------
+# Category D guard LLM — configuration (D-039 Phase 2)
+# ---------------------------------------------------------------------------
+# REVIEW_GUARD_MODEL: Ollama model name for Category D guard inference.
+#   Empty string = Category D check disabled (default — enable per deployment).
+# REVIEW_GUARD_URL: Ollama base URL for the guard model.
+#   Falls back to OLLAMA_BASE_URL env var, then http://localhost:11434.
+# REVIEW_D_FAIL_MODE: behaviour when the guard call fails (timeout / error).
+#   'open'   = allow the request through and log a WARN (default at Phase 2)
+#   'closed' = reject the request and log an ERROR
+# ---------------------------------------------------------------------------
+
+_GUARD_D_SYSTEM_PROMPT: str = (
+    "You are a content safety classifier. Review the following text and reply with "
+    "exactly one classification token — nothing else.\n"
+    "  SAFE            — content is acceptable\n"
+    "  UNSAFE:profanity  — content contains profanity or obscene language\n"
+    "  UNSAFE:violence   — content describes or glorifies violence or harm\n"
+    "  UNSAFE:sexual     — content is sexually explicit or inappropriate\n"
+    "  UNSAFE:hate-speech — content expresses hatred toward a person or group\n"
+    "  UNSAFE:self-harm  — content relates to self-harm, suicide, or self-destruction\n"
+    "Reply with ONLY the classification token. No explanation, no punctuation, no extra text."
+)
+
+
+async def _guard_d_check(
+    text: str,
+    *,
+    enforcement_point: str,
+    request_id: str,
+) -> None:
+    """
+    Category D guard LLM check (D-039 Phase 2).
+
+    Makes a stateless, context-isolated inference call to a separate guard
+    Ollama model that returns a single classification token (SAFE | UNSAFE:<cat>).
+    Raises ValueError on UNSAFE classification — same generic message as A/B/C.
+    On timeout or error: raises if REVIEW_D_FAIL_MODE == 'closed', otherwise
+    logs a WARN and allows the request through.
+
+    No-op when REVIEW_ENABLED is false or REVIEW_GUARD_MODEL is unset.
+    """
+    if not _REVIEW_ENABLED:
+        return
+
+    model: str = os.environ.get("REVIEW_GUARD_MODEL", "")
+    if not model:
+        return  # Guard model not configured — Category D skipped
+
+    base_url: str = (
+        os.environ.get("REVIEW_GUARD_URL", "").rstrip("/")
+        or os.environ.get("OLLAMA_BASE_URL", "").rstrip("/")
+        or "http://localhost:11434"
+    )
+
+    classification: str
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.post(
+                f"{base_url}/api/chat",
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": _GUARD_D_SYSTEM_PROMPT},
+                        {"role": "user", "content": text[:4096]},
+                    ],
+                    "stream": False,
+                    "options": {"temperature": 0, "num_predict": 20},
+                },
+            )
+        resp.raise_for_status()
+        raw = resp.json().get("message", {}).get("content", "").strip()
+        classification = raw.split()[0].upper() if raw.split() else "SAFE"
+    except Exception as exc:
+        guard_action = "rejected" if os.environ.get("REVIEW_D_FAIL_MODE", "open").lower() == "closed" else "allowed"
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "level": "ERROR" if guard_action == "rejected" else "WARN",
+            "event": "content_review_guard_error",
+            "enforcement_point": enforcement_point,
+            "category": "D",
+            "rule": "guard:unavailable",
+            "action": guard_action,
+            "request_id": request_id,
+            "error": str(exc)[:200],
+        }
+        print(json.dumps(record), file=sys.stderr, flush=True)
+        if guard_action == "rejected":
+            raise ValueError("Request rejected by content policy.")
+        return
+
+    if classification.startswith("UNSAFE"):
+        cat = classification.split(":", 1)[-1].lower() if ":" in classification else "unclassified"
+        rule = f"unsafe:{cat}"
+        _log_review_event(
+            enforcement_point=enforcement_point,
+            category="D",
+            rule=rule,
+            action="rejected",
+            request_id=request_id,
+            full_content=text,
+            matched_segment=classification,
+        )
+        raise ValueError("Request rejected by content policy.")
+
 
 def _log_review_event(
     *,
@@ -194,15 +306,18 @@ def _review_or_raise(
 
 
 # ---------------------------------------------------------------------------
-# ContentReviewHook — LiteLLM callback (D-039 Phase 1)
+# ContentReviewHook — LiteLLM callback (D-039 Phase 1 + Phase 2)
 # ---------------------------------------------------------------------------
 
 class ContentReviewHook(CustomLogger):
     """
     LiteLLM callback that reviews user/system message content for policy
-    violations (Categories A/B/C) before inference. Hard-rejects on match.
+    violations (Categories A/B/C/D) before inference. Hard-rejects on match.
     Must be registered before AsyncRAGHook in proxy_config.yaml so that
     rejected content never triggers a KI query.
+
+    Phase 1: synchronous regex gates A/B/C.
+    Phase 2: async guard LLM for Category D (enabled when REVIEW_GUARD_MODEL is set).
     """
 
     async def async_pre_call_hook(
@@ -224,7 +339,10 @@ class ContentReviewHook(CustomLogger):
             return data
 
         request_id = str(data.get("litellm_call_id", "unknown"))
+        # Phase 1: deterministic regex gates (A/B/C) — synchronous, zero-latency
         _review_or_raise(text, enforcement_point="litellm_hook", request_id=request_id)
+        # Phase 2: guard LLM (Category D) — async, context-isolated
+        await _guard_d_check(text, enforcement_point="litellm_hook", request_id=request_id)
         return data
 
 

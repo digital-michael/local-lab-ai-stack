@@ -300,3 +300,117 @@ A SELinux health warning (`SELinux is enabled; Tailscale SSH may not work`) appe
 - [Operator FAQ and How-To Guides](operator-faq.md) — add models, register nodes, ingest documents, troubleshoot
 - [Feature Overview](features.md) — full capability inventory
 - [Architecture](ai_stack_blueprint/ai_stack_architecture.md) — system design reference
+
+---
+
+## Troubleshooting
+
+### A service shows `failed` or `inactive`
+
+```bash
+systemctl --user status <svc>.service
+journalctl --user -u <svc>.service --no-pager -n 30
+bash scripts/diagnose.sh <svc>
+# Auto-restart all failed:
+bash scripts/diagnose.sh --fix
+```
+
+Cascade: if `postgres` is down, `litellm`, `authentik`, and `knowledge-index` will also fail.
+
+---
+
+### LiteLLM is in a crash loop
+
+```bash
+journalctl --user -u litellm.service --no-pager -n 20
+```
+
+**Common cause — stale deployed `hooks.py`:** If the repo's `configs/litellm/hooks.py` was updated (e.g. after adding a new callback) but the deployed copy at `~/ai-stack/configs/litellm/hooks.py` was not refreshed, LiteLLM will crash on startup with `AttributeError: module 'hooks' has no attribute ...`.
+
+Fix:
+```bash
+cp configs/litellm/hooks.py ~/ai-stack/configs/litellm/hooks.py
+systemctl --user restart litellm.service
+```
+
+---
+
+### Homepage dashboard widgets show errors (401 / ENOTFOUND / "pagination is undefined")
+
+Homepage service widgets require credential env vars in the `homepage.container` quadlet. These are **not** generated automatically by `configure.sh` — they must be added manually after initial deploy (and after any quadlet regeneration).
+
+**Fix:**
+```bash
+nano ~/.config/containers/systemd/homepage.container
+```
+
+Add under `[Service]`:
+```ini
+Environment=HOMEPAGE_VAR_GRAFANA_USER=admin
+Environment=HOMEPAGE_VAR_GRAFANA_PASS=<grafana_admin_password>
+Environment=HOMEPAGE_VAR_QDRANT_API_KEY=<qdrant_api_key>
+Environment=HOMEPAGE_VAR_AUTHENTIK_TOKEN=<akadmin_api_token>
+```
+
+Then reload:
+```bash
+systemctl --user daemon-reload && systemctl --user restart homepage.service
+```
+
+Grafana password: `~/ai-stack/configs/grafana/grafana.ini` (`admin_password`).
+Qdrant key: `podman secret inspect qdrant_api_key --showsecret --format '{{.SecretData}}'`.
+Authentik token: `AKADMIN_API_TOKEN` in `configs/credentials.local`.
+
+**ENOTFOUND for knowledge-index or postgres widget** — the `knowledge-index` service is inactive:
+```bash
+systemctl --user start knowledge-index.service
+```
+
+---
+
+### Service unreachable in browser (502 / connection refused)
+
+All services are served via Traefik at `https://*.stack.localhost`. If a URL returns 502 or times out:
+
+```bash
+# Check Traefik is running
+systemctl --user is-active traefik.service
+
+# Check the target service
+systemctl --user is-active <svc>.service
+
+# Verify TLS certs are present
+ls ~/ai-stack/configs/traefik/certs/
+# If missing: bash scripts/generate-tls.sh && systemctl --user restart traefik.service
+```
+
+---
+
+### LiteLLM `/metrics` returns 404
+
+The Prometheus metrics endpoint is only active when the `prometheus` callback is registered. Check `configs/litellm/proxy_config.yaml`:
+
+```yaml
+litellm_settings:
+  callbacks:
+    - prometheus
+```
+
+Restart LiteLLM after adding it: `systemctl --user restart litellm.service`.
+
+---
+
+### Qdrant / Grafana return 401 in Homepage widgets
+
+See [Homepage dashboard widgets](#homepage-dashboard-widgets-show-errors-401--enotfound--pagination-is-undefined) above. The credential env vars in the quadlet are not set.
+
+---
+
+### First-time TLS errors in browser
+
+```bash
+bash scripts/generate-tls.sh
+systemctl --user restart traefik.service
+```
+
+Then import the generated CA cert into your browser's trusted certificate store.

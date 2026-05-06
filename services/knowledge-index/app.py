@@ -576,9 +576,93 @@ def _ki_log_review_event(
     print(json.dumps(record), file=sys.stderr, flush=True)
 
 
+_KI_GUARD_SYSTEM_PROMPT: str = (
+    "You are a content safety classifier. Review the following text and reply with "
+    "exactly one classification token — nothing else.\n"
+    "  SAFE            — content is acceptable\n"
+    "  UNSAFE:profanity  — content contains profanity or obscene language\n"
+    "  UNSAFE:violence   — content describes or glorifies violence or harm\n"
+    "  UNSAFE:sexual     — content is sexually explicit or inappropriate\n"
+    "  UNSAFE:hate-speech — content expresses hatred toward a person or group\n"
+    "  UNSAFE:self-harm  — content relates to self-harm, suicide, or self-destruction\n"
+    "Reply with ONLY the classification token. No explanation, no punctuation, no extra text."
+)
+
+
+def _ki_guard_d_check(text: str, *, source_endpoint: str) -> None:
+    """
+    Category D guard LLM check (D-039 Phase 2) for KI ingestion endpoints.
+
+    Makes a sync, context-isolated inference call to a separate guard Ollama
+    model. Raises HTTPException(422) on UNSAFE classification.
+    On error/timeout: raises if REVIEW_D_FAIL_MODE == 'closed', otherwise
+    logs a WARN and allows through.
+
+    No-op when REVIEW_ENABLED is false or REVIEW_GUARD_MODEL is unset.
+    """
+    if not _KI_REVIEW_ENABLED:
+        return
+
+    model: str = os.environ.get("REVIEW_GUARD_MODEL", "")
+    if not model:
+        return  # Guard model not configured — Category D skipped
+
+    base_url: str = (
+        os.environ.get("REVIEW_GUARD_URL", "").rstrip("/")
+        or os.environ.get("OLLAMA_BASE_URL", "").rstrip("/")
+        or "http://localhost:11434"
+    )
+    fail_mode: str = os.environ.get("REVIEW_D_FAIL_MODE", "open").lower()
+
+    classification: str
+    try:
+        with httpx.Client(timeout=8.0) as client:
+            resp = client.post(
+                f"{base_url}/api/chat",
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": _KI_GUARD_SYSTEM_PROMPT},
+                        {"role": "user", "content": text[:4096]},
+                    ],
+                    "stream": False,
+                    "options": {"temperature": 0, "num_predict": 20},
+                },
+            )
+        resp.raise_for_status()
+        raw = resp.json().get("message", {}).get("content", "").strip()
+        classification = raw.split()[0].upper() if raw.split() else "SAFE"
+    except Exception as exc:
+        from datetime import datetime, timezone  # noqa: PLC0415
+        guard_action = "rejected" if fail_mode == "closed" else "allowed"
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "level": "ERROR" if guard_action == "rejected" else "WARN",
+            "event": "content_review_guard_error",
+            "enforcement_point": "ki_ingestion",
+            "category": "D",
+            "rule": "guard:unavailable",
+            "action": guard_action,
+            "request_id": source_endpoint,
+            "error": str(exc)[:200],
+        }
+        print(json.dumps(record), file=sys.stderr, flush=True)
+        if guard_action == "rejected":
+            raise HTTPException(status_code=422, detail="Document rejected by content policy.")
+        return
+
+    if classification.startswith("UNSAFE"):
+        cat = classification.split(":", 1)[-1].lower() if ":" in classification else "unclassified"
+        _ki_log_review_event(
+            category="D", rule=f"unsafe:{cat}", source_endpoint=source_endpoint,
+            full_content=text, matched_segment=classification,
+        )
+        raise HTTPException(status_code=422, detail="Document rejected by content policy.")
+
+
 def _review_content(text: str, *, source_endpoint: str) -> None:
     """
-    Apply Category A/B/C content review to ingested document text.
+    Apply Category A/B/C/D content review to ingested document text.
     Raises HTTPException(422) with a generic message on any match.
     Call before any Qdrant write or DB write.
     """
@@ -605,6 +689,9 @@ def _review_content(text: str, *, source_endpoint: str) -> None:
             _ki_log_review_event(category="C", rule=rule, source_endpoint=source_endpoint,
                                  full_content=text, matched_segment=m.group(0))
             raise HTTPException(status_code=422, detail="Document rejected by content policy.")
+
+    # Phase 2: guard LLM — Category D (profanity, violence, sexual, hate-speech, self-harm)
+    _ki_guard_d_check(text, source_endpoint=source_endpoint)
 
 # ---------------------------------------------------------------------------
 # Endpoints

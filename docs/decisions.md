@@ -674,7 +674,7 @@ Concrete protocol specification for the **WAN** discovery profile.
 | **Skill** | `docs/library/actions/knowledge-index-review/knowledge-index-review-SKILL.md` |
 | **Driver** | User design session 2026-04-07; concern that using the same LLM to evaluate and execute shared the adversarial surface and weakened the review boundary. |
 | **Trigger** | Planning content ingestion into the Knowledge Index; review layer must be in place before production ingestion expands. |
-| **Commit** | TBD — BL-009 Phase 1 |
+| **Commit** | Phase 1: `9d33dce` — BL-009 Phase 1. Phase 2: pending — BL-009 Phase 2 |
 
 ---
 

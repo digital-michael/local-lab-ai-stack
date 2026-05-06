@@ -1,9 +1,9 @@
 # testing/layer3_model/test_content_review.py
 #
-# Layer 3e — Content Review Unit Tests (T-REV-001 through T-REV-012)
+# Layer 3e — Content Review Unit Tests (T-REV-001 through T-REV-018)
 #
-# Tests the Category A/B/C review patterns in:
-#   - configs/litellm/hooks.py  (_review_or_raise)
+# Tests the Category A/B/C/D review patterns in:
+#   - configs/litellm/hooks.py  (_review_or_raise, _guard_d_check)
 #   - services/knowledge-index/app.py  (_review_content via HTTP)
 #
 # hooks.py tests are pure unit tests (no services required).
@@ -12,9 +12,11 @@
 # Run all: pytest testing/layer3_model/test_content_review.py -v
 # Run unit only: pytest testing/layer3_model/test_content_review.py -v -m "not requires_ki"
 
+import asyncio
 import importlib.util
 import os
 import sys
+import unittest.mock
 import uuid
 
 import httpx
@@ -191,4 +193,134 @@ class TestKIIngestionReview:
         # 201 = created; 502 = Ollama/Qdrant not available (acceptable in CI without models)
         assert resp.status_code in (201, 502), (
             f"Expected 201 or 502, got {resp.status_code}: {resp.text}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# T-REV-013 through T-REV-018 — hooks._guard_d_check: Category D guard LLM
+# ---------------------------------------------------------------------------
+
+def _make_ollama_response(content: str) -> unittest.mock.MagicMock:
+    """Build a mock httpx response whose JSON returns an Ollama /api/chat payload."""
+    mock_resp = unittest.mock.MagicMock()
+    mock_resp.json.return_value = {"message": {"content": content}}
+    mock_resp.raise_for_status = unittest.mock.MagicMock()
+    return mock_resp
+
+
+class TestCategoryDGuard:
+    """Category D guard LLM — unit tests (no services required)."""
+
+    def test_guard_skipped_when_model_unset(self, hooks, monkeypatch):
+        """T-REV-013: _guard_d_check is a no-op when REVIEW_GUARD_MODEL is not set."""
+        monkeypatch.setenv("REVIEW_GUARD_MODEL", "")
+        # Would require a real guard call if model were set — no exception expected
+        asyncio.run(
+            hooks._guard_d_check(
+                "some violent content here",
+                enforcement_point="test", request_id="t-rev-013",
+            )
+        )
+
+    def test_unsafe_violence_raises(self, hooks, monkeypatch):
+        """T-REV-014: UNSAFE:violence response from guard raises ValueError."""
+        monkeypatch.setenv("REVIEW_GUARD_MODEL", "guard-model:test")
+        monkeypatch.setenv("REVIEW_GUARD_URL", "http://guard-ollama:11434")
+
+        mock_resp = _make_ollama_response("UNSAFE:violence")
+
+        with unittest.mock.patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = unittest.mock.AsyncMock()
+            mock_client.post = unittest.mock.AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = unittest.mock.AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = unittest.mock.AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            with pytest.raises(ValueError, match="content policy"):
+                asyncio.run(
+                    hooks._guard_d_check(
+                        "Detailed instructions for violent acts",
+                        enforcement_point="test", request_id="t-rev-014",
+                    )
+                )
+
+    def test_safe_response_passes(self, hooks, monkeypatch):
+        """T-REV-015: SAFE response from guard allows the request through."""
+        monkeypatch.setenv("REVIEW_GUARD_MODEL", "guard-model:test")
+        monkeypatch.setenv("REVIEW_GUARD_URL", "http://guard-ollama:11434")
+
+        mock_resp = _make_ollama_response("SAFE")
+
+        with unittest.mock.patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = unittest.mock.AsyncMock()
+            mock_client.post = unittest.mock.AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = unittest.mock.AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = unittest.mock.AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            # Should not raise
+            asyncio.run(
+                hooks._guard_d_check(
+                    "The weather today is sunny.",
+                    enforcement_point="test", request_id="t-rev-015",
+                )
+            )
+
+    def test_guard_error_fail_mode_open_allows(self, hooks, monkeypatch):
+        """T-REV-016: guard call error + fail_mode=open logs warning and allows request."""
+        monkeypatch.setenv("REVIEW_GUARD_MODEL", "guard-model:test")
+        monkeypatch.setenv("REVIEW_GUARD_URL", "http://guard-ollama:11434")
+        monkeypatch.setenv("REVIEW_D_FAIL_MODE", "open")
+
+        with unittest.mock.patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = unittest.mock.AsyncMock()
+            mock_client.post = unittest.mock.AsyncMock(
+                side_effect=Exception("connection refused")
+            )
+            mock_client.__aenter__ = unittest.mock.AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = unittest.mock.AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            # Should not raise when fail_mode=open
+            asyncio.run(
+                hooks._guard_d_check(
+                    "Some content that can't be checked",
+                    enforcement_point="test", request_id="t-rev-016",
+                )
+            )
+
+    def test_guard_error_fail_mode_closed_rejects(self, hooks, monkeypatch):
+        """T-REV-017: guard call error + fail_mode=closed raises ValueError."""
+        monkeypatch.setenv("REVIEW_GUARD_MODEL", "guard-model:test")
+        monkeypatch.setenv("REVIEW_GUARD_URL", "http://guard-ollama:11434")
+        monkeypatch.setenv("REVIEW_D_FAIL_MODE", "closed")
+
+        with unittest.mock.patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = unittest.mock.AsyncMock()
+            mock_client.post = unittest.mock.AsyncMock(
+                side_effect=Exception("guard timeout")
+            )
+            mock_client.__aenter__ = unittest.mock.AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = unittest.mock.AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            with pytest.raises(ValueError, match="content policy"):
+                asyncio.run(
+                    hooks._guard_d_check(
+                        "Some content",
+                        enforcement_point="test", request_id="t-rev-017",
+                    )
+                )
+
+    def test_guard_review_disabled_skips_all(self, hooks, monkeypatch):
+        """T-REV-018: REVIEW_ENABLED=false skips Category D guard even when model is set."""
+        monkeypatch.setenv("REVIEW_GUARD_MODEL", "guard-model:test")
+        monkeypatch.setattr(hooks, "_REVIEW_ENABLED", False)
+
+        # No HTTP call should be made — would raise if it tried to connect
+        asyncio.run(
+            hooks._guard_d_check(
+                "Extremely violent and hateful content",
+                enforcement_point="test", request_id="t-rev-018",
+            )
         )
