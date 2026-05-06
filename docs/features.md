@@ -306,6 +306,22 @@ Prevents worker nodes from sleeping or hibernating while the AI stack is running
 - `configure.sh security-audit` Check E now includes the exact `harden-worker` remediation command in its CRITICAL finding message
 - _Delivered: [Phase 24](ai_stack_blueprint/ai_stack_checklist.md) · Script: [scripts/node.sh](../scripts/node.sh)_
 
+### `[X]` Remote SSH Command Delivery
+`node.sh remote <node> <cmd>` runs any command on a worker node from the controller over the tailnet — no manual SSH session needed.
+- Resolves node alias/node_id to tailnet peer IP via `tailscale status --json`
+- Connects via direct SSH (StrictHostKeyChecking disabled — headscale does not serve SSH host keys)
+- SSH exit 255 = connection failure → automatic fallback to LAN IP (`address_fallback` in node file)
+- SSH user read from `ssh_user` field in `configs/nodes/<name>.json`
+- _Delivered: BL-014 · Script: [scripts/node.sh](../scripts/node.sh) · Runbook: CENTAURI playbook §7.13_
+
+### `[X]` Headplane — Headscale Web UI
+Full-featured web UI for managing the headscale tailnet, deployed on photondatum.space and accessible only over the tailnet.
+- Bound to tailnet IP `100.64.0.5:3000`; public internet cannot reach port 3000
+- Headscale API key authentication on first browser visit
+- Full-feature mode: DNS management, settings, and node operations via headscale config bind mount
+- Firewalld `tailscale0` interface assigned to `trusted` zone; port 3000 absent from `public` zone
+- _Deployed: BL-016 · Access: `http://100.64.0.5:3000/admin` · Runbook: CENTAURI playbook §7.14_
+
 ### `[-]` Tailscale SSH — Zero-Config Node Access
 Any enrolled cluster node can SSH to any other enrolled node without managing SSH keys — the tailnet ACL policy handles authentication.
 - No key distribution required; `tailscale ssh <node>` works immediately after enabling `--ssh`

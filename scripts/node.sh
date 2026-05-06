@@ -25,6 +25,8 @@ set -euo pipefail
 #   suggestions apply  <suggestion-id> [--node-id <id>]
 #                                 Manage controller suggestions for this node
 #   configure                      Write ~/.config/ai-stack/node-config.json from local state + Ollama
+#   remote  <node> <cmd> [args...]
+#                                 Run a command on a worker via SSH (tailnet → LAN fallback)
 #   harden-worker --alias <alias> [--controller-ip <ip>]
 #                                 Print OS-appropriate firewall rules to restrict Ollama :11434
 #                                 on an inference-worker to controller access only
@@ -73,6 +75,8 @@ Commands:
   suggestions show <id>          Show suggestion detail
   suggestions apply <id>         Mark suggestion consumed
   configure                      Write node-config.json from local environment (run on each worker)
+  remote  <node> <cmd> [args...] Run a command on a remote worker via SSH
+                                  Primary: tailnet IP (tailscale status); fallback: LAN IP
   harden-worker --alias <alias> \
           [--controller-ip <ip>] Print OS-appropriate firewall rules to restrict Ollama :11434
                                  on the target inference-worker to controller access only
@@ -1316,6 +1320,130 @@ cmd_harden_worker() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_remote — SSH command delivery to a worker node
+#
+# Usage: node.sh remote <node> <cmd> [args...]
+#
+# Resolves <node> (alias, node_id, or hostname — case-insensitive) to a
+# tailnet peer IP via `tailscale status`, then runs the command over SSH.
+# Falls back to the node's LAN IP (address_fallback in configs/nodes/) if
+# the tailnet connection fails (exit 255).
+# SSH user is read from the node file's "ssh_user" field.
+# StrictHostKeyChecking disabled — headscale does not serve SSH host keys.
+# ---------------------------------------------------------------------------
+
+cmd_remote() {
+    if [[ $# -lt 2 ]]; then
+        echo "Usage: node.sh remote <node> <cmd> [args...]" >&2
+        exit 1
+    fi
+
+    local node_arg="$1"
+    shift
+    local remote_cmd=("$@")
+
+    local nodes_dir="$SCRIPT_DIR/../configs/nodes"
+    local cache_dir="$STATE_DIR/nodes"
+
+    # ------------------------------------------------------------------
+    # Resolve tailnet peer IP from `tailscale status --json`
+    # ------------------------------------------------------------------
+    local tailnet_ip=""
+    tailnet_ip=$(tailscale status --json 2>/dev/null | python3 -c "import json, sys
+try:
+    d   = json.load(sys.stdin)
+    arg = sys.argv[1].lower()
+    for peer in d.get('Peer', {}).values():
+        hn  = (peer.get('HostName') or '').lower()
+        ips = peer.get('TailscaleIPs', [])
+        if hn == arg and ips:
+            print(ips[0])
+            break
+except Exception:
+    pass
+" "$node_arg" 2>/dev/null || true)
+
+    # ------------------------------------------------------------------
+    # Resolve LAN IP and ssh_user from node files (cache dir first, then static)
+    # ------------------------------------------------------------------
+    local lan_ip="" ssh_user=""
+    local _info
+    _info=$(python3 - "$nodes_dir" "$cache_dir" "$node_arg" <<'PYEOF' 2>/dev/null
+import glob, json, os, sys
+
+nodes_dir = sys.argv[1]
+cache_dir = sys.argv[2]
+target    = sys.argv[3].lower()
+
+def match(d):
+    return target in (
+        (d.get('node_id') or '').lower(),
+        (d.get('alias')   or '').lower(),
+        (d.get('name')    or '').lower(),
+    )
+
+for sdir in [cache_dir, nodes_dir]:
+    for path in sorted(glob.glob(sdir + '/*.json')):
+        try:
+            d = json.load(open(path))
+        except Exception:
+            continue
+        stem = os.path.splitext(os.path.basename(path))[0].lower()
+        if match(d) or stem == target:
+            print(json.dumps({
+                'lan_ip':   d.get('address_fallback') or '',
+                'ssh_user': d.get('ssh_user') or '',
+            }))
+            break
+    else:
+        continue
+    break
+PYEOF
+    )
+
+    if [[ -n "$_info" ]]; then
+        lan_ip=$(  echo "$_info" | python3 -c "import json,sys; print(json.load(sys.stdin).get('lan_ip',''))"   2>/dev/null || true)
+        ssh_user=$(echo "$_info" | python3 -c "import json,sys; print(json.load(sys.stdin).get('ssh_user',''))" 2>/dev/null || true)
+    fi
+
+    if [[ -z "$tailnet_ip" && -z "$lan_ip" ]]; then
+        echo "ERROR: cannot resolve node '${node_arg}' — not in tailscale peers or node files" >&2
+        exit 1
+    fi
+
+    local _ssh_opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10)
+
+    # ------------------------------------------------------------------
+    # Primary: tailnet IP
+    # SSH exit 255 = connection-level failure; any other code = remote exit code
+    # ------------------------------------------------------------------
+    if [[ -n "$tailnet_ip" ]]; then
+        local _t="$tailnet_ip"
+        [[ -n "$ssh_user" ]] && _t="${ssh_user}@${tailnet_ip}"
+        local _rc=0
+        ssh "${_ssh_opts[@]}" "$_t" "${remote_cmd[@]}" || _rc=$?
+        if [[ $_rc -ne 255 ]]; then
+            return $_rc   # connected; propagate remote exit code
+        fi
+        echo "[remote] tailnet SSH to ${_t} failed (connection error) — trying LAN fallback" >&2
+    fi
+
+    # ------------------------------------------------------------------
+    # Fallback: LAN IP
+    # ------------------------------------------------------------------
+    if [[ -n "$lan_ip" ]]; then
+        local _t="$lan_ip"
+        [[ -n "$ssh_user" ]] && _t="${ssh_user}@${lan_ip}"
+        local _rc=0
+        ssh "${_ssh_opts[@]}" "$_t" "${remote_cmd[@]}" || _rc=$?
+        return $_rc
+    fi
+
+    echo "ERROR: all SSH paths exhausted for node '${node_arg}'" >&2
+    exit 1
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1332,6 +1460,7 @@ case "${1:-help}" in
     list)           shift; cmd_list "$@" ;;
     status)         shift; cmd_status "$@" ;;
     suggestions)    shift; cmd_suggestions "$@" ;;
+    remote)         shift; cmd_remote "$@" ;;
     undeploy)       cmd_undeploy ;;
     harden-worker)  shift; cmd_harden_worker "$@" ;;
     help|--help|-h) usage ;;

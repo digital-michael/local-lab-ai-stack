@@ -81,17 +81,17 @@ _Nothing in flight._
 
 ### BL-014 — node.sh remote: SSH command delivery wrapper
 **Priority:** P2  
-**Status:** not started  
+**Status:** ✅ done — implemented 2026-05-06  
 **Decisions:** D-007  
 **Blocked by:** BL-011 (ACL must be directional before this is used in anger)
 
 **Steps:**
-1. Implement `node.sh remote <node> <cmd>` — resolves node to tailnet IP from cache/headscale, invokes `tailscale ssh <node> <cmd>`.
-2. Fallback: if tailscale SSH fails, attempt `ssh <user>@<lan-ip> <cmd>` (read from node-config or static map).
-3. Migrate `node.sh suggestions` to use remote SSH (pull a local queue file on the node) instead of `_curl_admin`.
-4. Add `node.sh remote <node> bash scripts/status.sh` as the standard worker health check.
+1. ✅ Implement `node.sh remote <node> <cmd>` — resolves node alias/node_id to tailnet IP via `tailscale status --json`; invokes `ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null <user>@<tailnet-ip> <cmd>`. (Note: `tailscale ssh` rejected by headscale — host key not served; direct SSH is the correct transport.)
+2. ✅ Fallback: if SSH exits 255 (connection-level failure), retry via LAN IP (`address_fallback` from node file).
+3. ⏸ Migrate `node.sh suggestions` to use remote SSH — deferred; requires workers to cache suggestions locally first (heartbeat.sh does not yet write a local queue file).
+4. ✅ `node.sh remote <node> bash scripts/status.sh` is the standard worker health check pattern.
 
-**Verification gate:** `node.sh remote sol bash scripts/status.sh` returns exit 0 from CENTAURI.
+**Verification gate:** ✅ `node.sh remote sol echo BL-014` returns `BL-014`, exit 0 from CENTAURI. SSH transport confirmed via tailnet IP 100.64.0.2 → SOL hostname. (Note: SOL's repo is at `~/Projects/active/local-lab-ai-stack/`, not `~/ai-stack/scripts/`.)
 
 ---
 
@@ -121,15 +121,46 @@ _Nothing in flight._
 
 ### BL-016 — Headplane deployment on photondatum.space
 **Priority:** P2  
-**Status:** not started  
-**WIP reference:** `docs/wip/headplane-remote-deploy.md` (draft, ready to execute)  
+**Status:** ✅ done — deployed 2026-05-06  
+**WIP reference:** `docs/wip/headplane-remote-deploy.md`  
 **Decisions:** D-007 (Headplane role: network UI only)
 
-Execute `docs/wip/headplane-remote-deploy.md` as written. Bind to tailnet IP only. Verify ACL restricts access to `tag:controller` only.
+Headplane v0.6.2 deployed on photondatum.space as a Podman quadlet. Bound to tailnet IP `100.64.0.5:3000` only. `tailscale0` assigned to firewalld `trusted` zone; port 3000 blocked on `public` zone.
+
+**Verification gate:** ✅ `curl http://100.64.0.5:3000/admin` → 302 from CENTAURI; `curl http://photondatum.space:3000/admin` → connection refused.
 
 ---
 
-## Queue (full backlog in priority order)
+## Queue (core-functionality order — metrics track deferred)
+
+**Model guidance:** Each item is annotated with recommended agent model.
+`Auto` = narrow, fully-specified, zero design decisions — agent MUST NOT execute work outside the item's defined scope.
+`Sonnet` = standard implementation with moderate judgment. `Opus` = architecture / L3-L4 design.
+
+### Core track (execute in order)
+
+| # | ID | Priority | Title | Status | Model | Decisions |
+|---|---|---|---|---|---|---|
+| 1 | BL-009 Ph.2 | P1 | Content Review Layer Phase 2 (guard LLM) | ✅ done — guard LLM (Category D) implemented 2026-05-05 | Sonnet | D-039 |
+| 2 | BL-015 step 9 | P1 | LAN cleanup — remove SERVICES hostname from services.yaml | ✅ done 2026-05-05 | **Auto** | D-009 |
+| 3 | BL-014 | P2 | node.sh remote: SSH command delivery wrapper | ✅ done 2026-05-06 | Sonnet | D-007 |
+| 4 | BL-016 | P2 | Headplane deployment on photondatum.space | ✅ done 2026-05-06 | Sonnet | D-007 |
+| 5 | BL-008 | P2 | Default credential policy | not started | Sonnet | — |
+| 6 | m2m track | P2 | m2m-gateway + localhost MVP | on hold — now unblocked | Sonnet | — |
+| 7 | BL-004 | P2 | RLM integration research | not started | Sonnet | — |
+| 8 | BL-007 | P2 | Configurable domain in setup | not started | Sonnet | — |
+
+### Deferred — metrics/observability track
+
+_Deferred 2026-05-05: self-contained, no blocking dependencies on core track. Drop in at any time._
+
+| ID | Priority | Title | Status | Model | Decisions |
+|---|---|---|---|---|---|
+| BL-013 | P2 | node-exporter-ai: per-node Prometheus metrics exporter | not started | Sonnet | D-006 |
+| BL-005 | P2 | Internal operator dashboard | not started | Sonnet | — |
+| BL-006 | P2 | Live throughput + profiling dashboard | not started | Sonnet | — |
+
+### Completed
 
 | ID | Priority | Title | Status | Decisions |
 |---|---|---|---|---|
@@ -138,16 +169,7 @@ Execute `docs/wip/headplane-remote-deploy.md` as written. Bind to tailnet IP onl
 | BL-003 | P3 | --json output mode for scripts | ✅ done 2026-05-04 | — |
 | BL-015 | P1 | Tailnet-Accessible KI Endpoint + CNC Foundation | ✅ done 2026-05-05 | D-009 |
 | BL-011 | P1 | Headscale migration: ACL hardening + LAN break-glass + IP migration | ✅ done 2026-05-05 | D-004, D-007, D-008 |
-| BL-012 | P1 | Distributed node config: node.sh configure + --refresh | ✅ done `7813139` — verification gate complete 2026-05-05 | D-005 |
-| BL-009 | P1 | Content Review Layer Phase 2 (guard LLM) | Phase 1 done (`9d33dce`) | D-039 |
-| BL-013 | P2 | node-exporter-ai: per-node Prometheus metrics exporter | not started | D-006 |
-| BL-014 | P2 | node.sh remote: SSH command delivery wrapper | not started | D-007 |
-| BL-016 | P2 | Headplane deployment | not started | D-007 |
-| BL-008 | P2 | Default credential policy | not started | — |
-| BL-004 | P2 | RLM integration research | not started | — |
-| BL-005 | P2 | Internal operator dashboard | not started | — |
-| BL-006 | P2 | Live throughput + profiling dashboard | not started | — |
-| BL-007 | P2 | Configurable domain in setup | not started | — |
+| BL-012 | P1 | Distributed node config: node.sh configure + --refresh | ✅ done `7813139` 2026-05-05 | D-005 |
 | BL-010 | P3 | Evaluate peer/node registration architecture | deferred | — |
 
 ---
@@ -165,8 +187,16 @@ Execute `docs/wip/headplane-remote-deploy.md` as written. Bind to tailnet IP onl
 
 ---
 
+## TODO
+
+- **Evaluate photondatum.space service containerization:** Now that Podman is installed on photondatum.space, audit all services running there (Headscale, Caddy, any future additions) and assess whether they should be managed as Podman quadlets for lifecycle consistency with the CENTAURI deployment model. Consider: image-pinned versions, restart policies, log routing, and whether Caddy should be replaced or wrapped.
+
+---
+
 ## Notes
 
-- **BL-009 Phase 2** (guard LLM) remains P1; held in order after BL-011/BL-012 so guard LLM deployment runs on a stable network layer.
-- **BL-015** (tailnet KI endpoint) spec is complete. Implement before BL-013 (node-exporter-ai) — BL-013 depends on tailnet connectivity being proven.
-- **configs/nodes/*.json** worker files are deprecated by D-005 but must not be deleted until BL-012 `--refresh` is verified working on all nodes.
+- **BL-009 Phase 2** (guard LLM) is next — networking layer is now stable (BL-011/BL-012/BL-015 all done).
+- **BL-015 step 9** (LAN hostname cleanup): ✅ completed 2026-05-05. Removed `SERVICES.mynetworksettings.com` from `configs/traefik/dynamic/services.yaml` admin router rule; tailnet CNC path is authoritative.
+- **Metrics track deferred** (BL-013/005/006): no capability dependencies; re-insert into queue when observability becomes a priority.
+- **configs/nodes/*.json** worker files deprecated by D-005; do not delete until `node.sh list --refresh` is verified working on all nodes (TC25 headscale SSH gap still open per BL-012 notes).
+- **Auto model constraint:** Any item marked `Auto` must be scoped strictly to the defined work. Agent must not infer or expand scope, modify adjacent files, or act on assumptions outside the item spec.

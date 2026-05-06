@@ -5,6 +5,7 @@
   "name": "macbook-m1",
   "address": "TC25.mynetworksettings.com",
   "address_fallback": "10.19.208.118",
+  "ssh_user": "michaelbiggerstaff",
   "status": "active",
   "profile": "inference-worker",
   "os": "darwin",

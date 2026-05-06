@@ -5,6 +5,7 @@
   "name": "alienware",
   "address": "SOL.mynetworksettings.com",
   "address_fallback": "10.19.208.113",
+  "ssh_user": "3pdx7",
   "status": "active",
   "profile": "inference-worker",
   "os": "linux",
