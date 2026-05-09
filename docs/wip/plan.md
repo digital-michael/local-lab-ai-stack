@@ -158,6 +158,12 @@ _Deferred 2026-05-05: self-contained, no blocking dependencies on core track. Dr
 | ID | Priority | Title | Status | Model | Decisions |
 |---|---|---|---|---|---|
 | BL-013 | P2 | node-exporter-ai: per-node Prometheus metrics exporter | not started | Sonnet | D-006 |
+
+### Deferred — operational improvements
+
+| ID | Priority | Title | Status | Notes |
+|---|---|---|---|---|
+| BL-SSO | P3 | LiteLLM UI SSO via Authentik (https://litellm.stack.localhost/ui) | blocked — 2026-05-06 | OAuth2 provider + scope mappings (openid/email/profile) created and wired. Token exchange reaches Authentik (HTTP 200) but userinfo response triggers JSONDecodeError in fastapi_sso. Scope mismatch warning in Authentik logs (`token_has: set()`) persists even after SQL-inserting scope mappings — Authentik likely has a cached representation. Resume by: (1) restarting Authentik to bust cache, or (2) deleting the provider and re-creating via the Authentik UI with scope mappings selected in the form, which guarantees the ORM wires them correctly. |
 | BL-005 | P2 | Internal operator dashboard | not started | Sonnet | — |
 | BL-006 | P2 | Live throughput + profiling dashboard | not started | Sonnet | — |
 
