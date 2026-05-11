@@ -76,13 +76,13 @@ if [[ "$DOMAIN" != "localhost" ]]; then
     SANS="${SANS},DNS:${DOMAIN},DNS:*.${DOMAIN}"
 
     # Add the specific service subdomains
-    for svc in auth webui grafana flowise prometheus; do
+    for svc in auth webui grafana flowise prometheus litellm qdrant minio dashboard; do
         SANS="${SANS},DNS:${svc}.${DOMAIN}"
     done
 fi
 
 # Always add the service subdomains for localhost
-for svc in auth webui grafana flowise prometheus; do
+for svc in auth webui grafana flowise prometheus litellm qdrant minio dashboard; do
     SANS="${SANS},DNS:${svc}.localhost"
 done
 

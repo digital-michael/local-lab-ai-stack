@@ -414,3 +414,45 @@ systemctl --user restart traefik.service
 ```
 
 Then import the generated CA cert into your browser's trusted certificate store.
+
+---
+
+### SSO login loop — service redirects to login but never completes
+
+When navigating to a service (e.g. `https://litellm.stack.localhost`) and the Authentik login page appears but clicking "Log In" loops back or shows a certificate error, the most common cause is a **missing TLS certificate SAN entry** for that hostname.
+
+**Diagnose:**
+```bash
+bash scripts/diagnose.sh --profile full
+# Look for lines: [FAIL] <hostname>   NOT in cert SAN list — SSO will break
+```
+
+Or check directly:
+```bash
+echo | openssl s_client -connect litellm.stack.localhost:443 \
+  -servername litellm.stack.localhost 2>/dev/null \
+  | openssl x509 -noout -ext subjectAltName
+```
+
+**Fix — add the missing hostname and regenerate:**
+
+1. Open `scripts/generate-tls.sh` and add the missing service name to both SAN loops (the `if [[ "$DOMAIN" != "localhost" ]]` block and the `for svc in ...` block below it).
+
+2. Regenerate and re-trust the CA:
+```bash
+DOMAIN=stack.localhost bash scripts/generate-tls.sh --force
+sudo cp ~/ai-stack/configs/tls/ca.crt /etc/pki/ca-trust/source/anchors/
+sudo update-ca-trust
+systemctl --user restart traefik.service
+```
+
+3. Clear your browser's certificate cache (or open a new private/incognito window) and retry.
+
+> **Note:** The CA is regenerated along with the server cert. Any browser or OS that previously trusted the old CA will need the new `ca.crt` re-imported.
+
+---
+
+### Loki / Promtail entries on the dashboard have no direct UI
+
+This is expected. Loki is an API-only log store; Promtail is a log shipping agent with no web interface. Neither should have a clickable link on the Homepage dashboard. To query logs from Loki, use **Grafana → Explore** (`https://grafana.stack.localhost/explore`).
+

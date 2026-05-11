@@ -1,3 +1,4 @@
-Access Key: iPXLNEQcHUtwVOpWResl
-Secret Key: GArSvVbpn6qUInlkG1s67YY6bmmXfFV0tn3NisTK
+# MinIO credentials — do not store here; use configs/credentials.local
+# Access Key: <redacted — rotate via MinIO console>
+# Secret Key: <redacted — rotate via MinIO console>
 

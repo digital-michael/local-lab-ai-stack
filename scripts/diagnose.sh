@@ -54,6 +54,7 @@ Profiles:
 
   full
     - Everything in quick, plus:
+    - TLS certificate SAN coverage (missing SANs silently break SSO forwardAuth)
     - Integration probes (cross-service auth & config correctness)
     - Config validation (configure.sh validate)
     - Secrets presence (all referenced podman secrets exist)
@@ -1405,6 +1406,110 @@ except Exception:
     return $fail
 }
 
+# ── Full check: TLS certificate SAN coverage ─────────────────────────────────
+# Verifies that the serving TLS cert covers every hostname that has a Traefik
+# router entry.  Missing SANs silently break SSO: the Authentik forwardAuth
+# redirect returns to the service URL, but the browser rejects the TLS cert at
+# that step — manifesting as a broken SSO loop rather than a clear TLS error.
+# Reads router Host() rules from the deployed Traefik dynamic config.
+
+_check_tls_san_coverage() {
+    echo ""
+    echo "  TLS Certificate SAN Coverage"
+
+    local tls_dir
+    tls_dir="$(jq -r '.ai_stack_dir' "$CONFIG_FILE" 2>/dev/null \
+        | sed "s|\\\$HOME|$HOME|g")/configs/tls"
+
+    local cert_file="$tls_dir/server.crt"
+    if [[ ! -f "$cert_file" ]]; then
+        printf "  [FAIL] %-28s cert not found at %s\n" "tls/cert" "$cert_file"
+        printf "         ! Fix: DOMAIN=stack.localhost bash scripts/generate-tls.sh --force\n"
+        printf "         !       systemctl --user restart traefik.service\n"
+        return 1
+    fi
+
+    # Extract SANs from the cert
+    local cert_sans
+    cert_sans=$(openssl x509 -noout -ext subjectAltName -in "$cert_file" 2>/dev/null \
+        | grep -oP 'DNS:[^,\s]+' | sed 's/DNS://g' | tr '[:upper:]' '[:lower:]' || true)
+
+    if [[ -z "$cert_sans" ]]; then
+        printf "  [WARN] %-28s could not parse SANs from cert\n" "tls/cert"
+        return 1
+    fi
+
+    # Collect hostnames from deployed Traefik dynamic config
+    local traefik_dyn_dir
+    traefik_dyn_dir="$(jq -r '.ai_stack_dir' "$CONFIG_FILE" 2>/dev/null \
+        | sed "s|\\\$HOME|$HOME|g")/configs/traefik/dynamic"
+
+    local router_hosts=()
+    if [[ -d "$traefik_dyn_dir" ]]; then
+        while IFS= read -r h; do
+            [[ -n "$h" ]] && router_hosts+=("$(echo "$h" | tr '[:upper:]' '[:lower:]')")
+        done < <(grep -hoPR "Host\(\`[^\`]+\`\)" "$traefik_dyn_dir"/*.yaml 2>/dev/null \
+            | grep -oP '`[^`]+`' | tr -d '`' | sort -u || true)
+    fi
+
+    if [[ ${#router_hosts[@]} -eq 0 ]]; then
+        printf "  [SKIP] %-28s no Traefik router Host() rules found in %s\n" "tls/san" "$traefik_dyn_dir"
+        return 0
+    fi
+
+    local fail=0
+    for host in "${router_hosts[@]}"; do
+        # Check: does any SAN cover this hostname (exact or wildcard)?
+        local covered=false
+        while IFS= read -r san; do
+            [[ -z "$san" ]] && continue
+            if [[ "$san" == "$host" ]]; then
+                covered=true; break
+            fi
+            # Wildcard match: *.example.com covers foo.example.com (one level only)
+            if [[ "$san" == \** ]]; then
+                local san_domain="${san#\*.}"
+                local host_domain="${host#*.}"
+                if [[ "$host_domain" == "$san_domain" && "$host" != "$san_domain" ]]; then
+                    covered=true; break
+                fi
+            fi
+        done <<< "$cert_sans"
+
+        if $covered; then
+            printf "  [PASS] %-36s covered\n" "$host"
+        else
+            printf "  [FAIL] %-36s NOT in cert SAN list — SSO will break\n" "$host"
+            printf "         ! Fix: add '%s' to generate-tls.sh SAN loop, then:\n" "$host"
+            printf "         !       DOMAIN=stack.localhost bash scripts/generate-tls.sh --force\n"
+            printf "         !       sudo cp %s/ca.crt /etc/pki/ca-trust/source/anchors/\n" "$tls_dir"
+            printf "         !       sudo update-ca-trust\n"
+            printf "         !       systemctl --user restart traefik.service\n"
+            fail=$((fail + 1))
+        fi
+    done
+
+    # Also report cert validity window
+    local not_after
+    not_after=$(openssl x509 -noout -enddate -in "$cert_file" 2>/dev/null \
+        | sed 's/notAfter=//' || true)
+    local exp_epoch now_epoch days_left
+    exp_epoch=$(date -d "$not_after" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$not_after" +%s 2>/dev/null || echo 0)
+    now_epoch=$(date +%s)
+    days_left=$(( (exp_epoch - now_epoch) / 86400 )) 2>/dev/null || days_left=0
+
+    if [[ "$days_left" -le 0 ]]; then
+        printf "  [FAIL] %-28s cert EXPIRED (%s)\n" "tls/expiry" "$not_after"
+        fail=$((fail + 1))
+    elif [[ "$days_left" -le 30 ]]; then
+        printf "  [WARN] %-28s cert expires in %d days (%s)\n" "tls/expiry" "$days_left" "$not_after"
+    else
+        printf "  [PASS] %-28s cert valid for %d days (expires %s)\n" "tls/expiry" "$days_left" "$not_after"
+    fi
+
+    return $fail
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 echo ""
@@ -1454,6 +1559,11 @@ _check_models || { model_ok=false; warn=$((warn + 1)); }
 # ── Full profile additions ────────────────────────────────────────────────────
 
 if [[ "$PROFILE" == "full" ]]; then
+
+    # TLS certificate SAN coverage (missing SANs silently break SSO)
+    tls_san_fail=0
+    _check_tls_san_coverage || tls_san_fail=$?
+    fail=$((fail + tls_san_fail))
 
     # Integration probes (cross-service auth/config)
     integ_fail=0
