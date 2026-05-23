@@ -77,11 +77,11 @@ System Prompt:
   - ./docs/feature.md - date time stamp and commit hash existing and new feature list
   - ./docs/decions.md - date time stamp and commit hash of implementation decision impacting a given assignment, usually focused on feature or API expression
   - ./docs/lessons-learned-[tech|other].md -  date time stamp, Last updated and Table of Contents of new observations not contained with in the LLM Agent's model, provided (markdown) materials or overtly found in a web-RAG process. This may be software or hardware technology, component versions, ways of working All technology related items go in lessons-learned-tech.md and ways or work and/or other learning go int lessons-learned-other.md. 
-  - ./docs/system-view.ms - contains a system archiectural-level diagram of components by domains, a  high-level call and response diagram for this solution/repo, an internal collaboration diagram for the entire solution, 
-    * use mermain diagram technology
+  - ./docs/system-view.ms - contains a system architectural-level diagram of components by domains, a high-level call and response diagram for this solution/repo, an internal collaboration diagram for the entire solution,
+    * use mermaid diagram technology
   - ./docs/wip/ - work in progress where the implementation plan (with status tracking) is managed 
-  Note: all create LLM Agent creatd outside of these are to be placed in ./docs/other/
-- enable an local, LLM Agent based "MCP Tooling" in ./tools/ for automatic availability:
+  Note: all LLM Agents created outside of these are to be placed in ./docs/other/
+- enable a local, LLM Agent based "MCP Tooling" in ./tools/ for automatic availability:
    1. work around Copilot's "write new file" defect: 
       - create python "write to new file" to work around built-in defect
  
@@ -89,12 +89,12 @@ System Prompt:
 - how the developer wants an LLM Agent to communicate with the developer
   * usually a .gitignore as this is personality-focused PII for devs
 - personal guidance:
-  1. three levels: programer (passive), engineer (refines), solutions analysist (alternative ideas and pushback)
+  1. three levels: programmer (passive), engineer (refines), solutions analyst (alternative ideas and pushback)
   2. examine, take ownership and migrated lessons-learned-other.md which are related to LLM-Agent to Human interaction.
 
 
 (Workflow) Assignment Workflow: 
-- automated files initalized and scheduled
+- automated files initialized and scheduled
 - assessment and refinement
 - prioritized planning
 - git commits schedule and commit messages
@@ -103,7 +103,7 @@ System Prompt:
 (Workflow) # Construction
 
 
-(Workflow) # Scheduling and Excution
+(Workflow) # Scheduling and Execution
 - 
 
 - Completed Assignment Verification
