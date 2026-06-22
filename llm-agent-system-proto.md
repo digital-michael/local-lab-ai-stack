@@ -1,3 +1,14 @@
+> **STATUS: SUPERSEDED**
+> This file is a pre-framework planning artifact. It has been replaced by the LLM Agent Collaboration Framework.
+> Authoritative governance is now defined at:
+> - Infrastructure: `/home/3pdx7/Documents/Entities/frameworks/llm-agent-framework/`
+> - Domain profile: `/home/3pdx7/Documents/Entities/frameworks/llm-agent-domains/cts/local-lab-ai-stack/README.md`
+> - Project governance: `docs/governance/` (in progress)
+>
+> **Do not load this file as active governance.** Retained for historical reference only.
+
+---
+
 # Define 
 System Prompt: 
 - role

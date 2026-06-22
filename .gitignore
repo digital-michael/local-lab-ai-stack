@@ -23,7 +23,6 @@ __pycache__/
 # Runtime and temp
 *.log
 *.pid
-tmp/
 testing/layer5_distributed/results/
 
 # Machine-local node profile override (not committed; set by configure.sh recommend)
@@ -37,3 +36,4 @@ output/
 docs/meta
 docs/meta_local/dynamics.md
 docs/meta_local/review_log.md
+docs/meta_local/agent-context.md
