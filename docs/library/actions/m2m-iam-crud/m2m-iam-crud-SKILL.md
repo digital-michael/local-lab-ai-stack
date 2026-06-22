@@ -33,7 +33,7 @@ Recommended validation before/after any CRUD action:
 
 ```bash
 bash scripts/configure.sh validate
-/home/3pdx7/Projects/active/llm-agent-local-2/.venv/bin/python -m pytest testing/security/test_m2m_gateway.py -q
+/home/3pdx7/Projects/active/local-lab-ai-stack/.venv/bin/python -m pytest testing/security/test_m2m_gateway.py -q
 ```
 
 ---
@@ -243,7 +243,7 @@ Then:
 
 ```bash
 bash scripts/configure.sh validate
-/home/3pdx7/Projects/active/llm-agent-local-2/.venv/bin/python -m pytest testing/security/test_m2m_gateway.py -q
+/home/3pdx7/Projects/active/local-lab-ai-stack/.venv/bin/python -m pytest testing/security/test_m2m_gateway.py -q
 ```
 
 ### U3. Update trusted interop policy

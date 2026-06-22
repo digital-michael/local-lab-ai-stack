@@ -405,7 +405,7 @@ After=postgres.service qdrant.service
 
 [Service]
 Type=oneshot
-ExecStart=%h/Projects/active/llm-agent-local-2/scripts/backup.sh
+ExecStart=%h/Projects/active/local-lab-ai-stack/scripts/backup.sh
 Environment=AI_STACK_DIR=%h/ai-stack
 ```
 

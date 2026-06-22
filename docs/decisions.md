@@ -1,4 +1,4 @@
-# Project Decisions — llm-agent-local-2
+# Project Decisions — local-lab-ai-stack
 **Last Updated:** 2026-03-24 UTC (D-034 added)
 **Target Audience:** LLM Agents
 

@@ -1,6 +1,6 @@
 # Headscale Installation Guide — Fedora 42+
 
-**Summary:** Step-by-step installation and configuration guide for running Headscale as a self-hosted WireGuard mesh coordination server on a Fedora 42+ Linode Nanode. Covers the full lifecycle: binary install, DERP relay, Caddy reverse proxy, node enrollment (controller + workers), script integration, Authentik OIDC, and ACL enforcement. Written for the llm-agent-local-2 AI stack.
+**Summary:** Step-by-step installation and configuration guide for running Headscale as a self-hosted WireGuard mesh coordination server on a Fedora 42+ Linode Nanode. Covers the full lifecycle: binary install, DERP relay, Caddy reverse proxy, node enrollment (controller + workers), script integration, Authentik OIDC, and ACL enforcement. Written for the local-lab-ai-stack AI stack.
 
 **Last Updated:** 2026-04-16
 **Headscale Version:** v0.28.0 (released 2026-02-04)
@@ -856,10 +856,10 @@ curl -I https://chat.${DOMAIN}
 
 ### 1.6 Set Networking Mode in config.json
 
-> **Runs as:** yourself on your **development machine**, from the repo root directory (`llm-agent-local-2/`).
+> **Runs as:** yourself on your **development machine**, from the repo root directory (`local-lab-ai-stack/`).
 
 ```bash
-cd /path/to/llm-agent-local-2   # skip if already there
+cd /path/to/local-lab-ai-stack   # skip if already there
 
 jq '.networking.mode = "headscale"' configs/config.json > /tmp/cfg.json && mv /tmp/cfg.json configs/config.json
 ```

@@ -1,5 +1,5 @@
 # Traefik static configuration
-# Managed by: llm-agent-local-2
+# Managed by: local-lab-ai-stack
 # Place at: $AI_STACK_DIR/configs/traefik/traefik.yaml
 #
 # Changes to this file require a container restart.
