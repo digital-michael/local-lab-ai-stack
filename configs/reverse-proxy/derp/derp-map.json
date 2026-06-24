@@ -1,0 +1,37 @@
+{
+  "_comment": [
+    "DERP map — ecotone-000 private relay",
+    "This map describes the embedded DERP relay served by Headscale.",
+    "Headscale distributes this map automatically to enrolled nodes via the",
+    "coordination protocol — you do not need to manually distribute this file.",
+    "",
+    "It is kept here for reference and for manual client configuration if needed",
+    "(e.g. debugging relay reachability with `tailscale netcheck`).",
+    "",
+    "STUN (UDP 3478) must be open on the photondatum.space firewall:",
+    "  sudo firewall-cmd --permanent --add-port=3478/udp",
+    "  sudo firewall-cmd --reload",
+    "",
+    "Verify relay reachability from any enrolled node:",
+    "  tailscale netcheck",
+    "  tailscale debug derp --region 999"
+  ],
+  "Regions": {
+    "999": {
+      "RegionID": 999,
+      "RegionCode": "ecotone-priv",
+      "RegionName": "ecotone-000 private relay",
+      "Nodes": [
+        {
+          "Name": "999a",
+          "RegionID": 999,
+          "HostName": "headscale.photondatum.space",
+          "DERPPort": 443,
+          "STUNPort": 3478,
+          "STUNOnly": false,
+          "InsecureForTests": false
+        }
+      ]
+    }
+  }
+}

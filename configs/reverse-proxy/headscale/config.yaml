@@ -1,0 +1,66 @@
+# Headscale reference configuration — photondatum.space
+# Full config lives at: /etc/headscale/config.yaml on photondatum.space
+# Permissions: chmod 600, root-owned
+# Restart: sudo systemctl restart headscale  (reload not supported)
+#
+# This file documents the deployment-specific values for the ecotone-000 tailnet.
+# Fields not listed here use Headscale v0.28.x defaults.
+
+# Public URL — must match --login-server on tailscale up
+server_url: https://headscale.photondatum.space
+
+# Headscale HTTP listen address.
+# Caddy proxies headscale.photondatum.space:443 → localhost:8080.
+listen_addr: 127.0.0.1:8080
+
+# Metrics endpoint (Prometheus-compatible); not exposed publicly.
+metrics_listen_addr: 127.0.0.1:9090
+
+# gRPC — used by the headscale CLI and Headplane.
+# Headplane connects to localhost:50443 on the same host.
+grpc_listen_addr: 127.0.0.1:50443
+grpc_allow_insecure: false
+
+# Private network range (CGNAT — RFC 6598 / RFC 4193)
+ip_prefixes:
+  - 100.64.0.0/10
+  - fd7a:115c:a1e0::/48
+
+# ACL policy — defines who can talk to whom and Tailscale SSH rules
+acl_policy_path: /etc/headscale/acl.json
+
+# Database
+database:
+  type: sqlite
+  sqlite:
+    path: /var/lib/headscale/db.sqlite
+
+# ── Embedded DERP relay server ────────────────────────────────────────────────
+# Headscale serves its own DERP relay at /derp on the coordination endpoint.
+# Caddy proxies HTTPS traffic, so the relay is reachable at:
+#   https://headscale.photondatum.space/derp
+#
+# STUN (UDP 3478) is handled directly by Headscale — Caddy cannot proxy UDP.
+# Firewall rule required on photondatum.space:
+#   sudo firewall-cmd --permanent --add-port=3478/udp && sudo firewall-cmd --reload
+derp:
+  server:
+    enabled: true
+    region_id: 999
+    region_code: ecotone-priv
+    region_name: "ecotone-000 private relay"
+    stun_listen_addr: 0.0.0.0:3478
+  # Disable Tailscale's public DERP servers — use embedded relay only.
+  urls: []
+  paths: []
+  auto_update_enabled: false
+  update_frequency: 0s
+
+# Noise (WireGuard key exchange)
+noise:
+  private_key_path: /var/lib/headscale/noise_private.key
+
+# Log level
+log:
+  level: info
+  format: text

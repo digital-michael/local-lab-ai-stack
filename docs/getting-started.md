@@ -281,6 +281,131 @@ A SELinux health warning (`SELinux is enabled; Tailscale SSH may not work`) appe
 
 ---
 
+## Step 15 — Configure the public reverse proxy (optional, internet-facing deployments)
+
+If you need to expose AI stack services to the internet, a Caddy instance on a public host acts as the TLS-terminating reverse proxy. Traffic is forwarded to CENTAURI through the WireGuard tailnet established in Steps 13–14.
+
+### Architecture
+
+```
+Browser (HTTPS)
+  └─► <public-host>:443  (Caddy — TLS via Let's Encrypt, TLS-ALPN-01)
+           │  WireGuard tunnel (Headscale tailnet)
+           ▼
+      CENTAURI <tailnet-ip>:443  (Traefik — self-signed *.stack.localhost cert)
+           │
+           ▼
+      http://<service>.ai-stack:<port>  (container network)
+```
+
+### What you need
+
+- Caddy installed on the public host (`caddy` package or via [caddyserver.com](https://caddyserver.com/download))
+- Public host enrolled in the Headscale tailnet (Step 13)
+- Port 443 open and publicly reachable on the public host (for TLS-ALPN-01 certificate issuance)
+- DNS `A` records pointing each subdomain at the public host's IP
+- Port 80 is **not** required — Caddy uses TLS-ALPN-01
+
+### Caddyfile pattern
+
+Reference config: `configs/reverse-proxy/caddy/Caddyfile`
+
+Each exposed service gets its own `server_name.yourdomain.com` block. Two Caddy behaviours require explicit configuration:
+
+1. **Host header**: when the upstream is an IP address with TLS, Caddy sets `Host` to the upstream IP, not the original request hostname. Always use `header_up Host` to set the value Traefik's router expects.
+2. **DERP / HTTP Upgrade**: Headscale's embedded DERP relay uses the HTTP/1.1 `Upgrade` mechanism. Both the frontend ALPN (`tls { alpn http/1.1 }`) and the backend transport (`transport http { versions 1.1 }`) must restrict to HTTP/1.1; fixing only one is not sufficient.
+
+```caddy
+# Headscale coordination server (if co-located on this host)
+# tls { alpn } and transport versions 1.1 are both required for DERP relay.
+headscale.yourdomain.com {
+    tls {
+        alpn http/1.1
+    }
+    reverse_proxy localhost:8080 {
+        transport http { versions 1.1 }
+    }
+}
+
+# Authentik SSO — required for external auth redirects to resolve
+auth.yourdomain.com {
+    reverse_proxy <centauri-tailnet-ip>:443 {
+        header_up Host auth.stack.localhost
+        transport http { tls_insecure_skip_verify }
+    }
+}
+
+# Services using an existing *.stack.localhost Traefik router (no new Traefik config needed)
+flowise.yourdomain.com {
+    reverse_proxy <centauri-tailnet-ip>:443 {
+        header_up Host flowise.stack.localhost
+        transport http { tls_insecure_skip_verify }
+    }
+}
+
+# Services exposed at their external hostname with a dedicated Traefik router
+# (needed when the service must bypass Authentik for external users — see below)
+chat.yourdomain.com {
+    reverse_proxy <centauri-tailnet-ip>:443 {
+        header_up Host chat.yourdomain.com   # matches openwebui-public router in services.yaml
+        transport http { tls_insecure_skip_verify }
+    }
+}
+```
+
+`tls_insecure_skip_verify` is required because Traefik presents a self-signed `*.stack.localhost` certificate. This is safe — the WireGuard tunnel provides transport security.
+
+### Authentik SSO — two approaches for external access
+
+Traefik's `forwardAuth` redirects unauthenticated users to Authentik. The redirect URL is built from the outpost's **External URL** (configured in the Authentik admin UI). This creates a constraint for external browsers:
+
+#### Option A — Authentik SSO for external users (full SSO flow)
+
+Works when you have a dedicated Authentik outpost whose External URL is your public domain:
+
+1. In Authentik admin UI, create a second outpost with External URL `https://auth.yourdomain.com`.
+2. Use `header_up Host <service>.stack.localhost` in Caddy to route through the existing `*.stack.localhost` Traefik router.
+3. Add a Traefik middleware pointing at the new outpost and apply it to the router.
+
+This preserves SSO for both local and external users but requires a second Authentik outpost.
+
+#### Option B — bypass Authentik for external users (simpler, uses the service's own auth)
+
+Works when the service has its own authentication (e.g., OpenWebUI) and you don't want to modify the existing Authentik outpost:
+
+1. Add a dedicated Traefik router for the external hostname that intentionally omits the `authentik` middleware (see `openwebui-public` in `configs/traefik/dynamic/services.yaml`).
+2. Use `header_up Host chat.yourdomain.com` in Caddy so Traefik matches that router.
+
+Local users continue to use Authentik SSO through the existing `*.stack.localhost` router. External users authenticate directly with the service.
+
+The AI stack ships with Option B configured for `chat.photondatum.space` / OpenWebUI.
+
+### Firewall rules on the public host
+
+```bash
+# HTTPS for Caddy (also used by TLS-ALPN-01 cert issuance)
+sudo firewall-cmd --permanent --add-service=https
+
+# STUN — required for DERP relay NAT traversal (UDP)
+sudo firewall-cmd --permanent --add-port=3478/udp
+
+sudo firewall-cmd --reload
+```
+
+### Verify
+
+```bash
+# Certificate issued by Let's Encrypt (not self-signed)
+echo | openssl s_client -connect chat.yourdomain.com:443 \
+  -servername chat.yourdomain.com 2>&1 | grep issuer
+
+# Backend reachable through the tunnel
+curl -sk -o /dev/null -w "%{http_code}" https://chat.yourdomain.com/
+# Expect 200 or 302 (Authentik redirect) — not a TLS error
+```
+
+---
+
 ## Quick Reference — Day-to-Day Commands
 
 | Goal | Command |

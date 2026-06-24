@@ -154,6 +154,20 @@ http:
         - secure-headers
       tls: {}
 
+    # Public entry — chat.photondatum.space proxied via Caddy on photondatum.space.
+    # Caddy forwards Host: chat.photondatum.space so this router matches.
+    # Intentionally excludes the authentik middleware: the Authentik outpost External URL
+    # is auth.stack.localhost (LAN-only), so forwardAuth redirects would fail in external
+    # browsers. OpenWebUI's own authentication handles external access.
+    openwebui-public:
+      rule: "Host(`chat.photondatum.space`)"
+      entryPoints:
+        - websecure
+      service: openwebui
+      middlewares:
+        - secure-headers
+      tls: {}
+
   services:
     openwebui:
       loadBalancer:

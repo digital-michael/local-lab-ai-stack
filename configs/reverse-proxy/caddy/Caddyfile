@@ -1,0 +1,100 @@
+# Caddy reverse proxy — photondatum.space
+# Deploy at:  /etc/caddy/Caddyfile on photondatum.space
+# Validate:   sudo caddy validate --config /etc/caddy/Caddyfile
+# Reload:     sudo systemctl reload caddy
+# Logs:       sudo journalctl -u caddy -f
+#
+# TLS: Automatic via TLS-ALPN-01 (port 443 must be reachable from Let's Encrypt).
+#      Port 80 is not available on this host.
+#
+# Backend: CENTAURI at tailnet IP 100.64.0.4:443 via WireGuard.
+#   Traefik is bound to 0.0.0.0:443 on CENTAURI and is reachable at this IP.
+#   Traefik presents a self-signed *.stack.localhost cert on all connections;
+#   tls_insecure_skip_verify is required. Transport security is provided by WireGuard.
+#
+# Routing: When the upstream is an IP address with TLS, Caddy sets the Host header to
+#   the upstream IP, not the original hostname. Each block must use header_up Host to
+#   set the correct value so Traefik's router rules match.
+#   - auth, flowise, grafana, etc.: header_up Host <service>.stack.localhost (existing routers)
+#   - chat: header_up Host chat.photondatum.space (openwebui-public router, no Authentik)
+#
+# SSO: chat.photondatum.space bypasses Authentik forwardAuth — the outpost External URL is
+#   auth.stack.localhost (LAN-only), so forwardAuth would redirect external browsers to an
+#   unresolvable domain. OpenWebUI's own auth handles external access instead.
+#   See §7.15 of CENTAURI-playbook.md for the full SSO architecture.
+
+# ── Root domain — redirect to primary interface ───────────────────────────────
+photondatum.space {
+    redir https://chat.photondatum.space{uri} permanent
+}
+
+# ── Headscale coordination server + embedded DERP relay ──────────────────────
+# Nodes enroll via: tailscale up --login-server https://headscale.photondatum.space
+# Headscale listens on 127.0.0.1:8080; Caddy provides TLS termination.
+# Embedded DERP is served at https://headscale.photondatum.space/derp — no separate
+# derp.* block needed. STUN (UDP 3478) is handled directly by Headscale.
+#
+# Two HTTP/2 issues must both be addressed for DERP relay to work:
+#   1. Frontend ALPN: Caddy must offer only http/1.1 to clients (tls { alpn http/1.1 }).
+#      If h2 is negotiated, Tailscale clients can't do the HTTP Upgrade to start DERP.
+#   2. Backend transport: Caddy must use HTTP/1.1 to Headscale (transport http { versions 1.1 }).
+#      Both are required; fixing only one is not sufficient.
+headscale.photondatum.space {
+    tls {
+        alpn http/1.1
+    }
+    reverse_proxy 127.0.0.1:8080 {
+        transport http {
+            versions 1.1
+        }
+    }
+}
+
+# ── Authentik SSO — required for external auth flow ──────────────────────────
+auth.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host auth.stack.localhost
+        transport http {
+            tls_insecure_skip_verify
+        }
+    }
+}
+
+# ── OpenWebUI — primary AI chat interface ────────────────────────────────────
+# Host header is NOT rewritten: Traefik matches the dedicated openwebui-public router
+# (Host: chat.photondatum.space) which intentionally omits the authentik middleware.
+# The Authentik outpost External URL is auth.stack.localhost (LAN-only); forwardAuth
+# would redirect external browsers to an unresolvable domain.
+# OpenWebUI's own authentication handles external user access.
+chat.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        # Caddy sets Host to the upstream IP when the backend is an IP+TLS address.
+        # Explicitly restore it so Traefik matches the openwebui-public router.
+        header_up Host chat.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+        }
+    }
+
+    handle_errors {
+        respond "AI Stack is currently offline. Services will resume when the controller comes back online." 503
+    }
+}
+
+# ── Additional services — uncomment to expose ────────────────────────────────
+# Pattern: pick a subdomain, rewrite Host to the *.stack.localhost entry in
+# configs/traefik/dynamic/services.yaml. No Traefik changes required.
+
+# flowise.photondatum.space {
+#     reverse_proxy 100.64.0.4:443 {
+#         header_up Host flowise.stack.localhost
+#         transport http { tls_insecure_skip_verify }
+#     }
+# }
+
+# grafana.photondatum.space {
+#     reverse_proxy 100.64.0.4:443 {
+#         header_up Host grafana.stack.localhost
+#         transport http { tls_insecure_skip_verify }
+#     }
+# }
