@@ -168,6 +168,17 @@ http:
         - secure-headers
       tls: {}
 
+    # Public: chat.photondatum.com → same pattern as openwebui-public above.
+    # auth.photondatum.com needs no router here — Caddy rewrites Host to auth.stack.localhost.
+    openwebui-public-com:
+      rule: "Host(`chat.photondatum.com`)"
+      entryPoints:
+        - websecure
+      service: openwebui
+      middlewares:
+        - secure-headers
+      tls: {}
+
   services:
     openwebui:
       loadBalancer:

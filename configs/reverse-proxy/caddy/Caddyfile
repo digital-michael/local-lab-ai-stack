@@ -1,11 +1,13 @@
-# Caddy reverse proxy — photondatum.space
-# Deploy at:  /etc/caddy/Caddyfile on photondatum.space
+# Caddy reverse proxy — photondatum.space / photondatum.com
+# Deploy at:  /etc/caddy/Caddyfile on the photondatum server
 # Validate:   sudo caddy validate --config /etc/caddy/Caddyfile
 # Reload:     sudo systemctl reload caddy
 # Logs:       sudo journalctl -u caddy -f
 #
-# TLS: Automatic via TLS-ALPN-01 (port 443 must be reachable from Let's Encrypt).
-#      Port 80 is not available on this host.
+# TLS: Automatic via TLS-ALPN-01 on port 443. Caddy does NOT bind port 80.
+#      auto_https disable_redirects suppresses Caddy's built-in HTTP redirect
+#      server, freeing port 80 for nginx to serve the static root site.
+#      nginx handles HTTP; Caddy handles HTTPS only.
 #
 # Backend: CENTAURI at tailnet IP 100.64.0.4:443 via WireGuard.
 #   Traefik is bound to 0.0.0.0:443 on CENTAURI and is reachable at this IP.
@@ -23,9 +25,19 @@
 #   unresolvable domain. OpenWebUI's own auth handles external access instead.
 #   See §7.15 of CENTAURI-playbook.md for the full SSO architecture.
 
-# ── Root domain — redirect to primary interface ───────────────────────────────
+{
+    # Caddy does NOT bind port 80. nginx owns port 80 for HTTP.
+    # Certs are obtained via TLS-ALPN-01 on port 443 only.
+    auto_https disable_redirects
+}
+
+# ── Root domain — static site (HTTPS; nginx owns HTTP on port 80) ────────────
+# Caddy serves HTTPS for this domain directly via file_server.
+# nginx on port 80 handles HTTP for the same content.
+# Update root path to match the actual document root on this server.
 photondatum.space {
-    redir https://chat.photondatum.space{uri} permanent
+    root * /var/www/photondatum
+    file_server
 }
 
 # ── Headscale coordination server + embedded DERP relay ──────────────────────
@@ -43,9 +55,20 @@ headscale.photondatum.space {
     tls {
         alpn http/1.1
     }
-    reverse_proxy 127.0.0.1:8080 {
-        transport http {
-            versions 1.1
+
+    # Root path has no content — return 404 rather than an empty 200.
+    # All Headscale API paths (/key, /register, /oidc/*, /derp, /health) fall
+    # through to the reverse_proxy block below.
+    @root path /
+    handle @root {
+        respond "Not Found" 404
+    }
+
+    handle {
+        reverse_proxy 127.0.0.1:8080 {
+            transport http {
+                versions 1.1
+            }
         }
     }
 }
@@ -71,6 +94,45 @@ chat.photondatum.space {
         # Caddy sets Host to the upstream IP when the backend is an IP+TLS address.
         # Explicitly restore it so Traefik matches the openwebui-public router.
         header_up Host chat.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+        }
+    }
+
+    handle_errors {
+        respond "AI Stack is currently offline. Services will resume when the controller comes back online." 503
+    }
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# photondatum.com — public entry point (Let's Encrypt via TLS-ALPN-01)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Root domain — static site (HTTPS; nginx owns HTTP on port 80) ────────────
+photondatum.com {
+    root * /var/www/photondatum
+    file_server
+}
+
+# ── Authentik SSO ─────────────────────────────────────────────────────────────
+# Host is rewritten to auth.stack.localhost so the existing Traefik router matches.
+# No new Traefik router needed.
+auth.photondatum.com {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host auth.stack.localhost
+        transport http {
+            tls_insecure_skip_verify
+        }
+    }
+}
+
+# ── OpenWebUI — primary AI chat interface ─────────────────────────────────────
+# Host is NOT rewritten: Traefik matches the openwebui-public-com router
+# (Host: chat.photondatum.com) which intentionally omits the authentik middleware.
+# OpenWebUI's own authentication handles external user access.
+chat.photondatum.com {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host chat.photondatum.com
         transport http {
             tls_insecure_skip_verify
         }
