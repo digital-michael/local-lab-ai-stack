@@ -53,7 +53,7 @@ https://headscale.photondatum.space {
 }
 
 # ── Forgejo — git hosting ─────────────────────────────────────────────────────
-https://git.photondatum.space {
+git.photondatum.space {
     reverse_proxy 127.0.0.1:3000
 }
 
