@@ -89,6 +89,13 @@ https://chat.photondatum.space {
     }
 }
 
+# ── Forgejo — git hosting ─────────────────────────────────────────────────────
+# Forgejo runs on photondatum.space itself at localhost:3000 (plain HTTP).
+# No tls_insecure_skip_verify or header_up Host needed — local HTTP backend.
+https://git.photondatum.space {
+    reverse_proxy 127.0.0.1:3000
+}
+
 # ── Additional services — uncomment to expose ────────────────────────────────
 # Pattern: pick a subdomain, rewrite Host to the *.stack.localhost entry in
 # configs/traefik/dynamic/services.yaml. No Traefik changes required.
