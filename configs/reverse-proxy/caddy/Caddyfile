@@ -89,6 +89,12 @@ https://chat.photondatum.space {
     }
 }
 
+# ── mail — no webmail service; serves static site to avoid connection errors ──
+https://mail.photondatum.space {
+    root * /var/www/photondatum
+    file_server
+}
+
 # ── Forgejo — git hosting ─────────────────────────────────────────────────────
 # Forgejo runs on photondatum.space itself at localhost:3000 (plain HTTP).
 # No tls_insecure_skip_verify or header_up Host needed — local HTTP backend.
