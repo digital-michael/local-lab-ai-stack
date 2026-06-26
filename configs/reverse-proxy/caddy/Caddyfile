@@ -1,57 +1,46 @@
-# Caddy reverse proxy — photondatum.space
+# Caddy — photondatum.space
 # Deploy at:  /etc/caddy/Caddyfile on the photondatum server
 # Validate:   sudo caddy validate --config /etc/caddy/Caddyfile
 # Reload:     sudo systemctl reload caddy
 # Logs:       sudo journalctl -u caddy -f
 #
-# TLS: Automatic via TLS-ALPN-01 on port 443 only.
-#      All site addresses are prefixed with https:// so Caddy never binds port 80.
-#      nginx owns port 80 for HTTP serving of the static root site.
+# TLS: Automatic via Let's Encrypt (TLS-ALPN-01 on :443).
+#      Caddy owns both :80 (HTTP→HTTPS redirects) and :443 (content + TLS).
+#      Static site blocks use bare hostnames — Caddy serves :443 and auto-redirects :80.
+#      Service blocks use https:// prefix — HTTPS-only, no HTTP redirect needed.
 #
 # Backend: CENTAURI at tailnet IP 100.64.0.4:443 via WireGuard.
-#   Traefik is bound to 0.0.0.0:443 on CENTAURI and is reachable at this IP.
-#   Traefik presents a self-signed *.stack.localhost cert on all connections;
-#   tls_insecure_skip_verify is required. Transport security is provided by WireGuard.
+#   Traefik presents a self-signed *.stack.localhost cert; tls_insecure_skip_verify
+#   is required. Transport security is provided by WireGuard.
 #
-# Routing: When the upstream is an IP address with TLS, Caddy sets the Host header to
-#   the upstream IP, not the original hostname. Each block must use header_up Host to
-#   set the correct value so Traefik's router rules match.
-#   - auth, flowise, grafana, etc.: header_up Host <service>.stack.localhost (existing routers)
-#   - chat: header_up Host chat.photondatum.space (openwebui-public router, no Authentik)
+# Host header: when the upstream is an IP+TLS address, Caddy sets Host to the IP.
+#   Each CENTAURI block uses header_up Host to set the value Traefik expects.
 #
-# SSO: chat.photondatum.space bypasses Authentik forwardAuth — the outpost External URL is
-#   auth.stack.localhost (LAN-only), so forwardAuth would redirect external browsers to an
-#   unresolvable domain. OpenWebUI's own auth handles external access instead.
-#   See §7.15 of CENTAURI-playbook.md for the full SSO architecture.
-
-{
-    # https:// prefix on all site blocks is the correct way to prevent Caddy from
-    # binding port 80. auto_https disable_redirects alone is NOT sufficient —
-    # Caddy still binds :80 even with that option set.
-    auto_https disable_redirects
-}
+# SSO: chat.photondatum.space bypasses Authentik — the outpost External URL is
+#   auth.stack.localhost (LAN-only). OpenWebUI's own auth handles external access.
 
 # ══════════════════════════════════════════════════════════════════════════════
-# photondatum.space
+# Static site — served by Caddy's file_server on :80 and :443
 # ══════════════════════════════════════════════════════════════════════════════
 
-# ── Root domain — static site (HTTPS; nginx owns HTTP on port 80) ────────────
-https://photondatum.space {
+photondatum.space {
     root * /var/www/photondatum
     file_server
 }
 
+mail.photondatum.space {
+    root * /var/www/photondatum
+    file_server
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Local services — running on photondatum.space itself
+# ══════════════════════════════════════════════════════════════════════════════
+
 # ── Headscale coordination server + embedded DERP relay ──────────────────────
-# Nodes enroll via: tailscale up --login-server https://headscale.photondatum.space
-# Headscale listens on 127.0.0.1:8080; Caddy provides TLS termination.
-# Embedded DERP is served at https://headscale.photondatum.space/derp — no separate
-# derp.* block needed. STUN (UDP 3478) is handled directly by Headscale.
-#
-# Two HTTP/2 issues must both be addressed for DERP relay to work:
-#   1. Frontend ALPN: Caddy must offer only http/1.1 to clients (tls { alpn http/1.1 }).
-#      If h2 is negotiated, Tailscale clients can't do the HTTP Upgrade to start DERP.
-#   2. Backend transport: Caddy must use HTTP/1.1 to Headscale (transport http { versions 1.1 }).
-#      Both are required; fixing only one is not sufficient.
+# Two HTTP/2 issues must both be fixed for DERP relay to work:
+#   1. Frontend ALPN: tls { alpn http/1.1 } — prevents Caddy negotiating h2 with clients.
+#   2. Backend transport: versions 1.1 — prevents Caddy using h2 to Headscale.
 https://headscale.photondatum.space {
     tls {
         alpn http/1.1
@@ -63,7 +52,16 @@ https://headscale.photondatum.space {
     }
 }
 
-# ── Authentik SSO — required for external auth flow ──────────────────────────
+# ── Forgejo — git hosting ─────────────────────────────────────────────────────
+https://git.photondatum.space {
+    reverse_proxy 127.0.0.1:3000
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CENTAURI services — proxied over WireGuard tailnet to 100.64.0.4:443
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Authentik SSO ─────────────────────────────────────────────────────────────
 https://auth.photondatum.space {
     reverse_proxy 100.64.0.4:443 {
         header_up Host auth.stack.localhost
@@ -73,11 +71,9 @@ https://auth.photondatum.space {
     }
 }
 
-# ── OpenWebUI — primary AI chat interface ─────────────────────────────────────
+# ── OpenWebUI — AI chat interface ─────────────────────────────────────────────
 https://chat.photondatum.space {
     reverse_proxy 100.64.0.4:443 {
-        # Caddy sets Host to the upstream IP when the backend is an IP+TLS address.
-        # Explicitly restore it so Traefik matches the openwebui-public router.
         header_up Host chat.photondatum.space
         transport http {
             tls_insecure_skip_verify
@@ -89,22 +85,8 @@ https://chat.photondatum.space {
     }
 }
 
-# ── mail — no webmail service; serves static site to avoid connection errors ──
-https://mail.photondatum.space {
-    root * /var/www/photondatum
-    file_server
-}
-
-# ── Forgejo — git hosting ─────────────────────────────────────────────────────
-# Forgejo runs on photondatum.space itself at localhost:3000 (plain HTTP).
-# No tls_insecure_skip_verify or header_up Host needed — local HTTP backend.
-https://git.photondatum.space {
-    reverse_proxy 127.0.0.1:3000
-}
-
-# ── Additional services — uncomment to expose ────────────────────────────────
-# Pattern: pick a subdomain, rewrite Host to the *.stack.localhost entry in
-# configs/traefik/dynamic/services.yaml. No Traefik changes required.
+# ── Additional CENTAURI services — uncomment to expose ───────────────────────
+# Pattern: header_up Host to the *.stack.localhost Traefik router for the service.
 
 # https://flowise.photondatum.space {
 #     reverse_proxy 100.64.0.4:443 {
