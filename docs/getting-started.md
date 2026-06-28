@@ -314,6 +314,11 @@ Each exposed service gets its own `server_name.yourdomain.com` block. Two Caddy 
 
 1. **Host header**: when the upstream is an IP address with TLS, Caddy sets `Host` to the upstream IP, not the original request hostname. Always use `header_up Host` to set the value Traefik's router expects.
 2. **DERP / HTTP Upgrade**: Headscale's embedded DERP relay uses the HTTP/1.1 `Upgrade` mechanism. Both the frontend ALPN (`tls { alpn http/1.1 }`) and the backend transport (`transport http { versions 1.1 }`) must restrict to HTTP/1.1; fixing only one is not sufficient.
+3. **Headscale embedded DERP is disabled by default** — `derp.server.enabled: false` in headscale's default config. Without enabling it, Headscale's SPA returns HTML for `/derp` requests and the relay silently fails. Three fields must all be set in `/etc/headscale/config.yaml`:
+   - `derp.server.enabled: true`
+   - `derp.server.private_key_path: /var/lib/headscale/derp_server_private.key`
+   - `server_url: https://headscale.yourdomain.com` — must be the actual domain, not a placeholder; this is what Headscale advertises as the embedded DERP hostname to clients
+   Verify DERP is live: `curl http://127.0.0.1:8080/derp/probe` must return `DERP ALIVE` (HTML = DERP disabled).
 
 ```caddy
 # Headscale coordination server (if co-located on this host)

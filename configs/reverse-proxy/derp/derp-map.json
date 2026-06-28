@@ -1,30 +1,31 @@
 {
   "_comment": [
-    "DERP map — ecotone-000 private relay",
-    "This map describes the embedded DERP relay served by Headscale.",
-    "Headscale distributes this map automatically to enrolled nodes via the",
-    "coordination protocol — you do not need to manually distribute this file.",
+    "DERP map — ecotone-000 private relay (reference only)",
+    "Headscale distributes the embedded DERP map automatically to enrolled nodes via the",
+    "coordination protocol when derp.server.enabled: true. You do not need to load this file.",
+    "paths: [] in config.yaml ensures this file is NOT loaded — a region_id collision between",
+    "this file and the embedded server causes a headscale startup conflict.",
     "",
-    "It is kept here for reference and for manual client configuration if needed",
-    "(e.g. debugging relay reachability with `tailscale netcheck`).",
+    "This file is kept as a reference describing the embedded relay parameters.",
     "",
     "STUN (UDP 3478) must be open on the photondatum.space firewall:",
     "  sudo firewall-cmd --permanent --add-port=3478/udp",
     "  sudo firewall-cmd --reload",
     "",
     "Verify relay reachability from any enrolled node:",
+    "  curl http://127.0.0.1:8080/derp/probe   # must return: DERP ALIVE",
     "  tailscale netcheck",
-    "  tailscale debug derp --region 999"
+    "  tailscale debug derp --region 900"
   ],
   "Regions": {
-    "999": {
-      "RegionID": 999,
-      "RegionCode": "ecotone-priv",
-      "RegionName": "ecotone-000 private relay",
+    "900": {
+      "RegionID": 900,
+      "RegionCode": "headscale",
+      "RegionName": "Headscale",
       "Nodes": [
         {
-          "Name": "999a",
-          "RegionID": 999,
+          "Name": "900a",
+          "RegionID": 900,
           "HostName": "headscale.photondatum.space",
           "DERPPort": 443,
           "STUNPort": 3478,
