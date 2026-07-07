@@ -15,10 +15,37 @@ LAN/tailnet), but external SSO login fails.
 
 ---
 
+## Dependencies
+
+### Infrastructure (must exist before deployment)
+
+| Dependency | Required by | Notes |
+| --- | --- | --- |
+| Public IPv4 address | All groups | VPS with static IP |
+| Domain name with DNS control | `ai-stack-edge` (Caddy) | `*.photondatum.space` A records must resolve to this IP |
+| Ports 80, 443 (TCP) open inbound | `ai-stack-edge` (Caddy) | Firewall rule required |
+| Port 3478 (UDP) open inbound | `ai-stack-mesh` (Headscale STUN) | Firewall rule required; Caddy cannot proxy UDP |
+| Podman 5.0+ installed | `ai-stack-iam` containers | Only IAM group uses containers on this host |
+
+### External services (no role dependency)
+
+The edge role has no upstream role dependency — it is the foundation all other
+roles depend on. It must be deployed before controller and worker roles can
+receive external SSO authentication.
+
+### Role dependencies (downstream — roles that require edge to function)
+
+| Dependent role | What breaks without edge |
+| --- | --- |
+| Controller role | External SSO login fails; Traefik `forwardAuth` cannot reach Authentik |
+| Worker role | Tailscale enrollment requires Headscale on edge |
+
+---
+
 ## Target Hardware Profile
 
 | Property | Minimum | Recommended |
-|---|---|---|
+| --- | --- | --- |
 | RAM | 1 GB | 2 GB |
 | CPU | 1 vCPU | 2 vCPU |
 | Storage | 20 GB | 40 GB |
@@ -42,7 +69,7 @@ stack — social login, local accounts, MFA, and OIDC delegation to all services
 **SystemD target:** `ai-stack-iam.target`
 
 | Container | Image | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `ai-stack-iam-authentik` | `ghcr.io/goauthentik/server` | Authentik server (IdP, SSO, OIDC) |
 | `ai-stack-iam-authentik-worker` | `ghcr.io/goauthentik/server` | Celery worker (background tasks, outpost sync) |
 | `ai-stack-iam-postgres` | `docker.io/library/postgres:16` | Authentik database — not shared |
@@ -51,7 +78,7 @@ stack — social login, local accounts, MFA, and OIDC delegation to all services
 **Volumes:**
 
 | Volume | Mount | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `ai-stack-iam-postgres-data` | `/var/lib/postgresql/data` | Persistent database |
 | `ai-stack-iam-redis-data` | `/data` | Persistent cache (optional — can be ephemeral) |
 | `ai-stack-iam-authentik-media` | `/media` | Authentik static assets, custom branding |
@@ -86,18 +113,18 @@ containerized — it requires host network namespace access for WireGuard).
 **SystemD target:** `ai-stack-mesh.target`
 
 | Container | Image | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `ai-stack-mesh-headscale` | `ghcr.io/juanfont/headscale` | Coordination server + embedded DERP relay |
 | `ai-stack-mesh-headplane` | `ghcr.io/tale/headplane` | Headscale web admin UI |
 
 **Host services (not containerized):**
 | Service | Manager | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `tailscale` | systemd | WireGuard mesh agent; host network required |
 
 **Volumes:**
 | Volume | Mount | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | (bind) `/var/lib/headscale` | `/var/lib/headscale` | Headscale DB, keys, state |
 | (bind) `/etc/headscale` | `/etc/headscale` | Headscale config, ACL |
 
@@ -110,7 +137,7 @@ containerized — it requires host network namespace access for WireGuard).
 
 **Port requirements:**
 | Port | Protocol | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | 443 | TCP | Headscale (proxied by Caddy) |
 | 3478 | UDP | STUN — Caddy cannot proxy UDP; firewall must allow |
 
@@ -127,12 +154,12 @@ Authentik via OIDC.
 **SystemD target:** `ai-stack-edge.target`
 
 | Container | Image | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `ai-stack-edge-caddy` | `docker.io/library/caddy:2` | TLS termination, public reverse proxy, forward_auth |
 
 **External services (not containerized, not managed by this role):**
 | Service | Auth integration |
-|---|---|
+| --- | --- |
 | Forgejo | OIDC source configured in Forgejo admin → Authentication Sources; delegates to `ai-stack-iam-authentik` |
 
 **Caddy patterns:**
@@ -190,6 +217,39 @@ SystemD target for full role: `ai-stack-edge-role.target`
 
 ---
 
+## Scripts Reference
+
+Most edge role services (Caddy, Headscale, Headplane, Forgejo) are native
+systemd services on this host — they are managed by `systemctl` directly, not
+by the ai-stack automation scripts. The scripts below apply only to the IAM
+group containers deployed via Podman quadlets.
+
+| Script | Applies to | Purpose |
+| --- | --- | --- |
+| `scripts/install.sh` | IAM containers | Install Podman and create storage layout on the edge host |
+| `scripts/validate-system.sh` | IAM containers | Validate Podman version and storage prerequisites |
+| `scripts/configure.sh generate-secrets` | `ai-stack-iam-*` | Provision Podman secrets for Authentik, PostgreSQL, Redis |
+| `scripts/configure.sh generate-quadlets` | `ai-stack-iam-*` | Generate systemd quadlet `.container` and `.network` files |
+| `scripts/deploy.sh` | `ai-stack-iam-*` | Validate config, generate quadlets, create `ai-stack-iam` network |
+| `scripts/start.sh` | `ai-stack-iam-*` | Start IAM containers in dependency order |
+| `scripts/stop.sh` | `ai-stack-iam-*` | Stop IAM containers |
+| `scripts/status.sh` | `ai-stack-iam-*` | Health status of deployed IAM containers |
+| `scripts/diagnose.sh` | `ai-stack-iam-*` | Per-container diagnostic walkthrough |
+| `scripts/backup.sh` | `ai-stack-iam-postgres` | Back up the Authentik PostgreSQL database |
+| `scripts/capture-credentials.sh` | all secrets | Capture all provisioned Podman secret values to `configs/credentials.local` |
+| `scripts/m2m-authentik-bootstrap.sh` | `ai-stack-iam-authentik` | Wire M2M gateway OIDC/JWKS configuration in Authentik |
+
+**Native service management (outside script scope):**
+
+```bash
+sudo systemctl reload caddy           # apply Caddyfile changes without downtime
+sudo systemctl restart headscale      # apply Headscale config changes (no reload support)
+sudo systemctl restart headplane
+sudo systemctl status forgejo
+```
+
+---
+
 ## Pre-Deployment Checklist
 
 - [ ] Public IPv4 DNS A records: `headscale.<domain>`, `auth.<domain>`, `git.<domain>`, `*.photondatum.space`
@@ -208,7 +268,7 @@ SystemD target for full role: `ai-stack-edge-role.target`
 Instance overlay documents (in `docs/instances/`) provide:
 
 | Setting | Instance override |
-|---|---|
+| --- | --- |
 | Domain names | `photondatum.space`, tailnet base domain |
 | Node IP addresses | Tailnet IPs, public IPs |
 | Network mode | isolated vs combined |

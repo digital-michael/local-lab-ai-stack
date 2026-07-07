@@ -13,10 +13,44 @@ inference demand is high, or dedicated GPU machines that stay on continuously.
 
 ---
 
+## Dependencies
+
+### Role dependencies (must be deployed first)
+
+| Role | Required by | What fails without it |
+| --- | --- | --- |
+| Edge role — mesh group | Tailscale agent | Cannot enroll in Headscale; tailnet connectivity unavailable |
+| Controller role | All worker function | No LiteLLM endpoint to register with; no knowledge-index heartbeat target; no model routing |
+
+The worker has no independent value without the controller. Its only job is to
+extend the controller's inference capacity. Both the edge role (for Headscale)
+and the controller role (for LiteLLM and heartbeat) must be reachable before a
+worker can register.
+
+### Infrastructure (must exist on the worker host)
+
+| Dependency | Required by | Notes |
+| --- | --- | --- |
+| Podman 5.0+ (rootless) | `ai-stack-infer-ollama` | Ollama runs as a user container |
+| Tailscale enrolled via Headscale | All | Tailnet IP required for controller to reach Ollama |
+| GPU + CUDA drivers | `ai-stack-infer-vllm` | Optional; CPU inference via Ollama works without GPU |
+| Sufficient storage | `ai-stack-infer-ollama` | Model files; 4–8 GB per model minimum |
+| Ollama port 11434 reachable from controller tailnet IP only | `ai-stack-infer-ollama` | Harden via firewall after registration |
+
+### External service dependencies
+
+| Service | Where it runs | Required by |
+| --- | --- | --- |
+| Headscale | Edge node (`ai-stack-mesh`) | Tailscale enrollment; tailnet IP assignment |
+| knowledge-index | Controller (`ai-stack-know-index`) | Heartbeat registration endpoint |
+| LiteLLM | Controller (`ai-stack-infer-litellm`) | Model route target; config updated after worker joins |
+
+---
+
 ## Target Hardware Profile
 
 | Property | Minimum | Recommended |
-|---|---|---|
+| --- | --- | --- |
 | RAM | 8 GB | 16 GB+ |
 | CPU | 4 cores | 8+ cores |
 | GPU | None (CPU inference) | NVIDIA GPU (8GB+ VRAM) |
@@ -37,13 +71,13 @@ its API on port 11434; LiteLLM on the controller routes to it by tailnet/LAN IP.
 **SystemD target:** `ai-stack-infer-worker.target`
 
 | Container | Image | Purpose | Notes |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `ai-stack-infer-ollama` | `docker.io/ollama/ollama` | Local model runtime | Same image as controller |
 | `ai-stack-infer-vllm` | `docker.io/vllm/vllm-openai` | GPU-accelerated runtime | Optional; CUDA required |
 
 **Agent bundle (every node — not containerized):**
 | Service | Manager | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `tailscale` | systemd | Mesh connectivity to controller |
 | `ai-stack-obs-promtail` | quadlet or systemd | Log shipping to controller Loki |
 | `ai-stack-heartbeat` | systemd timer | Reports node status to knowledge-index |
@@ -87,7 +121,7 @@ Restart LiteLLM after editing: `systemctl --user restart ai-stack-infer-litellm.
 ## Port Requirements
 
 | Port | Protocol | Bind | Purpose |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 11434 | TCP | LAN/tailnet IP | Ollama API — LiteLLM connects here |
 | 8000 | TCP | LAN/tailnet IP | vLLM API (if running) |
 
@@ -103,7 +137,7 @@ Ollama should not be reachable from the public internet or untrusted LAN segment
 ## Node State Machine
 
 | State | Condition | Recovery |
-|---|---|---|
+| --- | --- | --- |
 | `online` | Heartbeat received within last 90s | Normal |
 | `caution` | Last heartbeat 90–150s ago | Send 2 beats within 70s |
 | `failed` | Last heartbeat > 150s ago | Send 2 beats within 70s |
@@ -112,6 +146,44 @@ Ollama should not be reachable from the public internet or untrusted LAN segment
 Check node status from controller:
 ```bash
 bash scripts/node.sh list --controller http://localhost:8100
+```
+
+---
+
+## Scripts Reference
+
+| Script | Phase | Purpose |
+| --- | --- | --- |
+| `scripts/install.sh` | Setup | Install Podman and create storage layout on the worker host |
+| `scripts/validate-system.sh` | Setup | Validate Podman version, GPU availability, storage prerequisites |
+| `scripts/bootstrap.sh` | Registration | Zero-touch worker bootstrap — joins the controller with a token |
+| `scripts/register-node.sh` | Registration | Introspects local environment and prints a config block for the controller's `config.json` |
+| `scripts/node.sh join` | Registration | Join the controller with a previously generated token |
+| `scripts/node.sh status` | Operations | Check this node's registration status against the controller |
+| `scripts/node.sh unjoin` | Operations | Remove this node from the controller registry |
+| `scripts/node.sh harden-worker` | Security | Print firewall rules that restrict Ollama port 11434 to controller IP only |
+| `scripts/heartbeat.sh` | Operations | Send a single heartbeat to the controller (invoked by systemd timer) |
+| `scripts/inhibit.sh` | Operations | Enable/disable OS sleep inhibition while inference is running |
+| `scripts/pull-models.sh` | Models | Pull Ollama models and register routes in controller LiteLLM (run on controller after worker joins) |
+| `scripts/status.sh` | Operations | Health status of deployed Ollama/vLLM containers |
+| `scripts/stop.sh` | Operations | Stop inference containers |
+| `scripts/start.sh` | Operations | Start inference containers |
+
+**Worker bootstrap flow (typical):**
+```bash
+# 1. On controller — generate a join token
+bash scripts/configure.sh generate-join-token \
+  --node-id <id> --profile inference-worker --display-name "<name>"
+
+# 2. On worker — bootstrap (installs, joins, starts heartbeat timer)
+bash scripts/bootstrap.sh \
+  --controller "http://<controller-tailnet-ip>:8100" \
+  --token "<token>" --node-id "<id>"
+
+# 3. On controller — verify registration and update LiteLLM config
+bash scripts/node.sh list --controller http://localhost:8100
+# Then add worker Ollama endpoint to configs/litellm/proxy_config.yaml
+bash scripts/pull-models.sh
 ```
 
 ---
@@ -137,7 +209,7 @@ bash scripts/node.sh list --controller http://localhost:8100
 Instance overlay documents provide:
 
 | Setting | Instance override |
-|---|---|
+| --- | --- |
 | Node ID and alias | e.g., `tc25`, `sol` |
 | Tailnet IP | Assigned by Headscale |
 | GPU device | CUDA device index or `cpu` |
