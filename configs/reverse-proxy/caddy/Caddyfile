@@ -16,9 +16,6 @@
 # Host header: when the upstream is an IP+TLS address, Caddy sets Host to the IP.
 #   Each CENTAURI block uses header_up Host to set the value Traefik expects.
 #
-# SSO: chat.photondatum.space bypasses Authentik — the outpost External URL is
-#   auth.stack.localhost (LAN-only). OpenWebUI's own auth handles external access.
-
 # ══════════════════════════════════════════════════════════════════════════════
 # Static site — served by Caddy's file_server on :80 and :443
 # ══════════════════════════════════════════════════════════════════════════════
@@ -61,14 +58,9 @@ git.photondatum.space {
 # CENTAURI services — proxied over WireGuard tailnet to 100.64.0.4:443
 # ══════════════════════════════════════════════════════════════════════════════
 
-# ── Authentik SSO ─────────────────────────────────────────────────────────────
+# ── Authentik SSO — ai-stack-iam-authentik (local Podman container) ──────────
 https://auth.photondatum.space {
-    reverse_proxy 100.64.0.4:443 {
-        header_up Host auth.stack.localhost
-        transport http {
-            tls_insecure_skip_verify
-        }
-    }
+    reverse_proxy 127.0.0.1:9000
 }
 
 # ── OpenWebUI — AI chat interface ─────────────────────────────────────────────
