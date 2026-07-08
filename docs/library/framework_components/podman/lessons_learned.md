@@ -196,6 +196,69 @@ podman ps --format "{{.Names}} {{.Ports}}"
 
 ---
 
+## 7 `su` Does Not Change the Real UID — Rootless Podman Must Run from a Proper Login Session
+
+**Version:** Podman 5.8.4, Fedora 43  
+**Discovered:** 2026-07-08, photondatum.space IAM deployment
+
+## What Happened
+
+Podman commands (including `podman secret create`) were executed from a shell obtained via:
+
+```bash
+ssh host "echo '$PASS' | su -s /bin/bash target-user -c 'podman ...'"
+```
+
+Every Podman invocation failed with errors like:
+
+```text
+cannot chdir to /home/outer-user: Permission denied
+Error: setting up the process
+```
+
+or
+
+```text
+mkdir /run/user/1000/libpod: permission denied
+```
+
+even though the `su` shell reported the correct effective UID and `$HOME` was explicitly exported to the target user's home directory.
+
+## Root Cause
+
+`su` (without `-l` and without a proper PAM session) changes the **effective UID** but not the **real UID**. The Linux kernel tracks both:
+
+- **Real UID** — the original user who started the process (the SSH session user)
+- **Effective UID** — the user whose privileges are used for permission checks
+
+Rootless Podman uses the **real UID** for:
+
+- Locating the runtime directory: `/run/user/<real-uid>/`
+- Looking up `subuid`/`subgid` ranges in `/etc/subuid`
+- Setting up user namespaces via `newuidmap`/`newgidmap`
+
+If the real UID is 1000 (SSH user) but we `su`'d to UID 975, Podman looks for `/run/user/1000/`, uses the SSH user's subuid range, and fails because the SSH user's home is inaccessible to the `su`'d user. No amount of `export HOME=...` fixes this — Podman does not read HOME for these lookups.
+
+## Fix
+
+The execution owner must be accessed via a **proper login session**:
+
+```bash
+# Correct — real UID is set to the target user from the start
+ssh execution-owner@host 'podman ...'
+
+# Also correct — systemd user session with linger active
+systemctl --user start ai-stack-iam.target  # run as the execution owner
+```
+
+Never use `su`, `sudo -u`, or pipe-based user switching to run rootless Podman on behalf of another user.
+
+## Rule
+
+> Rootless Podman must be invoked directly by the execution owner via a proper login session (SSH or console). Any setup or configuration that needs to run Podman commands must be done by SSHing as the execution owner, not by su-ing from another session. See `docs/security-policy.md §5` for the full access model.
+
+---
+
 # 6 Stale Quadlet After Config Change Requires Full Stop → Delete → Regen — Restart Is Not Enough
 
 **Version:** Podman 5.8.1, systemd quadlet  

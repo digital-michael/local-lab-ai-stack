@@ -13,6 +13,26 @@ inference demand is high, or dedicated GPU machines that stay on continuously.
 
 ---
 
+## Operational Access Model
+
+> **This is a hard architectural rule. Read before beginning any deployment.**
+>
+> Two distinct users govern every deployment. They must never be the same account.
+>
+> | Role | Purpose | Lifecycle |
+> | --- | --- | --- |
+> | **Setup / configuration** | Install packages, enable services | Temporary — revoke after deployment |
+> | **Execution owner** | Runs rootless Podman; owns all container state | Permanent |
+>
+> Rootless Podman uses the **real UID** of the invoking process. Running Podman via `su` from
+> another session always fails or operates in the wrong security context.
+>
+> See [security-policy.md §5](../security-policy.md) for the full access model and instance
+> user mapping. See [podman/lessons_learned.md §7](../library/framework_components/podman/lessons_learned.md)
+> for the technical root cause.
+
+---
+
 ## Dependencies
 
 ### Role dependencies (must be deployed first)
@@ -76,6 +96,7 @@ its API on port 11434; LiteLLM on the controller routes to it by tailnet/LAN IP.
 | `ai-stack-infer-vllm` | `docker.io/vllm/vllm-openai` | GPU-accelerated runtime | Optional; CUDA required |
 
 **Agent bundle (every node — not containerized):**
+
 | Service | Manager | Purpose |
 | --- | --- | --- |
 | `tailscale` | systemd | Mesh connectivity to controller |
@@ -90,6 +111,7 @@ Workers register with the controller's `ai-stack-know-index` via heartbeat.
 The controller then makes the worker visible to LiteLLM for model routing.
 
 **Generate join token (on controller):**
+
 ```bash
 bash scripts/configure.sh generate-join-token \
   --node-id <worker-id> \
@@ -99,6 +121,7 @@ bash scripts/configure.sh generate-join-token \
 ```
 
 **Bootstrap worker (on worker node):**
+
 ```bash
 bash scripts/bootstrap.sh \
   --controller "http://<controller-tailnet-ip>:8100" \
@@ -107,6 +130,7 @@ bash scripts/bootstrap.sh \
 ```
 
 **Add worker to LiteLLM (on controller, `configs/litellm/proxy_config.yaml`):**
+
 ```yaml
 model_list:
   - model_name: llama3.1:8b
@@ -114,6 +138,7 @@ model_list:
       model: ollama/llama3.1:8b
       api_base: http://<worker-tailnet-ip>:11434
 ```
+
 Restart LiteLLM after editing: `systemctl --user restart ai-stack-infer-litellm.service`
 
 ---
@@ -126,10 +151,12 @@ Restart LiteLLM after editing: `systemctl --user restart ai-stack-infer-litellm.
 | 8000 | TCP | LAN/tailnet IP | vLLM API (if running) |
 
 **Harden Ollama port (restrict to controller only):**
+
 ```bash
 bash scripts/node.sh harden-worker --alias <worker-alias>
 # Prints firewall commands; run them on the worker
 ```
+
 Ollama should not be reachable from the public internet or untrusted LAN segments.
 
 ---
@@ -144,6 +171,7 @@ Ollama should not be reachable from the public internet or untrusted LAN segment
 | `offline` | Absent > 24h | Generate new join token from controller |
 
 Check node status from controller:
+
 ```bash
 bash scripts/node.sh list --controller http://localhost:8100
 ```
@@ -170,6 +198,7 @@ bash scripts/node.sh list --controller http://localhost:8100
 | `scripts/start.sh` | Operations | Start inference containers |
 
 **Worker bootstrap flow (typical):**
+
 ```bash
 # 1. On controller — generate a join token
 bash scripts/configure.sh generate-join-token \

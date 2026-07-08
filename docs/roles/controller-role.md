@@ -14,6 +14,27 @@ the edge role recovers.
 
 ---
 
+## Operational Access Model
+
+> **This is a hard architectural rule. Read before beginning any deployment.**
+>
+> Two distinct users govern every deployment. They must never be the same account.
+>
+> | Role | Purpose | Lifecycle |
+> | --- | --- | --- |
+> | **Setup / configuration** | Install packages, enable services | Temporary — revoke after deployment |
+> | **Execution owner** | Runs rootless Podman; owns all container state | Permanent |
+>
+> Rootless Podman uses the **real UID** of the invoking process. Running Podman via `su` from
+> another session always fails or operates in the wrong security context — regardless of
+> `$HOME` overrides or `export` statements.
+>
+> See [security-policy.md §5](../security-policy.md) for the full access model and instance
+> user mapping. See [podman/lessons_learned.md §7](../library/framework_components/podman/lessons_learned.md)
+> for the technical root cause.
+
+---
+
 ## Dependencies
 
 ### Role dependencies (must be deployed first)
@@ -75,6 +96,7 @@ protected route. Runs on host network to bind :80/:443.
 | `ai-stack-route-traefik` | `docker.io/traefik:v3` | Internal reverse proxy, TLS, forwardAuth |
 
 **Key configuration:**
+
 - `forwardAuth` middleware points to `https://auth.<domain>` (the always-on edge Authentik)
 - Self-signed TLS for LAN access; Traefik manages the cert
 - Traefik must join every group network to route to backends
@@ -112,6 +134,7 @@ a model file to produce a compressed weight artifact, then restart Ollama/vLLM t
 pick up the new weights. Does not start at boot; invoked during model provisioning.
 
 **Startup order within group:**
+
 1. `ai-stack-infer-ollama` (+ `ai-stack-infer-vllm` if GPU present, parallel)
 2. `ai-stack-infer-litellm` (after at least one runtime healthy)
 
@@ -136,6 +159,7 @@ and is exclusive to this group — no other group reads or writes it directly.
 The container joins both `ai-stack-know` and `ai-stack-infer` networks.
 
 **Startup order within group:**
+
 1. `ai-stack-know-qdrant`
 2. `ai-stack-know-index` (after qdrant healthy)
 
@@ -158,6 +182,7 @@ through Traefik.
 | `ai-stack-app-homepage` | `ghcr.io/gethomepage/homepage` | Service dashboard |
 
 **Startup order within group:**
+
 1. All app containers in parallel (after `ai-stack-store-postgres` healthy)
 
 ---
@@ -176,11 +201,13 @@ on the edge node.
 | `ai-stack-store-postgres` | `docker.io/library/postgres:16` | App database — openwebui + flowise |
 
 **Volumes:**
+
 | Volume | Mount | Purpose |
 | --- | --- | --- |
 | `ai-stack-store-postgres-data` | `/var/lib/postgresql/data` | Persistent database |
 
 **Databases within the instance:**
+
 - `openwebui` — OpenWebUI conversations, users, settings
 - `flowise` — Flowise chatflows, credentials, API keys
 
@@ -208,6 +235,7 @@ every node (including edge and workers) and ships to this Loki instance.
 | `ai-stack-obs-promtail` | `docker.io/grafana/promtail` | Log shipping agent | every node |
 
 **Startup order within group:**
+
 1. `ai-stack-obs-loki` + `ai-stack-obs-prometheus` (parallel)
 2. `ai-stack-obs-grafana` (after loki + prometheus healthy)
 3. `ai-stack-obs-promtail` (independent — starts any time)
@@ -222,7 +250,7 @@ Each group has its own Podman network. Traefik joins every group network to
 route requests to backends. Containers that need cross-group access declare
 multiple `Network=` entries in their quadlet.
 
-```
+```text
 [tailnet/LAN] → ai-stack-route-traefik (host net)
                     │ joins all group networks
                     ├─→ ai-stack-app-openwebui  (ai-stack-app)
@@ -245,7 +273,7 @@ deployments.
 
 ## Startup Order (full controller role)
 
-```
+```text
 1. ai-stack-store-postgres          ← data layer first
    ai-stack-know-qdrant             │ parallel
    ai-stack-obs-loki                │

@@ -15,6 +15,28 @@ LAN/tailnet), but external SSO login fails.
 
 ---
 
+## Operational Access Model
+
+> **This is a hard architectural rule. Read before beginning any deployment.**
+>
+> Two distinct users govern every deployment. They must never be the same account.
+>
+> | Role | User (photondatum.space) | What they own | Lifecycle |
+> | --- | --- | --- | --- |
+> | **Setup / configuration** | `llmagent` | Nothing persistent | Temporary — revoke NOPASSWD after deployment |
+> | **Execution owner** | `3pdx7a` | All Podman containers, volumes, secrets | Permanent |
+>
+> `llmagent` installs packages and enables system services via `sudo dnf` / `sudo systemctl`.
+> `3pdx7a` runs rootless Podman — accessed directly via SSH, never via `su` from another session.
+>
+> Rootless Podman uses the **real UID**, not the effective UID from `su`. Running Podman via
+> `su` from a different session always fails or silently operates in the wrong security context.
+> See [security-policy.md §5](../security-policy.md) and
+> [podman/lessons_learned.md §7](../library/framework_components/podman/lessons_learned.md)
+> for the full rationale.
+
+---
+
 ## Dependencies
 
 ### Infrastructure (must exist before deployment)
@@ -85,6 +107,7 @@ stack — social login, local accounts, MFA, and OIDC delegation to all services
 | `ai-stack-iam-authentik-certs` | `/certs` | Authentik managed certificates |
 
 **Startup order within group:**
+
 1. `ai-stack-iam-postgres` + `ai-stack-iam-redis` (parallel)
 2. `ai-stack-iam-authentik` (after postgres + redis healthy)
 3. `ai-stack-iam-authentik-worker` (after authentik healthy)
@@ -118,17 +141,20 @@ containerized — it requires host network namespace access for WireGuard).
 | `ai-stack-mesh-headplane` | `ghcr.io/tale/headplane` | Headscale web admin UI |
 
 **Host services (not containerized):**
+
 | Service | Manager | Notes |
 | --- | --- | --- |
 | `tailscale` | systemd | WireGuard mesh agent; host network required |
 
 **Volumes:**
+
 | Volume | Mount | Purpose |
 | --- | --- | --- |
 | (bind) `/var/lib/headscale` | `/var/lib/headscale` | Headscale DB, keys, state |
 | (bind) `/etc/headscale` | `/etc/headscale` | Headscale config, ACL |
 
 **Critical Headscale config requirements:**
+
 - `derp.server.enabled: true` — disabled by default; `/derp` returns HTML when off
 - `derp.server.private_key_path` — required when enabled; Headscale fails to start without it
 - `server_url` — must be actual domain (`https://headscale.<domain>`), not a placeholder
@@ -136,6 +162,7 @@ containerized — it requires host network namespace access for WireGuard).
 - Verify relay: `curl http://127.0.0.1:8080/derp/probe` must return `DERP ALIVE`
 
 **Port requirements:**
+
 | Port | Protocol | Purpose |
 | --- | --- | --- |
 | 443 | TCP | Headscale (proxied by Caddy) |
@@ -158,11 +185,13 @@ Authentik via OIDC.
 | `ai-stack-edge-caddy` | `docker.io/library/caddy:2` | TLS termination, public reverse proxy, forward_auth |
 
 **External services (not containerized, not managed by this role):**
+
 | Service | Auth integration |
 | --- | --- |
 | Forgejo | OIDC source configured in Forgejo admin → Authentication Sources; delegates to `ai-stack-iam-authentik` |
 
 **Caddy patterns:**
+
 1. Static site: `root * /var/www/<site>` + `file_server`
 2. Reverse proxy: `reverse_proxy <upstream>` — Caddy handles TLS automatically
 3. Protected route: `forward_auth ai-stack-iam-authentik:9000 { ... }` before `reverse_proxy`
@@ -178,7 +207,7 @@ Each group has its own Podman network. Services within a group communicate by
 container name. Cross-group traffic (e.g., Caddy calling Authentik for `forward_auth`)
 requires the calling container to join the target group's network or route via the host.
 
-```
+```text
 [internet] → ai-stack-edge-caddy (host net)
                 │ forward_auth
                 ▼
@@ -201,7 +230,7 @@ Instance overlay sets `Network=ai-stack` on all containers instead of group-spec
 
 ## Startup Order
 
-```
+```text
 1. ai-stack-iam-postgres    │ parallel
    ai-stack-iam-redis       │
 2. ai-stack-iam-authentik
