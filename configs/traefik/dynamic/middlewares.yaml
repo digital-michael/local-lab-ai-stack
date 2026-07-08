@@ -23,10 +23,12 @@ http:
         stsIncludeSubdomains: true
 
     # Authentik forward-auth middleware
-    # Requires Authentik outpost to be running at authentik.ai-stack:9000
+    # Authentik runs on photondatum.space (always-on VPS edge node).
+    # CENTAURI services degrade gracefully when the VPS is unreachable —
+    # LAN/tailnet access remains up but auth checks will fail until it recovers.
     authentik:
       forwardAuth:
-        address: "http://authentik.ai-stack:9000/outpost.goauthentik.io/auth/traefik"
+        address: "https://auth.photondatum.space/outpost.goauthentik.io/auth/traefik"
         trustForwardHeader: true
         authResponseHeaders:
           - X-authentik-username

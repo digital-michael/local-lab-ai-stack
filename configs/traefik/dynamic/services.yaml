@@ -51,15 +51,8 @@ http:
         - secure-headers
       tls: {}
 
-    # Exception: Authentik is the identity provider — cannot forwardAuth to itself.
-    authentik:
-      rule: "Host(`auth.stack.localhost`)"
-      entryPoints:
-        - websecure
-      service: authentik
-      middlewares:
-        - secure-headers
-      tls: {}
+    # Note: auth.stack.localhost router removed — Authentik now runs on
+    # photondatum.space VPS. Access via https://auth.photondatum.space.
 
     # Exception: MCP + admin endpoints use API key auth (machine-to-machine, not browser SSO).
     # Access control: knowledge_index_api_key Podman secret (API_KEY env var in app).
@@ -156,26 +149,14 @@ http:
 
     # Public entry — chat.photondatum.space proxied via Caddy on photondatum.space.
     # Caddy forwards Host: chat.photondatum.space so this router matches.
-    # Intentionally excludes the authentik middleware: the Authentik outpost External URL
-    # is auth.stack.localhost (LAN-only), so forwardAuth redirects would fail in external
-    # browsers. OpenWebUI's own authentication handles external access.
+    # Authentik is now on the VPS (always-on), so forwardAuth works for external browsers.
     openwebui-public:
       rule: "Host(`chat.photondatum.space`)"
       entryPoints:
         - websecure
       service: openwebui
       middlewares:
-        - secure-headers
-      tls: {}
-
-    # Public: chat.photondatum.com → same pattern as openwebui-public above.
-    # auth.photondatum.com needs no router here — Caddy rewrites Host to auth.stack.localhost.
-    openwebui-public-com:
-      rule: "Host(`chat.photondatum.com`)"
-      entryPoints:
-        - websecure
-      service: openwebui
-      middlewares:
+        - authentik
         - secure-headers
       tls: {}
 
@@ -199,11 +180,6 @@ http:
       loadBalancer:
         servers:
           - url: "http://flowise.ai-stack:3000"
-
-    authentik:
-      loadBalancer:
-        servers:
-          - url: "http://authentik.ai-stack:9000"
 
     knowledge-index:
       loadBalancer:
