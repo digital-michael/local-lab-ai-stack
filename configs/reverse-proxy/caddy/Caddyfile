@@ -59,8 +59,13 @@ git.photondatum.space {
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ── Authentik SSO — ai-stack-iam-authentik (local Podman container) ──────────
+# header_up: Traefik forwardAuth passes X-Forwarded-Host with the original
+# service host (e.g. agent.photondatum.space). Caddy must not overwrite it —
+# the Authentik outpost uses it to match the correct proxy provider.
 https://auth.photondatum.space {
-    reverse_proxy 127.0.0.1:9000
+    reverse_proxy 127.0.0.1:9000 {
+        header_up X-Forwarded-Host {http.request.header.X-Forwarded-Host}
+    }
 }
 
 # ── OpenWebUI — AI agent interface ───────────────────────────────────────────
