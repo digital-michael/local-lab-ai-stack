@@ -1,0 +1,28 @@
+[Unit]
+Description=AI Stack IAM — Authentik worker
+After=ai-stack-iam-authentik.service
+
+[Container]
+Image=ghcr.io/goauthentik/server:2025.2.4
+ContainerName=ai-stack-iam-authentik-worker
+Exec=worker
+Network=ai-stack
+Environment=AUTHENTIK_REDIS__HOST=ai-stack-iam-redis
+Environment=AUTHENTIK_POSTGRESQL__HOST=ai-stack-iam-postgres
+Environment=AUTHENTIK_POSTGRESQL__USER=authentik
+Environment=AUTHENTIK_POSTGRESQL__NAME=authentik
+Environment=AUTHENTIK_ERROR_REPORTING__ENABLED=false
+Secret=ai-stack-iam-postgres-password,type=env,target=AUTHENTIK_POSTGRESQL__PASSWORD
+Secret=ai-stack-iam-authentik-secret-key,type=env,target=AUTHENTIK_SECRET_KEY
+Volume=ai-stack-iam-authentik-media:/media:Z
+Volume=ai-stack-iam-authentik-certs:/certs:Z
+Label=ai-stack.group=iam
+Label=ai-stack.service=authentik-worker
+PodmanArgs=--cpus=0.5 --memory=512m
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=ai-stack-iam.target

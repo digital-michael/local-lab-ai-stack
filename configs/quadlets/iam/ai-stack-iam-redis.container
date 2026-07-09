@@ -1,0 +1,19 @@
+[Unit]
+Description=AI Stack IAM — Redis
+After=network-online.target
+
+[Container]
+Image=docker.io/library/redis:7.4.9
+ContainerName=ai-stack-iam-redis
+Network=ai-stack
+Volume=ai-stack-iam-redis-data:/data:Z
+PublishPort=127.0.0.1:6379:6379
+Label=ai-stack.group=iam
+Label=ai-stack.service=redis
+PodmanArgs=--cpus=0.25 --memory=128m
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=ai-stack-iam.target
