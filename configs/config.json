@@ -484,6 +484,7 @@
       }
     },
     "vllm": {
+      "_suspended": "GPU contention with Ollama on RTX 3070 Ti (8GB) — vllm 0.55 utilization + Ollama leaves <1GB free; masked 2026-07-09 to restore 2GB headroom; re-enable when GPU upgrade or workload separation is in place",
       "image": "docker.io/vllm/vllm-openai",
       "tag": "v0.17.1",
       "command": "--model /models/qwen2.5-1.5b --served-model-name qwen2.5-1.5b --tensor-parallel-size 1 --max-model-len 2048 --gpu-memory-utilization 0.55 --host 0.0.0.0 --port 8000 --enforce-eager",
