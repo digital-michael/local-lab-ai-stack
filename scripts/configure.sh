@@ -296,6 +296,11 @@ EOF
             services=$'ollama\npromtail\nknowledge-index\nqdrant'
             echo "Note: node_profile=$node_profile — generating ollama + promtail + knowledge-index + qdrant quadlets"
             ;;
+        edge)
+            # Edge VPS: IAM group only (Authentik + its dependencies)
+            services=$'redis\npostgres\nauthentik\nauthentik-worker'
+            echo "Note: node_profile=$node_profile — generating IAM group quadlets only"
+            ;;
         *)
             # controller, peer: generate all services (skip minio if not defined)
             services=$(jq -r '.services | keys[]' "$CONFIG_FILE")

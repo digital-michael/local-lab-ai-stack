@@ -297,13 +297,47 @@
         "gpu": null
       }
     },
-    "authentik": {
+    "redis": {
+      "image": "docker.io/library/redis",
+      "tag": "7.4.3",
+      "container_name": "redis",
+      "dns_alias": "redis.ai-stack",
+      "depends_on": [],
+      "ports": [
+        {
+          "host": 6379,
+          "container": 6379,
+          "bind": "127.0.0.1"
+        }
+      ],
+      "volumes": [
+        {
+          "host": "$AI_STACK_DIR/redis",
+          "container": "/data",
+          "mode": "rw"
+        }
+      ],
+      "environment": {},
+      "secrets": [],
+      "health_check": {
+        "command": "redis-cli ping",
+        "interval": "30s",
+        "retries": 3,
+        "timeout": "5s"
+      },
+      "resources": {
+        "cpus": 0.25,
+        "memory": "128m",
+        "gpu": null
+      }
+    },
+    "authentik-worker": {
       "image": "ghcr.io/goauthentik/server",
       "tag": "2026.2.1",
-      "container_name": "authentik",
-      "dns_alias": "authentik.ai-stack",
+      "container_name": "authentik-worker",
+      "dns_alias": "authentik-worker.ai-stack",
       "depends_on": [
-        "postgres"
+        "authentik"
       ],
       "ports": [],
       "volumes": [],
@@ -311,6 +345,49 @@
         "AUTHENTIK_POSTGRESQL__HOST": "postgres.ai-stack",
         "AUTHENTIK_POSTGRESQL__NAME": "aistack",
         "AUTHENTIK_POSTGRESQL__USER": "aistack",
+        "AUTHENTIK_REDIS__HOST": "redis.ai-stack",
+        "AUTHENTIK_ERROR_REPORTING__ENABLED": "false",
+        "AUTHENTIK_LOG_LEVEL": "info"
+      },
+      "secrets": [
+        {
+          "name": "postgres_password",
+          "target": "AUTHENTIK_POSTGRESQL__PASSWORD"
+        },
+        {
+          "name": "authentik_secret_key",
+          "target": "AUTHENTIK_SECRET_KEY"
+        }
+      ],
+      "health_check": {
+        "command": null,
+        "interval": "30s",
+        "retries": 3,
+        "timeout": "5s"
+      },
+      "resources": {
+        "cpus": 0.5,
+        "memory": "256m",
+        "gpu": null
+      },
+      "command": "worker"
+    },
+    "authentik": {
+      "image": "ghcr.io/goauthentik/server",
+      "tag": "2026.2.1",
+      "container_name": "authentik",
+      "dns_alias": "authentik.ai-stack",
+      "depends_on": [
+        "postgres",
+        "redis"
+      ],
+      "ports": [],
+      "volumes": [],
+      "environment": {
+        "AUTHENTIK_POSTGRESQL__HOST": "postgres.ai-stack",
+        "AUTHENTIK_POSTGRESQL__NAME": "aistack",
+        "AUTHENTIK_POSTGRESQL__USER": "aistack",
+        "AUTHENTIK_REDIS__HOST": "redis.ai-stack",
         "AUTHENTIK_ERROR_REPORTING__ENABLED": "false",
         "AUTHENTIK_LOG_LEVEL": "info",
         "AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS": "10.89.0.0/24,127.0.0.0/8"
@@ -764,7 +841,7 @@
     },
     "homepage": {
       "image": "ghcr.io/gethomepage/homepage",
-      "tag": "latest",
+      "tag": "v1.12.3",
       "container_name": "homepage",
       "dns_alias": "homepage.ai-stack",
       "depends_on": [],

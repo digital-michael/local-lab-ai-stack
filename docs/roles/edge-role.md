@@ -92,10 +92,10 @@ stack — social login, local accounts, MFA, and OIDC delegation to all services
 
 | Container | Image | Purpose |
 | --- | --- | --- |
-| `ai-stack-iam-authentik` | `ghcr.io/goauthentik/server` | Authentik server (IdP, SSO, OIDC) |
-| `ai-stack-iam-authentik-worker` | `ghcr.io/goauthentik/server` | Celery worker (background tasks, outpost sync) |
-| `ai-stack-iam-postgres` | `docker.io/library/postgres:16` | Authentik database — not shared |
-| `ai-stack-iam-redis` | `docker.io/library/redis:7` | Authentik task queue and cache |
+| `authentik` | `ghcr.io/goauthentik/server` (see config.json for pinned tag) | Authentik server (IdP, SSO, OIDC) |
+| `authentik-worker` | `ghcr.io/goauthentik/server` (same tag as above) | Celery worker (background tasks, outpost sync) |
+| `postgres` | `docker.io/library/postgres` (see config.json for pinned tag) | Authentik database — not shared |
+| `redis` | `docker.io/library/redis` (see config.json for pinned tag) | Authentik task queue and cache |
 
 **Volumes:**
 
@@ -137,8 +137,8 @@ containerized — it requires host network namespace access for WireGuard).
 
 | Container | Image | Purpose |
 | --- | --- | --- |
-| `ai-stack-mesh-headscale` | `ghcr.io/juanfont/headscale` | Coordination server + embedded DERP relay |
-| `ai-stack-mesh-headplane` | `ghcr.io/tale/headplane` | Headscale web admin UI |
+| `ai-stack-mesh-headscale` | `ghcr.io/juanfont/headscale` (native systemd on photondatum.space — not a container) | Coordination server + embedded DERP relay |
+| `ai-stack-mesh-headplane` | `ghcr.io/tale/headplane` (native systemd on photondatum.space — not a container) | Headscale web admin UI |
 
 **Host services (not containerized):**
 
@@ -180,9 +180,9 @@ Authentik via OIDC.
 **Network:** `host` (Caddy binds :80/:443)
 **SystemD target:** `ai-stack-edge.target`
 
-| Container | Image | Purpose |
+| Service | Image / Install | Purpose |
 | --- | --- | --- |
-| `ai-stack-edge-caddy` | `docker.io/library/caddy:2` | TLS termination, public reverse proxy, forward_auth |
+| Caddy (native systemd) | `docker.io/library/caddy` v2.x — native package, not a container on photondatum.space | TLS termination, public reverse proxy, forward_auth |
 
 **External services (not containerized, not managed by this role):**
 
