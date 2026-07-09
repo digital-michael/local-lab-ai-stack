@@ -29,9 +29,12 @@
 | `headscale.photondatum.space` | A | VPS public IP | Headscale coordination + DERP |
 | `auth.photondatum.space` | A | VPS public IP | Authentik SSO |
 | `git.photondatum.space` | A | VPS public IP | Forgejo git hosting |
+| `agent.photondatum.space` | A | VPS public IP | OpenWebUI (AI agent interface) |
+| `chat.photondatum.space` | A | VPS public IP | Reserved — future social chat |
+| `dashboard.photondatum.space` | A | VPS public IP | CENTAURI stack homepage dashboard |
 
-All additional `*.photondatum.space` subdomains for CENTAURI services are also
-pointed at this VPS — Caddy proxies them through to CENTAURI via tailnet.
+All `*.photondatum.space` subdomains point at this VPS — Caddy proxies
+CENTAURI-hosted services through to `100.64.0.4:443` via tailnet.
 
 ---
 
@@ -61,12 +64,13 @@ Network=ai-stack
 
 **Authentik outpost External URL:** `https://auth.photondatum.space`
 
-**Social login sources to configure in Authentik admin:**
-- GitHub (OAuth2)
-- Google (OAuth2)
-- Microsoft (OAuth2)
-- GitLab (OAuth2)
-- (others as needed — each is a config entry, not a new container)
+**Social login sources configured:**
+
+- GitHub (slug: `github`) — OAuth2, configured
+- Google (slug: `google`) — OAuth2, configured
+- GitLab (slug: `gitlab`) — OAuth2, configured
+- Microsoft — skipped (requires Azure portal; add later if needed)
+- BitBucket — not supported in this Authentik version
 
 **Forgejo + Authentik:**
 Forgejo is a native systemd service on this host (not a container, not managed
@@ -137,20 +141,33 @@ https://auth.photondatum.space {
 
 # CENTAURI services — proxied via tailnet (100.64.0.4)
 # These routes are only reachable when CENTAURI is online
-https://chat.photondatum.space {
+https://agent.photondatum.space {
     reverse_proxy 100.64.0.4:443 {
-        header_up Host chat.photondatum.space
+        header_up Host agent.photondatum.space
         transport http { tls_insecure_skip_verify }
     }
     handle_errors {
-        respond "AI Stack is currently offline" 503
+        respond "AI Stack is currently offline. Services will resume when the controller comes back online." 503
+    }
+}
+
+# Chat portal — reserved for future social chat (Mattermost)
+chat.photondatum.space {
+    root * /var/www/photondatum
+    file_server
+}
+
+# Homepage dashboard — CENTAURI stack dashboard
+https://dashboard.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host dashboard.stack.localhost
+        transport http { tls_insecure_skip_verify }
     }
 }
 ```
 
 Additional CENTAURI service routes (flowise, grafana, etc.) follow the same
-pattern as `chat.photondatum.space` — proxy to `100.64.0.4:443` with
-`header_up Host <service>.photondatum.space`.
+pattern — proxy to `100.64.0.4:443` with `header_up Host <service>.stack.localhost`.
 
 ---
 

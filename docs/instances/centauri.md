@@ -72,7 +72,8 @@ Cross-group network memberships:
 
 **Traefik router notes:**
 
-- `openwebui-public` — `authentik` middleware restored; Authentik is now on VPS
+- `openwebui-public` — serves `agent.photondatum.space`; `authentik` middleware active
+- `homepage-public` — serves `dashboard.photondatum.space` → homepage container
 - `openwebui-public-com` — removed (referenced `chat.photondatum.com`, not owned)
 
 ---
@@ -110,9 +111,9 @@ Chunk size: 400 tokens
 
 | Container | Internal URL (via Traefik) | External URL |
 |---|---|---|
-| `ai-stack-app-openwebui` | `https://openwebui.stack.localhost` | `https://chat.photondatum.space` |
+| `ai-stack-app-openwebui` | `https://openwebui.stack.localhost` | `https://agent.photondatum.space` |
 | `ai-stack-app-flowise` | `https://flowise.stack.localhost` | _(add Caddy route on photondatum.space)_ |
-| `ai-stack-app-homepage` | `https://dashboard.stack.localhost` | _(LAN only currently)_ |
+| `ai-stack-app-homepage` | `https://dashboard.stack.localhost` | `https://dashboard.photondatum.space` |
 
 OpenWebUI: `openwebui_api_key` must equal `litellm_master_key` — see §4.3 of playbook.
 
