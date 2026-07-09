@@ -63,10 +63,10 @@ https://auth.photondatum.space {
     reverse_proxy 127.0.0.1:9000
 }
 
-# ── OpenWebUI — AI chat interface ─────────────────────────────────────────────
-https://chat.photondatum.space {
+# ── OpenWebUI — AI agent interface ───────────────────────────────────────────
+https://agent.photondatum.space {
     reverse_proxy 100.64.0.4:443 {
-        header_up Host chat.photondatum.space
+        header_up Host agent.photondatum.space
         transport http {
             tls_insecure_skip_verify
         }
@@ -74,6 +74,22 @@ https://chat.photondatum.space {
 
     handle_errors {
         respond "AI Stack is currently offline. Services will resume when the controller comes back online." 503
+    }
+}
+
+# ── Chat portal — reserved for future social chat (Mattermost) ───────────────
+chat.photondatum.space {
+    root * /var/www/photondatum
+    file_server
+}
+
+# ── Homepage dashboard — CENTAURI stack dashboard ─────────────────────────────
+https://dashboard.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host dashboard.stack.localhost
+        transport http {
+            tls_insecure_skip_verify
+        }
     }
 }
 

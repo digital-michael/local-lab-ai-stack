@@ -147,14 +147,25 @@ http:
         - secure-headers
       tls: {}
 
-    # Public entry — chat.photondatum.space proxied via Caddy on photondatum.space.
-    # Caddy forwards Host: chat.photondatum.space so this router matches.
+    # Public entry — agent.photondatum.space proxied via Caddy on photondatum.space.
+    # Caddy forwards Host: agent.photondatum.space so this router matches.
     # Authentik is now on the VPS (always-on), so forwardAuth works for external browsers.
     openwebui-public:
-      rule: "Host(`chat.photondatum.space`)"
+      rule: "Host(`agent.photondatum.space`)"
       entryPoints:
         - websecure
       service: openwebui
+      middlewares:
+        - authentik
+        - secure-headers
+      tls: {}
+
+    # Public entry — dashboard.photondatum.space proxied via Caddy on photondatum.space.
+    homepage-public:
+      rule: "Host(`dashboard.photondatum.space`)"
+      entryPoints:
+        - websecure
+      service: homepage
       middlewares:
         - authentik
         - secure-headers
