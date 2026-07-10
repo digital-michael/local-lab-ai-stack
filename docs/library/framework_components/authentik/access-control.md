@@ -46,6 +46,7 @@ by default; akadmin promotes as needed.
 | `grafana` | Grafana | `https://grafana.stack.localhost` | admin |
 | `prometheus` | Prometheus | `https://prometheus.stack.localhost` | admin |
 | `mcp` | MCP | `https://mcp.photondatum.space` | agent-mcp, developer, admin |
+| `flowise` | Flowise | `https://flowise.photondatum.space` | admin |
 
 Each application has an `access-<slug>` ExpressionPolicy bound to it that
 checks `ak_is_group_member` for the allowed bundles. Authentik enforces this

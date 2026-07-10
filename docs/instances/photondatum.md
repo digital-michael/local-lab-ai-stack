@@ -32,6 +32,7 @@
 | `agent.photondatum.space` | A | VPS public IP | OpenWebUI (AI agent interface) |
 | `chat.photondatum.space` | A | VPS public IP | Reserved — future social chat |
 | `dashboard.photondatum.space` | A | VPS public IP | CENTAURI stack homepage dashboard |
+| `flowise.photondatum.space` | A | VPS public IP | Flowise AI workflow builder (bundle-admin) |
 
 All `*.photondatum.space` subdomains point at this VPS — Caddy proxies
 CENTAURI-hosted services through to `100.64.0.4:443` via tailnet.
@@ -58,7 +59,7 @@ Network=ai-stack
 | Container | Port bind | Resource limits |
 |---|---|---|
 | `ai-stack-iam-authentik` | `127.0.0.1:9000:9000`, `127.0.0.1:9443:9443` | `--cpus=1 --memory=512m` |
-| `ai-stack-iam-authentik-worker` | none | `--cpus=0.5 --memory=256m` |
+| `ai-stack-iam-authentik-worker` | none | `--cpus=0.5 --memory=512m` |
 | `ai-stack-iam-postgres` | `127.0.0.1:5432:5432` | `--cpus=0.5 --memory=256m` |
 | `ai-stack-iam-redis` | `127.0.0.1:6379:6379` | `--cpus=0.25 --memory=128m` |
 
@@ -166,8 +167,18 @@ https://dashboard.photondatum.space {
 }
 ```
 
-Additional CENTAURI service routes (flowise, grafana, etc.) follow the same
-pattern — proxy to `100.64.0.4:443` with `header_up Host <service>.stack.localhost`.
+Additional CENTAURI service routes follow the same pattern — proxy to
+`100.64.0.4:443` with `header_up Host <service>.stack.localhost`:
+
+```caddy
+# Flowise — AI workflow builder (bundle-admin only, via Authentik forwardAuth)
+https://flowise.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host flowise.stack.localhost
+        transport http { tls_insecure_skip_verify }
+    }
+}
+```
 
 ---
 
@@ -178,12 +189,19 @@ pattern — proxy to `100.64.0.4:443` with `header_up Host <service>.stack.local
 | 80 | TCP | inbound | Caddy HTTP→HTTPS redirect |
 | 443 | TCP | inbound | Caddy HTTPS |
 | 3478 | UDP | inbound | Headscale STUN (Caddy cannot proxy UDP) |
+| 21115 | TCP | inbound | RustDesk hbbs — NAT type test |
+| 21116 | TCP+UDP | inbound | RustDesk hbbs — rendezvous + hole-punch |
+| 21117 | TCP | inbound | RustDesk hbbr — relay |
+| 21118 | TCP | inbound | RustDesk hbbs — WebSocket |
+| 21119 | TCP | inbound | RustDesk hbbr — relay WebSocket |
 
 Check: `sudo firewall-cmd --list-ports` or `sudo nft list ruleset`
 
 ---
 
-## Services NOT Managed by This Instance
+## Services NOT Managed by the ai-stack Group System
+
+### Native systemd (non-containerized)
 
 | Service | Managed by | Location |
 |---|---|---|
@@ -192,7 +210,31 @@ Check: `sudo firewall-cmd --list-ports` or `sudo nft list ruleset`
 | Tailscale | systemd (native) | `/etc/systemd/system/tailscaled.service` |
 | Caddy | systemd (native) | `/etc/systemd/system/caddy.service` |
 
-These are not containerized on this host. Manage them via `systemctl` directly.
+Manage these via `systemctl` directly.
+
+### RustDesk (podman-compose, 3pdx7a user)
+
+RustDesk self-hosted server runs as two containers (`hbbs` + `hbbr`) managed by
+`podman-compose`, not by ai-stack quadlets. It uses `network_mode: host` because
+RustDesk uses non-HTTP ports that cannot route through Podman container networking.
+
+| Property | Value |
+|---|---|
+| Version | `1.1.15` |
+| Image | `docker.io/rustdesk/rustdesk-server:1.1.15` |
+| Compose file | `configs/compose/rustdesk/docker-compose.yml` (repo) |
+| Working dir | `/home/3pdx7a/rustdesk-server/` (VPS) |
+| Managed by | `podman-compose@rustdesk-server.service` (user unit) |
+| Web UI | None — standard image has no web UI |
+| Auth | Keypair (`-k _`); public key stored in `./data/`, share with clients |
+
+**Key-pair setup:** On first start, `hbbs` generates a keypair stored in
+`./data/`. To display the public key: `podman exec rustdesk-hbbs cat /root/id_ed25519.pub`
+Share this key with RustDesk clients under Settings → Network → Key.
+
+**No Authentik protection possible** for relay endpoints (non-HTTP protocol).
+Any future RustDesk web UI (third-party) should be placed behind Authentik
+using `bundle-admin` or higher.
 
 ---
 

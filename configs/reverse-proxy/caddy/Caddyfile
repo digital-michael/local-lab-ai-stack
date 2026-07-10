@@ -101,12 +101,15 @@ https://dashboard.photondatum.space {
 # ── Additional CENTAURI services — uncomment to expose ───────────────────────
 # Pattern: header_up Host to the *.stack.localhost Traefik router for the service.
 
-# https://flowise.photondatum.space {
-#     reverse_proxy 100.64.0.4:443 {
-#         header_up Host flowise.stack.localhost
-#         transport http { tls_insecure_skip_verify }
-#     }
-# }
+# ── Flowise — AI workflow builder (admin only) ────────────────────────────────
+https://flowise.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host flowise.stack.localhost
+        transport http {
+            tls_insecure_skip_verify
+        }
+    }
+}
 
 # https://grafana.photondatum.space {
 #     reverse_proxy 100.64.0.4:443 {
