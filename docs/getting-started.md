@@ -1,6 +1,6 @@
 # Getting Started
 
-**Last Updated:** 2026-03-25
+**Last Updated:** 2026-07-10
 
 A step-by-step guide to installing, configuring, deploying, and verifying the AI stack on a new Linux controller node.
 
@@ -176,6 +176,30 @@ Run the offline preflight tests to confirm everything is wired correctly:
 ```bash
 bats testing/layer0_preflight.bats
 ```
+
+---
+
+## Step 12b — Remove stale Authentik if migrating from controller to edge node
+
+**Only applies when Authentik was previously running on this controller node and has been migrated to the edge node (photondatum.space).**
+
+If you have moved Authentik to the edge node, stop and disable it on the controller immediately. A stale Authentik outpost on the controller will hammer `auth.stack.localhost/ws/client/` with WebSocket reconnects, causing Traefik forwardAuth requests to time out with 500 errors — even though `middlewares.yaml` already points at the edge node.
+
+```bash
+systemctl --user stop authentik
+systemctl --user disable authentik
+```
+
+Verify Traefik forwardAuth is working after this:
+
+```bash
+curl -sk -o /dev/null -w "%{http_code}" \
+  -H "Host: agent.photondatum.space" \
+  https://localhost:443
+# Expect 302 (Authentik redirect) — not 500
+```
+
+See [Authentik lessons learned §12](library/framework_components/authentik/lessons_learned.md#12-stale-authentik-on-controller-node-causes-forwardauth-interference) for the full root cause.
 
 ---
 

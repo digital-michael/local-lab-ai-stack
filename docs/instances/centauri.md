@@ -112,7 +112,7 @@ Chunk size: 400 tokens
 | Container | Internal URL (via Traefik) | External URL |
 |---|---|---|
 | `ai-stack-app-openwebui` | `https://openwebui.stack.localhost` | `https://agent.photondatum.space` |
-| `ai-stack-app-flowise` | `https://flowise.stack.localhost` | _(add Caddy route on photondatum.space)_ |
+| `ai-stack-app-flowise` | `https://flowise.stack.localhost` | `https://flowise.photondatum.space` (bundle-admin) |
 | `ai-stack-app-homepage` | `https://dashboard.stack.localhost` | `https://dashboard.photondatum.space` |
 
 OpenWebUI: `openwebui_api_key` must equal `litellm_master_key` — see §4.3 of playbook.
@@ -162,7 +162,9 @@ Prometheus config: `configs/prometheus/prometheus.yml`
 | `openwebui-public` bypasses `authentik` middleware | **Resolved** | `authentik` middleware restored; Authentik now on VPS |
 | Stale router `openwebui-public-com` (refs `chat.photondatum.com`) | **Resolved** | Removed from `configs/traefik/dynamic/services.yaml` |
 | Authentik in this stack (before VPS migration) | **Resolved** | Authentik now runs on edge node (photondatum.space) |
-| Forgejo+Authentik OIDC auth | Not wired | Configured on photondatum.space Forgejo, not this node |
+| Forgejo+Authentik OIDC auth | **Resolved** | Wired via Authentik OAuth2Provider `Forgejo OIDC`; `digital-michael` linked |
+| Stale `authentik.service` on CENTAURI causing forwardAuth 500s | **Pending** | Run: `systemctl --user stop authentik && systemctl --user disable authentik` |
+| Forgejo `ROOT_URL` not set — sends `http://` redirect_uris to Authentik | **Pending** | Add `ROOT_URL = https://git.photondatum.space` to `/etc/forgejo/app.ini` under `[server]`, then `sudo systemctl restart forgejo` |
 
 ---
 

@@ -16,6 +16,12 @@ Empirical findings from deploying Authentik in this stack. Records behaviour tha
 6. [Superusers Must Be Explicitly Allowed in Expression Policies](#6-superusers-must-be-explicitly-allowed-in-expression-policies)
 7. [API Tokens Expire by Default — Use `expiring=False` for Setup](#7-api-tokens-expire-by-default--use-expiringfalse-for-setup)
 8. [BitBucket OAuth Removed in Authentik 2025.x](#8-bitbucket-oauth-removed-in-authentik-2025x)
+9. [DJANGO_SETTINGS_MODULE Must Be Set Explicitly in Programmatic Scripts](#9-django_settings_module-must-be-set-explicitly-in-programmatic-scripts)
+10. [Authentik Worker OOM on Startup — Needs 512m, Not 256m](#10-authentik-worker-oom-on-startup--needs-512m-not-256m)
+11. [Proxy Provider `external_host` Must Match the Host Header Caddy Sends](#11-proxy-provider-external_host-must-match-the-host-header-caddy-sends)
+12. [Stale Authentik on Controller Node Causes forwardAuth Interference](#12-stale-authentik-on-controller-node-causes-forwardauth-interference)
+13. [Proxy Provider Has No Client Secret — Use Separate OAuth2Provider for OIDC Clients](#13-proxy-provider-has-no-client-secret--use-separate-oauth2provider-for-oidc-clients)
+14. [Admin Account Email Must Be Distinct From Personal Account Email](#14-admin-account-email-must-be-distinct-from-personal-account-email)
 
 ---
 
@@ -333,3 +339,188 @@ BitBucket's OAuth 2.0 is also not fully OIDC-compliant, making it unsuitable as 
 ### Rule
 
 > BitBucket is not supported as a social login source in Authentik 2025.x. Use GitHub, Google, or GitLab instead. Do not attempt to configure it as an `openidconnect` source — the flows are incompatible.
+
+---
+
+## 9 DJANGO_SETTINGS_MODULE Must Be Set Explicitly in Programmatic Scripts
+
+**Version:** Authentik 2025.2.4
+**Discovered:** 2026-07-10, Flowise/Forgejo OIDC setup
+
+### What Happened
+
+Running `python -c "import django; django.setup(); ..."` inside the Authentik container raised:
+
+```
+django.core.exceptions.ImproperlyConfigured:
+  Requested setting INSTALLED_APPS, but settings are not configured.
+  You must either define the environment variable DJANGO_SETTINGS_MODULE
+  or call django.conf.settings.configure() before accessing settings.
+```
+
+Earlier sessions used `python manage.py shell` which set the env var automatically. Direct `python -c` does not.
+
+### Root Cause
+
+`/manage.py` sets `DJANGO_SETTINGS_MODULE=authentik.root.settings` at the top of the file. When you invoke `manage.py shell`, this runs. When you invoke `python -c` directly, the env var is never set.
+
+### Fix
+
+Always begin every script with:
+
+```python
+import os, django
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'authentik.root.settings')
+django.setup()
+```
+
+### Rule
+
+> Never omit `os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'authentik.root.settings')` before `django.setup()` in scripts run via `python` directly (not `manage.py shell`).
+
+---
+
+## 10 Authentik Worker OOM on Startup — Needs 512m, Not 256m
+
+**Version:** Authentik 2025.2.4
+**Discovered:** 2026-07-10, VPS IAM health check
+
+### What Happened
+
+`ai-stack-iam-authentik-worker` had `NRestarts=1816` on the VPS. The worker started, ran database migrations on first boot, peaked at 257MB RSS + 195MB swap, and was OOM-killed. This repeated in a tight loop.
+
+### Root Cause
+
+The initial resource limit was `--memory=256m`. Migration spikes during startup exceed this by ~1MB. Podman's OOM killer terminates the container immediately after the spike. The service restarts and repeats, never stabilising.
+
+### Fix
+
+```
+PodmanArgs=--cpus=0.5 --memory=512m
+```
+
+### Rule
+
+> Set `--memory=512m` for the Authentik worker. `256m` is insufficient on first boot when database migrations run. The spike is temporary but fatal under tight limits.
+
+---
+
+## 11 Proxy Provider `external_host` Must Match the Host Header Caddy Sends
+
+**Version:** Authentik 2025.2.4
+**Discovered:** 2026-07-10, Flowise forwardAuth wiring
+
+### What Happened
+
+The Flowise proxy provider was configured with `external_host=https://flowise.photondatum.space` (the public URL). Authentik's embedded outpost returned 404 for all forwardAuth requests from Traefik on CENTAURI.
+
+### Root Cause
+
+The Caddy reverse proxy block uses `header_up Host flowise.stack.localhost` to forward requests to CENTAURI Traefik. Traefik's forwardAuth request to Authentik includes `X-Forwarded-Host: flowise.stack.localhost`. The Authentik outpost matches this header against registered `external_host` values — if none match, it returns 404.
+
+The outpost matches `X-Forwarded-Host` (what arrives at Traefik), not the original browser `Host` (the public URL).
+
+### Fix
+
+```python
+provider.external_host = 'https://flowise.stack.localhost'
+```
+
+### Rule
+
+> Set `external_host` to the value Traefik sees — i.e., the `header_up Host` value Caddy sends into CENTAURI, not the public `*.photondatum.space` URL. Trace: browser Host → Caddy `header_up Host` → Traefik `X-Forwarded-Host` → Authentik outpost match.
+
+---
+
+## 12 Stale Authentik on Controller Node Causes forwardAuth Interference
+
+**Version:** Authentik 2025.2.4
+**Discovered:** 2026-07-10, post-migration diagnostics
+
+### What Happened
+
+After migrating Authentik from CENTAURI to the VPS edge node, `agent.photondatum.space` returned 500 with 14-second timeouts. Traefik logs showed the old Authentik outpost on CENTAURI hammering `auth.stack.localhost/ws/client/` with 404s — it was trying to reconnect to itself.
+
+### Root Cause
+
+The Authentik container was not stopped on CENTAURI after the VPS migration. The stale Authentik outpost (embedded in the CENTAURI container) periodically tried to establish its WebSocket channel. When Traefik's forwardAuth eventually routed a request to the VPS Authentik, the response was correct — but the interference from the stale outpost created timing and routing conflicts producing 500 errors.
+
+### Fix
+
+On CENTAURI, after confirming Authentik is running on the edge node:
+
+```bash
+systemctl --user stop authentik
+systemctl --user disable authentik
+```
+
+### Rule
+
+> When migrating Authentik from the controller to the edge node, immediately stop and disable the controller's Authentik service. Do not leave it running — even if Traefik's `forwardAuth` middleware is already pointed at the edge node, the stale outpost's WebSocket reconnect loop will interfere with auth responses.
+
+---
+
+## 13 Proxy Provider Has No Client Secret — Use Separate OAuth2Provider for OIDC Clients
+
+**Version:** Authentik 2025.2.4
+**Discovered:** 2026-07-10, Forgejo OIDC wiring
+
+### What Happened
+
+When attempting to configure Forgejo to use Authentik as an OIDC source, the existing "Forgejo (Git)" provider in Authentik showed "Update Proxy Provider" in the admin UI with no Client Secret field. The OIDC redirect URIs were also set to outpost callback URLs, not Forgejo's own callback.
+
+### Root Cause
+
+The provider was a `ProxyProvider` (set up for forwardAuth), not an `OAuth2Provider`. Proxy providers use Authentik's internal OAuth2 flow for the outpost — they do not expose a client secret to third-party applications. The redirect URIs (`/outpost.goauthentik.io/callback`) are internal to the outpost, not for use by external OIDC clients.
+
+### Fix
+
+Create a separate `OAuth2Provider` for Forgejo to authenticate against:
+
+```python
+from authentik.providers.oauth2.models import OAuth2Provider, RedirectURI, RedirectURIMatchingMode, ScopeMapping, ClientTypes
+
+provider = OAuth2Provider.objects.create(
+    name='Forgejo OIDC',
+    authentication_flow=auth_flow,
+    authorization_flow=authz_flow,
+    client_type=ClientTypes.CONFIDENTIAL,
+)
+provider.redirect_uris = [
+    RedirectURI(
+        matching_mode=RedirectURIMatchingMode.STRICT,
+        url='https://git.photondatum.space/user/oauth2/Authentik/callback',
+    )
+]
+provider.property_mappings.set(ScopeMapping.objects.filter(scope_name__in=['openid', 'email', 'profile']))
+provider.save()
+```
+
+Then retrieve the client secret from Authentik admin UI → Providers → (new provider) → Edit.
+
+### Rule
+
+> Proxy providers are for Authentik acting as a reverse-proxy forwardAuth gate. For third-party apps that authenticate *against* Authentik using OIDC (e.g., Forgejo, Grafana), create a separate `OAuth2Provider`. Never attempt to reuse a proxy provider as an OIDC source — it has no client secret and wrong redirect URIs.
+
+---
+
+## 14 Admin Account Email Must Be Distinct From Personal Account Email
+
+**Version:** Authentik 2025.2.4
+**Discovered:** 2026-07-10, account setup
+
+### What Happened
+
+Both `akadmin` and `digital-michael` were configured with the same email (`michaelbiggerstaff7@gmail.com`). This created ambiguity: social login via that email could potentially match either account, and administrative operations were unclear about which identity they affected.
+
+### Fix
+
+```python
+u = User.objects.get(username='akadmin')
+u.email = 'akadmin@photondatum.space'
+u.save()
+```
+
+### Rule
+
+> `akadmin` is an infrastructure account — give it a non-real, non-shared email (`akadmin@<domain>`). It should never be linked to a social login source. Personal user accounts use real email addresses and social login. The two must never share an email.
