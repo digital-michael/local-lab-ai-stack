@@ -73,11 +73,37 @@ Network=ai-stack
 - Microsoft — skipped (requires Azure portal; add later if needed)
 - BitBucket — not supported in this Authentik version
 
-**Forgejo + Authentik:**
-Forgejo is a native systemd service on this host (not a container, not managed
-by the ai-stack group system). Configure Authentik as an OIDC source in
-Forgejo admin → Site Administration → Authentication Sources → Add OAuth2.
-Forgejo keeps its own SQLite database; Authentik handles identity only.
+**Forgejo + Authentik OIDC:**
+Forgejo is a native systemd service on this host (not a container). Authentik
+acts as an OIDC source — Forgejo authenticates users against Authentik, not the
+reverse (no forwardAuth on Forgejo).
+
+Authentik OAuth2 provider `Forgejo (Git)` (pk=2):
+- `client_id`: `0LAu1ulhUacuK0ApS73LCwjCsQxLhMJrEi98sjHv`
+- `redirect_uri`: `https://git.photondatum.space/user/oauth2/Authentik/callback`
+- Discovery URL: `https://auth.photondatum.space/application/o/forgejo/.well-known/openid-configuration`
+- Policy: `access-forgejo` (bundle-developer, bundle-admin, superuser)
+
+To complete the connection, add the auth source in Forgejo admin UI:
+**`https://git.photondatum.space/-/admin/auths/new`**
+
+| Field | Value |
+|---|---|
+| Authentication Type | OAuth2 |
+| Authentication Name | `Authentik` |
+| OAuth2 Provider | OpenID Connect |
+| Client ID | `0LAu1ulhUacuK0ApS73LCwjCsQxLhMJrEi98sjHv` |
+| Client Secret | Copy from Authentik admin → Applications → Forgejo (Git) → Edit |
+| OpenID Connect URL | `https://auth.photondatum.space/application/o/forgejo/.well-known/openid-configuration` |
+
+After adding the source, to restrict local logins to admin only, add to `/etc/forgejo/app.ini`:
+```ini
+[service]
+ALLOW_ONLY_EXTERNAL_SELF_REGISTRATION = true
+```
+
+The planned `forgejo-guest` group (read-only, public repos, no forks) is a
+Forgejo-side group permission setting — no Authentik changes needed for it.
 
 ---
 
