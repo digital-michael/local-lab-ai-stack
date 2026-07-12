@@ -91,7 +91,7 @@ chat.photondatum.space {
 # ── Homepage dashboard — CENTAURI stack dashboard ─────────────────────────────
 https://dashboard.photondatum.space {
     reverse_proxy 100.64.0.4:443 {
-        header_up Host dashboard.stack.localhost
+        header_up Host dashboard.photondatum.space
         transport http {
             tls_insecure_skip_verify
         }
@@ -101,10 +101,36 @@ https://dashboard.photondatum.space {
 # ── Additional CENTAURI services — uncomment to expose ───────────────────────
 # Pattern: header_up Host to the *.stack.localhost Traefik router for the service.
 
+# ── Knowledge Index — API + admin panel (knowledge-index service) ─────────────
+# MCP endpoint (/mcp) is also at this URL. Browser access is Authentik-protected.
+# API (/v1) and MCP (/mcp) use application-level API key auth.
+# DNS: ki.photondatum.space A → VPS public IP (must exist before Caddy can get a cert).
+https://ki.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host ki.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+        }
+    }
+}
+
 # ── Flowise — AI workflow builder (admin only) ────────────────────────────────
 https://flowise.photondatum.space {
     reverse_proxy 100.64.0.4:443 {
-        header_up Host flowise.stack.localhost
+        header_up Host flowise.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+        }
+    }
+}
+
+# ── LiteLLM — AI proxy / model gateway ───────────────────────────────────────
+# LiteLLM handles its own OAuth SSO (GENERIC_* env vars pointing to Authentik).
+# No Authentik forwardAuth middleware on the Traefik side — double-auth would
+# force two Authentik round-trips per session.
+https://litellm.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host litellm.photondatum.space
         transport http {
             tls_insecure_skip_verify
         }

@@ -47,10 +47,21 @@ Security standards and hardening guidelines for the Knowledge Index Service in t
 
 # 4 Authentication and Authorization
 
-- The service is internal to the Podman network; external authentication is handled by Traefik + Authentik
-- For MVP: no per-request authentication on the internal API — network isolation is the trust boundary
-- Future: if the service is exposed to a broader network, add API key or OIDC token validation per request
+The knowledge-index uses **two independent auth layers**:
+
+| Layer | Mechanism | Who enforces | Applies to |
+| --- | --- | --- | --- |
+| **SSO (browser)** | Authentik forwardAuth via Traefik | Traefik middleware | `/admin` on public/LAN hostname |
+| **API key (service)** | `Authorization: Bearer <knowledge_index_api_key>` | App itself | All `/v1/*` and `/admin/v1/*` endpoints |
+
+**Important:** Authentik SSO passing does **not** inject the API key into downstream requests. Browser users who authenticate via Authentik still receive 401 from the app unless the API key is also supplied. This is a known gap — see the integration plan for the planned fix (Traefik header injection middleware).
+
+Operational rules:
+
+- Machine-to-machine clients (workers, agents, scripts) must supply the Bearer token directly
+- Retrieve the API key via: `podman secret inspect knowledge_index_api_key --showsecret --format '{{.SecretData}}'`
 - Do not log query contents unless explicitly required for debugging — queries may contain sensitive intent
+- The `/health` endpoint is unauthenticated and safe to expose to monitoring agents
 
 # 5 Container Security
 

@@ -568,7 +568,7 @@
     },
     "flowise": {
       "image": "docker.io/flowiseai/flowise",
-      "tag": "3.0.13",
+      "tag": "2.2.7",
       "container_name": "flowise",
       "dns_alias": "flowise.ai-stack",
       "depends_on": [
@@ -584,21 +584,16 @@
         }
       ],
       "environment": {
-        "FLOWISE_USERNAME": "admin",
         "DATABASE_PATH": "/data/flowise"
       },
       "secrets": [
-        {
-          "name": "flowise_password",
-          "target": "FLOWISE_PASSWORD"
-        },
         {
           "name": "flowise_secret_key",
           "target": "FLOWISE_SECRETKEY_OVERWRITE"
         }
       ],
       "health_check": {
-        "command": "curl -sf http://localhost:3000/api/v1/ping || exit 1",
+        "command": "wget -qO- http://localhost:3000/api/v1/ping || exit 1",
         "interval": "30s",
         "retries": 3,
         "timeout": "5s"
@@ -855,7 +850,7 @@
         }
       ],
       "environment": {
-        "HOMEPAGE_ALLOWED_HOSTS": "homepage.ai-stack,homepage.ai-stack:3000,dashboard.stack.localhost,dashboard.localhost,localhost,localhost:3000,127.0.0.1,127.0.0.1:3002"
+        "HOMEPAGE_ALLOWED_HOSTS": "homepage.ai-stack,homepage.ai-stack:3000,dashboard.stack.localhost,dashboard.localhost,localhost,localhost:3000,127.0.0.1,127.0.0.1:3002,dashboard.photondatum.space"
       },
       "secrets": [],
       "health_check": {

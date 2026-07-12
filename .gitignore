@@ -32,6 +32,9 @@ configs/node_profile
 # Never committed; lives only on the local machine that generated them
 output/
 
+# Live Traefik middleware with injected API key — secret value, never commit
+configs/traefik/dynamic/ki-auth.yaml
+
 # Meta framework (collaboration protocol — separate repo, symlinked locally)
 docs/meta
 docs/meta_local/dynamics.md

@@ -1,5 +1,5 @@
 # Grafana — Guidance
-**Last Updated:** 2026-03-08 UTC
+**Last Updated:** 2026-07-10
 
 ## Purpose
 Project-specific preferences and opinionated decisions for Grafana within this AI stack.
@@ -29,14 +29,15 @@ Project-specific preferences and opinionated decisions for Grafana within this A
 - Two primary data sources: Prometheus (metrics), Loki (logs)
 - Dashboards stored as JSON, provisioned from `$AI_STACK_DIR/configs/grafana/dashboards/`
 - Default org name: `AI Stack`
-- Anonymous access disabled; SSO via Authentik when enabled, basic auth otherwise
+- SSO via Authentik `auth.proxy` (header trust, not OAuth2) — login form disabled; Authentik forwardAuth is the sole gate
+- `domain` and `root_url` set to `grafana.stack.localhost` (LAN hostname); Traefik handles TLS termination
 
 # 3 Integration Patterns
 
 - Grafana → Prometheus (query metrics via PromQL)
 - Grafana → Loki (query logs via LogQL)
-- Grafana → Authentik (OAuth login, deferrable)
-- Users → Grafana (access dashboards, explore metrics and logs)
+- Authentik outpost → Grafana (injects `X-authentik-username`, `X-authentik-email`, `X-authentik-name` headers after forwardAuth; Grafana creates/logs in user from these)
+- Users → Traefik → Authentik forwardAuth → Grafana (browser flow)
 
 # 4 Operational Notes
 

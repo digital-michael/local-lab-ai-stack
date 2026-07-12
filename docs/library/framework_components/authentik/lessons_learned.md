@@ -1,5 +1,6 @@
+<!-- markdownlint-disable MD024 -->
 # Authentik — Lessons Learned
-**Last Updated:** 2026-03-08 UTC
+**Last Updated:** 2026-07-11
 
 ## Purpose
 Empirical findings from deploying Authentik in this stack. Records behaviour that diverged from documentation, assumptions, or prior expectations. See `guidance.md` for prescriptive decisions and `best_practices.md` for vendor recommendations.
@@ -22,6 +23,11 @@ Empirical findings from deploying Authentik in this stack. Records behaviour tha
 12. [Stale Authentik on Controller Node Causes forwardAuth Interference](#12-stale-authentik-on-controller-node-causes-forwardauth-interference)
 13. [Proxy Provider Has No Client Secret — Use Separate OAuth2Provider for OIDC Clients](#13-proxy-provider-has-no-client-secret--use-separate-oauth2provider-for-oidc-clients)
 14. [Admin Account Email Must Be Distinct From Personal Account Email](#14-admin-account-email-must-be-distinct-from-personal-account-email)
+15. [Changing ProxyProvider `external_host` Does Not Auto-Update OAuth2 `redirect_uris`](#15-changing-proxyprovider-external_host-does-not-auto-update-oauth2-redirect_uris)
+16. [New ProxyProvider Applications Are Not Auto-Enrolled in the Embedded Outpost](#16-new-proxyprovider-applications-are-not-auto-enrolled-in-the-embedded-outpost)
+17. [Changing a User's Email Invalidates All Proxy Session Cookies](#17-changing-a-users-email-invalidates-all-proxy-session-cookies)
+18. [`access_token_validity` on ProxyProvider Must Be Set Explicitly — Defaults to 1 Hour](#18-access_token_validity-on-proxyprovider-must-be-set-explicitly--defaults-to-1-hour)
+19. [Malformed `access_token_validity` Causes Infinite Redirect Loop — Diagnose via Event Log](#19-malformed-access_token_validity-causes-infinite-redirect-loop--diagnose-via-event-log)
 
 ---
 
@@ -524,3 +530,218 @@ u.save()
 ### Rule
 
 > `akadmin` is an infrastructure account — give it a non-real, non-shared email (`akadmin@<domain>`). It should never be linked to a social login source. Personal user accounts use real email addresses and social login. The two must never share an email.
+
+---
+
+## 15 Changing ProxyProvider `external_host` Does Not Auto-Update OAuth2 `redirect_uris`
+
+**Version:** Authentik 2025.2.4
+**Discovered:** 2026-07-10, exposing knowledge-index via ki.photondatum.space
+
+### What Happened
+
+After changing a ProxyProvider's `external_host` from `https://ki.stack.localhost` to `https://ki.photondatum.space`, the Authentik login flow returned "Redirect URI Error — missing, invalid, or mismatching redirection URI". The `redirect_uris` field still contained the old `ki.stack.localhost` values.
+
+### Root Cause
+
+`ProxyProvider.redirect_uris` is stored separately from `external_host`. Saving the provider via the Django ORM (`provider.external_host = '...'; provider.save()`) updates the field but does not trigger the signal that regenerates `redirect_uris` from the new `external_host`.
+
+### Fix
+
+Explicitly set `redirect_uris` after changing `external_host`:
+
+```python
+from authentik.providers.oauth2.models import RedirectURI, RedirectURIMatchingMode
+
+provider.external_host = 'https://ki.photondatum.space'
+provider.redirect_uris = [
+    RedirectURI(
+        matching_mode=RedirectURIMatchingMode.STRICT,
+        url='https://ki.photondatum.space/outpost.goauthentik.io/callback?X-authentik-auth-callback=true'
+    ),
+    RedirectURI(
+        matching_mode=RedirectURIMatchingMode.STRICT,
+        url='https://ki.photondatum.space?X-authentik-auth-callback=true'
+    ),
+]
+provider.save()
+```
+
+Alternatively, edit the provider in the Authentik admin UI — the UI regenerates `redirect_uris` from `external_host` on save.
+
+### Rule
+
+> When changing a ProxyProvider's `external_host` programmatically, always update `redirect_uris` in the same operation. The ORM `save()` does not auto-regenerate them. The UI save does.
+
+---
+
+## 16 New ProxyProvider Applications Are Not Auto-Enrolled in the Embedded Outpost
+
+**Version:** Authentik 2025.2.4
+**Discovered:** 2026-07-10, adding ki.stack.localhost LAN provider
+
+### What Happened
+
+After creating a new `Application` + `ProxyProvider` (`knowledge-index-lan`, `external_host=https://ki.stack.localhost`) to add LAN support alongside the existing public provider, the embedded outpost still returned 404 for `ki.stack.localhost`. The outpost had no knowledge of the new provider even after waiting several minutes.
+
+### Root Cause
+
+Authentik's embedded outpost maintains an **explicit list of providers** it serves. Creating an `Application` with a `ProxyProvider` does not automatically enroll that provider in any outpost — even the embedded one. The outpost's provider list must be updated manually.
+
+### Fix
+
+```python
+from authentik.outposts.models import Outpost
+from authentik.providers.proxy.models import ProxyProvider
+
+outpost = Outpost.objects.get(name='authentik Embedded Outpost')
+new_provider = ProxyProvider.objects.get(name='knowledge-index-lan')
+outpost.providers.add(new_provider)
+outpost.save()
+```
+
+The outpost picks up the change within ~30 seconds (no restart required).
+
+### Rule
+
+> After creating a ProxyProvider + Application, **always** add the provider to the target outpost (`outpost.providers.add(provider)`). The embedded outpost does not auto-discover new providers. Without this step, the outpost returns 404 for the new hostname indefinitely.
+
+---
+
+## 17 Changing a User's Email Invalidates All Proxy Session Cookies
+
+**Version:** Authentik 2025.2.4
+**Discovered:** 2026-07-10, akadmin email update
+
+### What Happened
+
+After changing `akadmin`'s email from `akadmin@photondatum.space` to `michaelbiggerstaff7@gmail.com` (to align it with the OpenWebUI admin account for `WEBUI_AUTH_TRUSTED_EMAIL_HEADER`), all existing proxy session cookies for `agent.photondatum.space` were invalidated. On the next visit, the browser served the cached HTML page (bypassing forwardAuth), loaded the SvelteKit app, then hit API endpoints — those were 302'd because the session cookie was now invalid. The cross-origin 302 triggered a CORS error → SvelteKit `/error` → "Backend Required".
+
+### Root Cause
+
+Authentik proxy session tokens contain the authenticated user's identity claims, including their email. When the email changes, existing sessions referencing the old email are invalidated server-side. The browser still holds the old cookie, but Authentik rejects it.
+
+### Fix
+
+After changing a user's email:
+
+1. Inform affected users that they need to clear site data for all forwardAuth-protected apps and re-authenticate.
+2. In Authentik admin → Flows & Stages → Tokens, revoke any outstanding tokens for that user if needed.
+3. Apply `Cache-Control: no-store` on forwardAuth-gated routers (see Traefik lessons §8 / OpenWebUI lessons §3) so that cached HTML pages do not cause CORS loops when the session is invalidated.
+
+### Rule
+
+> Changing a user's email in Authentik immediately invalidates their proxy session cookies. Users must re-authenticate. This is expected but easy to overlook — especially for the `akadmin` account which may be used intermittently. Document email changes and notify affected sessions before making the change.
+
+---
+
+## 18 `access_token_validity` on ProxyProvider Must Be Set Explicitly — Defaults to 1 Hour
+
+**Version:** Authentik 2025.2.4
+**Discovered:** 2026-07-10, debugging session expiry
+
+### What Happened
+
+After deploying forwardAuth with ProxyProviders for `agent.photondatum.space` and `flowise.photondatum.space`, users were logged out every hour. The Authentik proxy session cookie expired, triggering a re-authentication round-trip. This was disruptive for long-running chat sessions in OpenWebUI.
+
+### Root Cause
+
+The default `access_token_validity` on a freshly created `ProxyProvider` is `timedelta(hours=1)`. This is the lifetime of the proxy session cookie set by the embedded outpost's callback. Once expired, forwardAuth returns 302 on the next request.
+
+### Fix
+
+Update the ProxyProvider via the Authentik Django shell:
+
+```python
+from authentik.providers.proxy.models import ProxyProvider
+from datetime import timedelta
+
+for name in ['agent', 'flowise']:
+    p = ProxyProvider.objects.get(name__icontains=name)
+    p.access_token_validity = timedelta(hours=24)
+    p.save()
+    print(p.name, p.access_token_validity)
+```
+
+### Rule
+
+> After creating a ProxyProvider, explicitly set `access_token_validity` to match your session policy (e.g. `hours=24` for daily re-auth). The default 1-hour expiry is almost always too short for browser-based applications and will cause frequent re-authentication interruptions.
+
+### Caveat — Django ORM assignment corrupts the field (2026-07-11)
+
+**Do not** assign a Python `timedelta` object via the Django shell:
+
+```python
+p.access_token_validity = timedelta(hours=24)  # WRONG — stores "1 day, 0:00:00"
+```
+
+Authentik 2025.x stores `access_token_validity` as a plain string in `key=value` format. Setting it to a `timedelta` object causes Django to persist the object's `str()` representation (`1 day, 0:00:00`), which contains no `=` separator. On the next token exchange, `timedelta_from_string()` crashes with `ValueError: not enough values to unpack`. This produces an infinite redirect loop (see §19).
+
+**Correct shell fix:**
+
+```python
+from authentik.providers.proxy.models import ProxyProvider
+for p in ProxyProvider.objects.all():
+    p.access_token_validity = "hours=24"
+    p.save()
+```
+
+Or use the admin UI: **Applications → Providers → [Provider] → Edit → Access Token Validity** → enter `hours=24`.
+
+---
+
+## 19 Malformed `access_token_validity` Causes Infinite Redirect Loop — Diagnose via Event Log
+
+**Version:** Authentik 2025.2.4
+**Discovered:** 2026-07-11, post-migration forwardAuth debugging
+**See also:** §18 (access_token_validity format), Traefik lessons §8
+
+### What Happened
+
+All forwardAuth-gated services (`agent.photondatum.space`, `flowise.photondatum.space`) entered an infinite redirect loop. OAuth flows completed — fresh authorization codes appeared in Traefik logs — but sessions were never established and the browser returned `ERR_TOO_MANY_REDIRECTS`.
+
+### Root Cause
+
+The `access_token_validity` field on both ProxyProviders had been set to `timedelta(hours=24)` via the Django ORM (see §18 caveat). Django persisted `1 day, 0:00:00` as the field value. During every token exchange, `timedelta_from_string()` crashed:
+
+```
+File "/authentik/lib/utils/time.py", line 38, in timedelta_from_string
+    key, value = duration_pair.split("=")
+ValueError: not enough values to unpack (expected 2, got 1)
+```
+
+The embedded outpost caught the exception, returned `302 → original URL` **without a `Set-Cookie` header**, and the proxy session was never created. On the next request, forwardAuth found no session and started a new OAuth flow. Because the user's Authentik session was valid, authorization was granted instantly and a new code issued — repeating the loop indefinitely.
+
+### Symptoms
+
+- Traefik access log: `OriginStatus:0` on **every** request including `/outpost.goauthentik.io/callback` (backend never reached)
+- The same `sid` value appears in consecutive callback state JWTs (state cookie never replaced by session cookie)
+- All forwardAuth-gated services fail simultaneously
+- `ERR_TOO_MANY_REDIRECTS` in browser; incognito and cleared cookies make no difference
+
+### Diagnosis
+
+**Authentik admin → Events → Logs** shows the pattern repeating in lockstep:
+
+```
+Application authorized   akadmin   <browser IP>   (code issued)
+General system exception  AnonymousUser  127.0.0.1  (outpost crashes)
+Application authorized   akadmin   <browser IP>   (code issued again)
+General system exception  AnonymousUser  127.0.0.1  (outpost crashes again)
+```
+
+The `127.0.0.1` client IP identifies the **embedded outpost** (runs inside the Authentik server process). Click the exception entry — the traceback will name the exact failing line and field.
+
+### Fix
+
+Edit each ProxyProvider in the Authentik admin UI:
+
+1. **Applications → Providers → [Provider Name] → Edit**
+2. **Access Token Validity** field → change to `hours=24`
+3. **Save**
+
+Repeat for every affected provider. No restart needed.
+
+### Rule
+
+> When all forwardAuth-gated services loop simultaneously and `ERR_TOO_MANY_REDIRECTS` persists across cleared cookies and incognito windows, check the Authentik event log first. Alternating "Application authorized" + "General system exception (127.0.0.1)" pairs always mean the embedded outpost is crashing during token exchange — not an outpost assignment, network, or browser issue.

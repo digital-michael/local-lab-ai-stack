@@ -18,7 +18,7 @@ Project-specific preferences and opinionated decisions for the Knowledge Index S
 # 1 Deployment Preferences
 
 - Deploy via rootless Podman systemd quadlet generated from `configs/config.json`
-- Internal port: 8900 (not published to host)
+- Internal port: **8100** (container DNS: `http://knowledge-index.ai-stack:8100`)
 - No persistent data volume; library volumes mounted read-only from `$AI_STACK_DIR/libraries/`
 - Resource limits: 1 CPU, 512 MB RAM
 - Position 8 in the startup order: depends on PostgreSQL (position 3) and Qdrant (position 4)
@@ -112,10 +112,25 @@ async with sse_client("http://localhost:8100/mcp/sse") as (read, write):
 
 ## Traefik Routing
 
-The `/mcp` PathPrefix rule in `configs/traefik/dynamic/services.yaml` routes
-MCP traffic through Traefik → Authentik middleware → knowledge-index container.
-This means agent clients accessing the service via Traefik must pass Authentik
-forward-auth in addition to the `API_KEY` bearer token (if set).
+Four routers are defined in `configs/traefik/dynamic/services.yaml` for the public hostname
+(`ki.photondatum.space`) and three for the LAN hostname (`ki.stack.localhost`):
+
+| Router | Host | Path prefix | Authentik middleware | Notes |
+| --- | --- | --- | --- | --- |
+| `ki-public-root` | `ki.photondatum.space` | `/` | no | Redirects to `/admin` via `redirect-to-admin` |
+| `ki-public-admin` | `ki.photondatum.space` | `/admin` | **yes** | SSO login required; app still needs API key (known gap) |
+| `ki-public-api` | `ki.photondatum.space` | `/v1` | no | Machine-to-machine; clients supply Bearer token directly |
+| `ki-public-mcp` | `ki.photondatum.space` | `/mcp` | no | MCP clients supply Bearer token directly |
+| `knowledge-index-admin` | `ki.stack.localhost` | `/admin` | no | API key auth at app layer |
+| `knowledge-index-mcp` | `ki.stack.localhost` | `/mcp` | no | API key auth at app layer |
+| `knowledge-index-api` | `ki.stack.localhost` | `/v1` | **yes** | SSO login required on LAN; app still needs API key (known gap) |
+
+Tailnet routers (`Host('100.64.0.4')`) bypass Authentik entirely — used by workers and internal services.
+
+**Known gap:** Authentik forwardAuth on `/admin` and LAN `/v1` authenticates *identity* but does not
+inject `Authorization: Bearer <knowledge_index_api_key>` into the proxied request. The app therefore
+returns 401 even after a successful Authentik login. Planned fix: Traefik `headers` middleware to
+inject the API key for browser-facing routes.
 
 ---
 

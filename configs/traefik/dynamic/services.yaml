@@ -19,6 +19,7 @@ http:
       middlewares:
         - authentik
         - secure-headers
+        - nocache
       tls: {}
 
     grafana:
@@ -26,16 +27,6 @@ http:
       entryPoints:
         - websecure
       service: grafana
-      middlewares:
-        - authentik
-        - secure-headers
-      tls: {}
-
-    flowise:
-      rule: "Host(`flowise.stack.localhost`)"
-      entryPoints:
-        - websecure
-      service: flowise
       middlewares:
         - authentik
         - secure-headers
@@ -81,6 +72,7 @@ http:
       service: knowledge-index
       middlewares:
         - authentik
+        - ki-api-key
         - secure-headers
       tls: {}
 
@@ -117,6 +109,18 @@ http:
         - secure-headers
       tls: {}
 
+    # Public entry — litellm.photondatum.space proxied via Caddy on photondatum.space.
+    # LiteLLM manages its own Authentik OAuth SSO (GENERIC_* env vars). No forwardAuth
+    # middleware here — it would force two Authentik round-trips per session.
+    litellm-public:
+      rule: "Host(`litellm.photondatum.space`)"
+      entryPoints:
+        - websecure
+      service: litellm
+      middlewares:
+        - secure-headers
+      tls: {}
+
     qdrant:
       rule: "Host(`qdrant.stack.localhost`)"
       entryPoints:
@@ -147,6 +151,41 @@ http:
         - secure-headers
       tls: {}
 
+    # Public entry — flowise.photondatum.space proxied via Caddy on photondatum.space.
+    flowise-public:
+      rule: "Host(`flowise.photondatum.space`)"
+      entryPoints:
+        - websecure
+      service: flowise
+      middlewares:
+        - authentik
+        - secure-headers
+      tls: {}
+
+    # SvelteKit static assets and WebSocket — no forwardAuth on these paths.
+    # /_app/*: hashed immutable JS/CSS bundles + version.json. Bypassing auth prevents
+    # SvelteKit's background version.json poll from 302ing to Authentik cross-origin
+    # (fetch() can't complete a login redirect → CORS failure → error boundary).
+    # /ws/*: Socket.IO WebSocket. WebSocket upgrades can't follow 302 redirects, so
+    # Authentik forwardAuth must not intercept them. OpenWebUI's own JWT gates these.
+    openwebui-public-static:
+      rule: "Host(`agent.photondatum.space`) && (PathPrefix(`/_app`) || PathPrefix(`/ws`))"
+      entryPoints:
+        - websecure
+      service: openwebui
+      middlewares:
+        - secure-headers
+      tls: {}
+
+    openwebui-static:
+      rule: "Host(`openwebui.stack.localhost`) && (PathPrefix(`/_app`) || PathPrefix(`/ws`))"
+      entryPoints:
+        - websecure
+      service: openwebui
+      middlewares:
+        - secure-headers
+      tls: {}
+
     # Public entry — agent.photondatum.space proxied via Caddy on photondatum.space.
     # Caddy forwards Host: agent.photondatum.space so this router matches.
     # Authentik is now on the VPS (always-on), so forwardAuth works for external browsers.
@@ -158,6 +197,7 @@ http:
       middlewares:
         - authentik
         - secure-headers
+        - nocache
       tls: {}
 
     # Public entry — dashboard.photondatum.space proxied via Caddy on photondatum.space.
@@ -168,6 +208,49 @@ http:
       service: homepage
       middlewares:
         - authentik
+        - secure-headers
+      tls: {}
+
+    # Public entry — ki.photondatum.space proxied via Caddy on photondatum.space.
+    # Root path: redirect to /admin for browser users navigating to the base URL.
+    ki-public-root:
+      rule: "Host(`ki.photondatum.space`) && Path(`/`)"
+      entryPoints:
+        - websecure
+      middlewares:
+        - redirect-to-admin
+        - secure-headers
+      service: knowledge-index
+      tls: {}
+
+    # /admin: browser admin panel, protected by Authentik.
+    # /v1 and /mcp: machine-to-machine API key auth at app level; no Authentik middleware.
+    ki-public-admin:
+      rule: "Host(`ki.photondatum.space`) && PathPrefix(`/admin`)"
+      entryPoints:
+        - websecure
+      service: knowledge-index
+      middlewares:
+        - authentik
+        - ki-api-key
+        - secure-headers
+      tls: {}
+
+    ki-public-api:
+      rule: "Host(`ki.photondatum.space`) && PathPrefix(`/v1`)"
+      entryPoints:
+        - websecure
+      service: knowledge-index
+      middlewares:
+        - secure-headers
+      tls: {}
+
+    ki-public-mcp:
+      rule: "Host(`ki.photondatum.space`) && PathPrefix(`/mcp`)"
+      entryPoints:
+        - websecure
+      service: knowledge-index
+      middlewares:
         - secure-headers
       tls: {}
 

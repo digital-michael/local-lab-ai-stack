@@ -33,6 +33,7 @@
 | `chat.photondatum.space` | A | VPS public IP | Reserved — future social chat |
 | `dashboard.photondatum.space` | A | VPS public IP | CENTAURI stack homepage dashboard |
 | `flowise.photondatum.space` | A | VPS public IP | Flowise AI workflow builder (bundle-admin) |
+| `ki.photondatum.space` | A | VPS public IP (`66.228.37.60`) | Knowledge Index API + admin panel (pending) |
 
 All `*.photondatum.space` subdomains point at this VPS — Caddy proxies
 CENTAURI-hosted services through to `100.64.0.4:443` via tailnet.
@@ -85,7 +86,8 @@ Authentik OAuth2 provider `Forgejo (Git)` (pk=2):
 - Policy: `access-forgejo` (bundle-developer, bundle-admin, superuser)
 
 To complete the connection, add the auth source in Forgejo admin UI:
-**`https://git.photondatum.space/-/admin/auths/new`**
+**`https://git.photondatum.space/admin/auths/new`**
+(Forgejo 15 uses `/admin/` not `/-/admin/` — the `/-/` prefix returns 404)
 
 | Field | Value |
 |---|---|
@@ -185,22 +187,33 @@ chat.photondatum.space {
 }
 
 # Homepage dashboard — CENTAURI stack dashboard
+# header_up sends the public hostname so Traefik routes via homepage-public router
+# and Authentik's forwardAuth X-Forwarded-Host matches the proxy provider external_host.
 https://dashboard.photondatum.space {
     reverse_proxy 100.64.0.4:443 {
-        header_up Host dashboard.stack.localhost
+        header_up Host dashboard.photondatum.space
         transport http { tls_insecure_skip_verify }
     }
 }
 ```
 
 Additional CENTAURI service routes follow the same pattern — proxy to
-`100.64.0.4:443` with `header_up Host <service>.stack.localhost`:
+`100.64.0.4:443` with `header_up Host <public-hostname>`:
 
 ```caddy
 # Flowise — AI workflow builder (bundle-admin only, via Authentik forwardAuth)
 https://flowise.photondatum.space {
     reverse_proxy 100.64.0.4:443 {
         header_up Host flowise.stack.localhost
+        transport http { tls_insecure_skip_verify }
+    }
+}
+
+# Knowledge Index — API + admin panel (bundle-admin via Authentik; /v1 and /mcp use app API key)
+# Requires ki.photondatum.space A record in DNS before Caddy can obtain a TLS cert.
+https://ki.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host ki.photondatum.space
         transport http { tls_insecure_skip_verify }
     }
 }

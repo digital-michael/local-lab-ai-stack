@@ -28,10 +28,15 @@ regardless of their group membership.
 | `bundle-agent` | agent.photondatum.space, chat.photondatum.space (future) |
 | `bundle-agent-mcp` | agent + mcp.photondatum.space |
 | `bundle-developer` | agent + git.photondatum.space + knowledge-index |
-| `bundle-admin` | all services including grafana, prometheus, homepage |
+| `bundle-admin` | all services including grafana, prometheus, homepage, litellm |
+| `forgejo-guest` | git.photondatum.space (read-only public repos, no forks) |
+| `agent-only` | agent.photondatum.space only — for external guests/testers invited via the `enrollment-agent-only` flow |
 
 Users may be in multiple bundles. New invited users land in `bundle-agent`
-by default; akadmin promotes as needed.
+by default; akadmin promotes as needed. `forgejo-guest` is for external
+collaborators who need read-only repo access without full developer bundle access.
+`agent-only` is for external users invited specifically to use the AI agent
+interface — they have no access to other services.
 
 ---
 
@@ -39,14 +44,22 @@ by default; akadmin promotes as needed.
 
 | Application slug | Name | External URL | Allowed bundles |
 |---|---|---|---|
-| `agent` | Agent (OpenWebUI) | `https://agent.photondatum.space` | agent, agent-mcp, developer, admin |
-| `forgejo` | Forgejo (Git) | `https://git.photondatum.space` | developer, admin |
+| `agent` | Agent (OpenWebUI) | `https://agent.photondatum.space` | agent, agent-mcp, developer, admin, **agent-only** |
+| `forgejo-oidc` | Forgejo (Git) | `https://git.photondatum.space` | developer, admin, forgejo-guest |
 | `homepage` | Homepage Dashboard | `https://dashboard.photondatum.space` | admin |
-| `knowledge-index` | Knowledge Index | `https://ki.stack.localhost` | developer, admin |
+| `knowledge-index` | Knowledge Index | `https://ki.photondatum.space` | developer, admin |
+| `knowledge-index-lan` | Knowledge Index (LAN) | `https://ki.stack.localhost` | developer, admin |
 | `grafana` | Grafana | `https://grafana.stack.localhost` | admin |
 | `prometheus` | Prometheus | `https://prometheus.stack.localhost` | admin |
-| `mcp` | MCP | `https://mcp.photondatum.space` | agent-mcp, developer, admin |
+| `mcp` | MCP | `https://ki.photondatum.space/mcp` (meta_launch_url) | agent-mcp, developer, admin |
 | `flowise` | Flowise | `https://flowise.photondatum.space` | admin |
+| `litellm` | LiteLLM | `https://litellm.photondatum.space` | admin |
+
+> **Note — `forgejo-oidc`:** Forgejo uses an OAuth2Provider (OIDC), not a ProxyProvider. Caddy on the VPS serves `git.photondatum.space` directly with no forwardAuth middleware — Forgejo handles auth itself via the OIDC flow. A defunct ProxyProvider (pk=2, slug=`forgejo`) was removed during cleanup; only the OAuth2Provider (pk=9) remains. Do not add a ProxyProvider for Forgejo.
+>
+> **Note — `litellm`:** LiteLLM uses an OAuth2Provider (OIDC), not a ProxyProvider. LiteLLM manages its own Authentik OAuth SSO via `GENERIC_*` env vars in `litellm.env`. The Traefik `litellm-public` router has only `secure-headers` middleware — no Authentik forwardAuth — because LiteLLM's own OAuth handles auth. Adding forwardAuth would cause two Authentik round-trips per session. The OAuth2 provider does **not** need to be assigned to the Embedded Outpost (outpost is for ProxyProviders only).
+>
+> **Note — `knowledge-index-lan`:** A second ProxyProvider (`pk=10`, `external_host=https://ki.stack.localhost`) was created to restore LAN access after the public provider's `external_host` was changed from `ki.stack.localhost` to `ki.photondatum.space`. Both providers are enrolled in the embedded outpost. See [Lesson §16](../authentik/lessons_learned.md#16-new-proxyprovider-applications-are-not-auto-enrolled-in-the-embedded-outpost).
 
 Each application has an `access-<slug>` ExpressionPolicy bound to it that
 checks `ak_is_group_member` for the allowed bundles. Authentik enforces this
@@ -117,7 +130,9 @@ sources M2M via admin UI or Django ORM.
 
 ## Invitation Flow Details
 
-Flow slug: `invitation-enrollment`
+Two invitation flows exist for different invitee types:
+
+### Flow 1: `invitation-enrollment` — standard invite (username/password, lands in bundle-agent)
 
 | Stage | Name | Purpose |
 |---|---|---|
@@ -129,3 +144,22 @@ Flow slug: `invitation-enrollment`
 `continue_flow_without_invitation = False` — the flow is unusable without a
 valid invite link. Visiting `/if/flow/invitation-enrollment/` directly returns
 an error.
+
+### Flow 2: `enrollment-agent-only` — external guest invite (social login, lands in agent-only)
+
+For external users who should access `agent.photondatum.space` only. Uses social
+login (Google/GitHub) instead of username/password — no credentials for the
+invitee to manage.
+
+| Stage | Name | Purpose |
+|---|---|---|
+| 0 | `invitation-agent-only` | Reject requests without a valid invite token (`continue_flow_without_invitation = False`) |
+| 10 | `identification-agent-only` | Show Google/GitHub social login buttons (no password option) |
+| 20 | `user-write-agent-only` | Create user and assign `agent-only` group automatically |
+
+To invite an external guest:
+1. Directory → Invitations → Create
+2. Flow: `enrollment-agent-only`
+3. Expiry: 7–30 days, single-use: Yes
+4. Optionally set `{"email": "invitee@example.com"}` in Custom attributes
+5. Copy the generated link and send it to the invitee manually — Authentik does not email it

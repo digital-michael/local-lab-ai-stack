@@ -22,10 +22,27 @@ http:
         stsSeconds: 31536000
         stsIncludeSubdomains: true
 
+    # Redirect bare / to /admin/v1/nodes (used by ki-public-root router)
+    redirect-to-admin:
+      redirectRegex:
+        regex: "^(https?://[^/]+)/?$"
+        replacement: "${1}/admin/v1/nodes"
+        permanent: false
+
     # Authentik forward-auth middleware
     # Authentik runs on photondatum.space (always-on VPS edge node).
     # CENTAURI services degrade gracefully when the VPS is unreachable —
     # LAN/tailnet access remains up but auth checks will fail until it recovers.
+    # Prevent browsers from caching dynamic/auth-gated responses.
+    # Applied to routers that serve OpenWebUI pages and API calls so that
+    # an expired Authentik proxy session always triggers a fresh forwardAuth
+    # check rather than replaying a cached HTML response.
+    # NOT applied to /_app/* static asset routers (immutable hashed files).
+    nocache:
+      headers:
+        customResponseHeaders:
+          Cache-Control: "no-store, no-cache, must-revalidate"
+
     authentik:
       forwardAuth:
         address: "https://auth.photondatum.space/outpost.goauthentik.io/auth/traefik"

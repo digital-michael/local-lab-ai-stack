@@ -1,5 +1,5 @@
 # Grafana — Security
-**Last Updated:** 2026-03-08 UTC
+**Last Updated:** 2026-07-10
 
 ## Purpose
 Security standards and hardening guidelines for Grafana dashboards and visualization.
@@ -23,12 +23,13 @@ Security standards and hardening guidelines for Grafana dashboards and visualiza
 
 # 1 Authentication and Authorization
 
-- Change the default admin password immediately after first login
-- Disable anonymous access: `GF_AUTH_ANONYMOUS_ENABLED=false`
-- Integrate with Authentik via generic OAuth for centralized SSO
-- Use RBAC: `Admin` for operators, `Editor` for power users, `Viewer` for most users
-- Disable user signup: `GF_USERS_ALLOW_SIGN_UP=false`
-- Enforce session timeout: `GF_AUTH_LOGIN_MAXIMUM_INACTIVE_LIFETIME_DURATION=1h`
+- SSO via Authentik `auth.proxy`: Grafana trusts the `X-authentik-username` header injected by the Authentik outpost after forwardAuth passes. This is simpler than OAuth2 for proxy-fronted deployments — no client secret needed.
+- Whitelist the Podman network CIDR (`10.89.0.0/24`) in `auth.proxy.whitelist` to prevent header spoofing from outside the container network.
+- Disable the Grafana login form (`disable_login_form = true`) — users must authenticate through Authentik; direct password login is not available.
+- Set `auto_sign_up = true` so Grafana auto-creates an account on first SSO login.
+- Auto-assign `Admin` role for all SSO users (`auto_assign_org_role = Admin`) — role management happens in Authentik, not Grafana.
+- Disable anonymous access; no `GF_AUTH_ANONYMOUS_ENABLED` needed when login form is disabled and auth.proxy is the gate.
+- Additional headers (`Email:X-authentik-email Name:X-authentik-name`) keep Grafana user profiles in sync with Authentik identity.
 
 # 2 Network Security
 

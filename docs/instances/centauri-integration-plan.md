@@ -1,6 +1,6 @@
 # CENTAURI — Integration Plan (photondatum.space IAM)
-**Status:** In Progress
-**Last Updated:** 2026-07-10
+**Status:** Active (outstanding: tlvulcan7 invitation delivery + smoke test)
+**Last Updated:** 2026-07-11
 
 This document tracks the work needed to fully integrate CENTAURI with the photondatum.space IAM deployment and to resolve post-migration cleanup items. It also records planned roles for SOL and TC25 for future reference.
 
@@ -185,3 +185,78 @@ here so that when they are brought back online, the deployment path is clear.
 | RustDesk version pinned to 1.1.15 | 2026-07-10 | Was `latest` in docker-compose.yml |
 | Forgejo OIDC wired (Authentik side + Forgejo side) | 2026-07-10 | `digital-michael` linked via GitHub |
 | akadmin email separated from personal account | 2026-07-10 | akadmin@photondatum.space |
+| Dashboard Caddy fix — `header_up Host` corrected | 2026-07-10 | Was `dashboard.stack.localhost`; now `dashboard.photondatum.space` — apply Caddyfile with sudo |
+| Traefik ki-public routers added | 2026-07-10 | `ki-public-admin`, `ki-public-api`, `ki-public-mcp` — live in services.yaml |
+| Authentik KI provider external_host updated | 2026-07-10 | `ki.stack.localhost` → `ki.photondatum.space` |
+| Authentik MCP app meta_launch_url set | 2026-07-10 | `https://ki.photondatum.space/mcp` (MCP is a path on knowledge-index, not a separate service) |
+| Authentik KI redirect_uris updated to ki.photondatum.space | 2026-07-10 | ORM `.save()` does not auto-regenerate redirect_uris; set explicitly (Lesson §15) |
+| knowledge-index-lan provider created | 2026-07-10 | Restores `ki.stack.localhost` LAN auth; second ProxyProvider + Application added to embedded outpost (Lesson §16) |
+| Homepage Authentik widget token updated | 2026-07-10 | Old token was from local Authentik (CENTAURI); new `homepage-widget` token created in VPS Authentik, quadlet patched in-place |
+| KI browser auth — Traefik header injection | 2026-07-10 | `ki-auth.yaml` (gitignored) adds `Authorization: Bearer <knowledge_index_api_key>` after Authentik SSO passes; applied to `knowledge-index-api` (LAN) and `ki-public-admin` (public) routers |
+| Grafana SSO via auth.proxy | 2026-07-10 | `grafana.ini` updated: `auth.proxy` enabled, trusts `X-authentik-username` header from Authentik outpost; login form disabled; whitelist `10.89.0.0/24` prevents spoofing |
+| Flowise SSO — internal auth removed | 2026-07-10 | `FLOWISE_USERNAME` and `flowise_password` secret removed from quadlet; Authentik forwardAuth via Traefik is now the sole auth gate |
+| Stale Authentik quadlet removed from CENTAURI | 2026-07-10 | `~/.config/containers/systemd/authentik.container` deleted; `m2m-gateway.container` `After/Requires=authentik.service` dependency removed; daemon-reload run |
+| Forgejo ROOT_URL set to HTTPS | 2026-07-10 (re-applied 2026-07-11) | `/etc/forgejo/app.ini` `ROOT_URL = https://git.photondatum.space`; `http://` redirect URI already absent from Authentik Forgejo OIDC provider. Change was re-applied 2026-07-11 — initial apply did not persist. |
+| Forgejo registration restricted | 2026-07-10 | `ALLOW_ONLY_EXTERNAL_SELF_REGISTRATION = true`, `DEFAULT_ALLOW_CREATE_ORGANIZATION = false` added to `[service]` in `/etc/forgejo/app.ini` |
+| `forgejo-guest` group created | 2026-07-10 | Created in Authentik; `access-forgejo` ExpressionPolicy updated to include `ak_is_group_member(request.user, name="forgejo-guest")` |
+| Homepage KI link corrected | 2026-07-10 | `services.yaml` href changed from `dashboard.stack.localhost/v1/catalog` to `ki.photondatum.space/v1/catalog` |
+| OpenWebUI trusted email header SSO | 2026-07-11 | `WEBUI_AUTH_TRUSTED_EMAIL_HEADER=X-authentik-email` + `WEBUI_AUTH_TRUSTED_NAME_HEADER=X-authentik-name` added to `openwebui.container`; login form replaced by Authentik forwardAuth auto-sign-in |
+| akadmin promoted to Admin in OpenWebUI | 2026-07-11 | Logged in as `michaelbiggerstaff7@gmail.com` → Workspace → Users → promoted `akadmin@photondatum.space` to Admin |
+| Flowise Caddyfile host header fixed | 2026-07-11 | `flowise.photondatum.space` block was sending `Host: flowise.stack.localhost` — no Traefik router matched, Traefik 404'd. Changed to `Host: flowise.photondatum.space` in `/etc/caddy/Caddyfile`; caddy reloaded. Repo Caddyfile updated to match. |
+| LiteLLM OAuth endpoints updated to VPS Authentik | 2026-07-11 | `litellm.env` had three endpoints pointing to stale `auth.stack.localhost` / `authentik.ai-stack:9000`. Updated all three to `https://auth.photondatum.space/...`; LiteLLM restarted. |
+| akadmin Forgejo account created and promoted to admin | 2026-07-11 | Created with local auth source (not OIDC) using `akadmin@photondatum.space`; promoted to site administrator. Linked Authentik OIDC via User Settings → Security → Linked Accounts. |
+| akadmin added to bundle-admin group | 2026-07-11 | Authentik superuser status does not grant group membership. Added akadmin to bundle-admin so all bundle-admin-gated applications (Agent, Flowise, Dashboard, KI, LiteLLM) appear in akadmin's portal and pass policy checks. |
+| Homepage Authentik widget token renewed | 2026-07-11 | Old token expired (was from prior session). Deleted in Authentik; new `homepage-widget` API token created under akadmin; `homepage.container` quadlet updated; service reloaded. |
+| LiteLLM external access enabled | 2026-07-11 | New OAuth2 provider + Application created in VPS Authentik (old credentials were from decommissioned CENTAURI Authentik). `litellm-public` Traefik router added for `litellm.photondatum.space`. Caddy block added. `GENERIC_CLIENT_ID`, `GENERIC_CLIENT_SECRET`, `GENERIC_REDIRECT_URI`, `PROXY_BASE_URL` updated in `litellm.env`. LiteLLM restarted. No forwardAuth on public router — LiteLLM manages its own OAuth SSO. |
+| Traefik `nocache` middleware added | 2026-07-11 | `Cache-Control: no-store` on all auth-gated routers (`openwebui`, `openwebui-public`); prevents browser cache from bypassing forwardAuth on session expiry. Briefly removed during redirect loop investigation (false hypothesis); re-added once actual root cause identified. |
+| Redirect loop on agent.photondatum.space and flowise.photondatum.space resolved | 2026-07-11 | Root cause: `access_token_validity` on both ProxyProviders stored as `1 day, 0:00:00` (Python timedelta repr, no `=` separator). `timedelta_from_string()` crashed on every token exchange — callback returned 302 without Set-Cookie, no session ever created. Diagnosed via Authentik event log: alternating "Application authorized" + "General system exception (127.0.0.1)" pairs. Fixed by setting `hours=24` in both Agent (OpenWebUI) and Flowise Proxy providers via admin UI. See Authentik lessons §18 caveat and §19. |
+
+## Outstanding — Known Gaps
+
+### B. Create akadmin Forgejo Account and Promote to Admin
+
+**Why:** akadmin is the Authentik admin but has no Forgejo account. Without a Forgejo account, akadmin cannot administer the git service.
+
+**Action (as `3pdx7a` on photondatum.space):**
+
+```bash
+# 1. Create the Forgejo user
+sudo forgejo admin user create \
+  --username akadmin \
+  --email akadmin@photondatum.space \
+  --password <temporary-password> \
+  --admin \
+  --must-change-password=false
+
+# 2. Verify the user was created and has admin flag
+sudo forgejo admin user list | grep akadmin
+```
+
+Then, to link akadmin's Authentik OIDC identity to the Forgejo account:
+
+1. Log into Forgejo as `akadmin` (with the temporary password set above)
+2. User Settings → Security → Linked Accounts → Link **Authentik** account
+3. Complete the Authentik SSO flow
+4. After linking, akadmin logs in via Authentik SSO and Forgejo recognises them as admin
+
+**See:** [Forgejo lessons learned §4](../library/framework_components/forgejo/lessons_learned.md#4-first-oidc-login-requires-link_account-flow--pre-create-user-to-simplify)
+
+---
+
+### C. Agent-Only Role + Invitation Flow
+
+**Why:** External users (e.g. testers, guests) should be able to access `agent.photondatum.space` only — no other stack services. First invitee: `tlvulcan7@gmail.com`.
+
+**Planned work:**
+
+1. Create an `agent-only` group in Authentik
+2. Create an ExpressionPolicy that allows `bundle-admin` OR `agent-only` group membership for the Agent (OpenWebUI) application
+3. Configure Authentik invitation flow so that invited users land in `agent-only` group automatically on signup
+4. Send invitation to `tlvulcan7@gmail.com` and verify they can reach `agent.photondatum.space` but not flowise, dashboard, etc.
+
+---
+
+**Note on Grafana and Flowise:**
+
+- Grafana: `auto_assign_org_role = Admin` is set in `grafana.ini` — every Authentik SSO user is automatically an Admin. No action needed; akadmin will be Admin on first login.
+- Flowise: no app-level auth — Authentik forwardAuth is the sole gate. akadmin already has full access through Authentik. No action needed.
