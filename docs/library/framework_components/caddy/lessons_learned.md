@@ -1,6 +1,6 @@
 # Caddy — Lessons Learned
 
-**Last Updated:** 2026-07-09
+**Last Updated:** 2026-07-11
 
 ## Purpose
 
@@ -11,6 +11,7 @@ Empirical findings from operating Caddy in this stack. Records behaviour that di
 ## Table of Contents
 
 1. [Caddy Overwrites X-Forwarded-Host When Proxying forwardAuth](#1-caddy-overwrites-x-forwarded-host-when-proxying-forwardauth)
+2. [`header_up Host` Must Match the Traefik Router Rule Hostname Exactly](#2-header_up-host-must-match-the-traefik-router-rule-hostname-exactly)
 
 ---
 
@@ -67,3 +68,30 @@ include `X-Forwarded-Host`.
 > Authentik, always add `header_up X-Forwarded-Host {http.request.header.X-Forwarded-Host}`
 > to the Authentik proxy block. Without it, Caddy overwrites the header and
 > the Authentik outpost cannot identify which application is being accessed.
+
+---
+
+## 2 `header_up Host` Must Match the Traefik Router Rule Hostname Exactly
+
+**Version:** Caddy 2.x, Traefik 3.x
+**Discovered:** 2026-07-11, Flowise external access debugging
+
+`https://flowise.photondatum.space` returned 404 from Traefik. The Caddy block
+had `header_up Host flowise.stack.localhost` — but Traefik's `flowise-public`
+router matches `Host('flowise.photondatum.space')`. No router matched the
+wrong hostname, so Traefik returned 404. Fix: set `header_up Host` to the
+public hostname that Traefik expects:
+
+```caddy
+https://flowise.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host flowise.photondatum.space
+        ...
+    }
+}
+```
+
+> For every Caddy block that proxies to CENTAURI Traefik, `header_up Host`
+> must match the hostname in the corresponding Traefik router's `rule:` exactly.
+> Traefik routes by `Host` header — if it doesn't match a router rule, the
+> request returns 404 regardless of the original URL the browser used.
