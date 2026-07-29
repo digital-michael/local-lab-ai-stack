@@ -8,11 +8,13 @@
 
 ## Enrollment
 
-This project is enrolled in the LLM Agent Collaboration Framework, Team mode.
+This project is enrolled in the LLM Agent Collaboration Framework, **Full mode** (as of 2026-07-29).
 
 - **Infrastructure:** `~/Documents/Entities/frameworks/llm-agent-framework` (read-only)
 - **Domain:** `~/Documents/Entities/frameworks/llm-agent-domains/photon-datum`
+- **Personal:** `~/Documents/Entities/frameworks/llm-agent-personal` (private; identity key `digital-michael`)
 - **Config:** `.llm-framework.yml` at project root
+- **Resolution order:** personal > domain > infrastructure
 
 ## Multi-Workstation Convention
 

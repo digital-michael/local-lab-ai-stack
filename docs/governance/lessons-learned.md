@@ -80,3 +80,25 @@ The same CENTAURI commit also carried `meta/local-lab-ai-stack/{agent-context,dy
 ### LLM Agent
 
 - Two independent sessions enrolling the same project under different domains, discovered only at push time, is a real failure mode of multi-workstation framework use — `git push` rejection is the actual detection mechanism, not anything in the governance files themselves. There is no pre-push check today that would have caught this earlier.
+
+---
+
+## Retrospective — 2026-07-29 (third pass): Personal Profile Activated
+
+Recognized that "meta" always had two aspects (see the second retrospective, above, for the domain-duplication half of this story): a **framework** aspect (portable collaboration mechanics — traced via provenance headers to `meta-framework` → `llm-agent-framework/governance/collaboration-directives.md` and `agent-context-protocol.md`, already migrated long before this session) and a **collaboration metrics/lessons** aspect (this project's own `dynamics.md`/`review_log.md`, relocated in the second retrospective).
+
+The framework's `personal` layer (Full mode: infrastructure + team + personal, resolution order `personal > team > infrastructure`) existed in `llm-agent-framework/templates/personal/` but was never activated for this project. Activated it now:
+
+**Promoted to `~/Documents/Entities/frameworks/llm-agent-personal`** (new private repo, not committed to any shared repo) — distilled, not copied verbatim, from this file's `dynamics.md`/`review_log.md`:
+- P-1..P-4 in `collaboration-patterns.md`: separation-of-concerns as default decomposition heuristic (E-4, L-5); front-loaded specs enabling cheaper-model execution (E-6); naming vocabulary before design (E-7); confirm-then-record discipline (I-19)
+- `collaboration-preferences.md`: proactive meta-observation surfacing (I-3, L-2) and "evaluate vs. implement" request framing (L-12) as explicit agent behaviors wanted; default autonomy level and model-tier preferences proposed from `review_log.md`'s interaction-level pattern and this project's own `.github/copilot-instructions.md` profile-upgrade rule
+- `roles-guide.md`: `lateral-thinking: aggressive`, strongly evidenced by `dynamics.md` dedicating a full 13-entry section to lateral ideas as their own category
+
+**Deliberately left un-promoted / left empty:** "Where I Tend to Fail" and "What I Don't Want" in `collaboration-preferences.md`, and the "Personal Weaknesses" table in `collaboration-patterns.md` — the source material documents agent/tech-stack weaknesses that were fixed, not this person's own collaboration failure modes. Populating those sections would have required inventing content; left explicitly empty with a note instead.
+
+`.llm-framework.yml` gained `personal:` and `personal_identity: digital-michael` — the identity key is deliberately independent of any OS login name (`3pdx7` on CENTAURI, `michaelbiggerstaff` here) **and** independent of any single git platform's username (GitHub/Forgejo/GitLab/Bitbucket usernames may all differ) — actual per-platform username mapping lives in `llm-agent-personal/README.md`'s own table, not duplicated into every project's dotfile.
+
+### LLM Agent
+
+- When a template exists but was never activated (the `personal` layer sat in `llm-agent-framework/templates/` unused this whole session), check for it before proposing something that duplicates its purpose. The user's initial proposal (`llm-agent-domains/profiles/<user>/collaboration/`) was a reasonable design reaching for a real gap, but re-derived a mechanism the framework already had — worth surfacing the existing template rather than building a parallel one.
+- Confidence-labeling is worth doing explicitly when distilling inferred content into a profile: this file's promoted entries carry source citations and, in `roles-guide.md`, an explicit confidence note distinguishing strongly-evidenced settings (`lateral-thinking`) from weakly-inferred ones (`default-mode`). This directly addresses the stated risk of a personal profile being "not enough to be actionable" without overclaiming certainty it doesn't have.

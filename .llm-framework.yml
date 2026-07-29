@@ -9,5 +9,14 @@
 infrastructure: ~/Documents/Entities/frameworks/llm-agent-framework
 team: ~/Documents/Entities/frameworks/llm-agent-domains/photon-datum
 
+# Personal profile: private, cross-project collaboration preferences (Full mode).
+# personal_identity is a single stable resolution key — deliberately NOT tied to any
+# one workstation's OS login name (varies: 3pdx7 on CENTAURI, michaelbiggerstaff here)
+# NOR assumed to be the same username across git platforms (GitHub/Forgejo/GitLab/
+# Bitbucket may differ). The actual per-platform username mapping lives in
+# llm-agent-personal/README.md, not here — this field only ever needs one value.
+personal: ~/Documents/Entities/frameworks/llm-agent-personal
+personal_identity: digital-michael
+
 # Resolution order (most specific wins):
 #   personal > team > infrastructure
