@@ -1,3 +1,7 @@
+> **⚠ SUPERSEDED (2026-07-29):** This file is stale (last updated 2026-03-19) and is no longer
+> the cross-session handoff document. Use `docs/governance/session-context.md` instead.
+> Retained here for historical reference only — do not treat as current state.
+
 # Agent Working Context
 **Date:** 2026-03-19
 **HEAD:** `c70f1f0` (main, origin/main)

@@ -7,6 +7,9 @@
 .DS_Store
 Thumbs.db
 
+# Per-machine VS Code multi-root workspace — folder paths are workstation-specific
+*.code-workspace
+
 # Secrets and credentials — never commit
 *.key
 *.pem

@@ -1,0 +1,13 @@
+# LLM Framework Configuration
+# The agent reads this file at session start to locate framework repos.
+# Paths are workstation-portable: `~` resolves per-user, and the parent
+# `Documents/Entities/frameworks/` layout is the shared convention across
+# all workstations (CENTAURI, TC25, and any future machine).
+#
+# template-version: 1.0.0
+
+infrastructure: ~/Documents/Entities/frameworks/llm-agent-framework
+team: ~/Documents/Entities/frameworks/llm-agent-domains/photon-datum
+
+# Resolution order (most specific wins):
+#   personal > team > infrastructure
