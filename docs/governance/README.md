@@ -82,7 +82,8 @@ Read that file — it supersedes any summary here.
 ## Open Issues
 
 - **D-001 ADR collision:** `docs/decisions.md` and `docs/meta_local/decisions.md` are independently-numbered decision logs that diverged — both have a "D-001" with different content. Needs manual reconciliation by the operator; not resolved as part of the 2026-07-29 governance retrofit (see retrospective entry in `lessons-learned.md`).
-- **Ungathered CENTAURI lesson content:** an earlier retrofit attempt (2026-06-22) captured substantive lessons (`dynamics.md`: I-1..I-19, E-1..E-7, L-1..L-13; `review_log.md`) under a `meta` domain that was never committed to the shared `llm-agent-domains` repo — it exists only on CENTAURI's local disk. Not indexed into `lessons-learned.md` because this machine has no copy. See `tmp/whats-left.md` for detail.
+- ~~Ungathered CENTAURI lesson content~~ — **Resolved 2026-07-29.** CENTAURI pushed `meta/local-lab-ai-stack/{dynamics,review_log}.md` to `llm-agent-domains`; relocated into `docs/governance/{dynamics,review_log}.md` in this repo, where project-local lessons belong. See the second 2026-07-29 retrospective entry in `lessons-learned.md`.
+- **`cts` relationship to this repo** — deliberately deferred. `photon-datum` is confirmed as the enrolled domain (this project publishes to photondatum.space). CENTAURI had independently created a duplicate `cts/local-lab-ai-stack/` enrollment; that duplicate was removed, but whether this repo has *any* legitimate relationship to the `cts` domain/team was not evaluated and remains open.
 
 ---
 
@@ -93,3 +94,5 @@ Read that file — it supersedes any summary here.
 | `lessons-learned.md` | Framework-format lessons summary; indexes existing detailed lesson files |
 | `agent-assignment.md` | Assignment template — copy is filled in per active unit of work |
 | `session-context.md` | Cross-session handoff — update before pausing or closing a long session |
+| `dynamics.md` | Collaboration dynamics history (I/E/L items) — relocated from `llm-agent-domains/meta/` 2026-07-29 |
+| `review_log.md` | Full session-by-session review log — relocated from `llm-agent-domains/meta/` 2026-07-29 |
