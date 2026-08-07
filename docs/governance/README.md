@@ -42,8 +42,8 @@ to conform (2026-07-29).
 
 ## This Repo's Own Location
 
-`local-lab-ai-stack` (and the unrelated `cortex` project) are not framework repos — they are
-photon-datum project repos, and their real location is:
+`local-lab-ai-stack` and `cortex` are not framework repos — they are photon-datum project
+repos, and their real location is:
 
 ```
 ~/Documents/Entities/Photon Datum/local-lab-ai-stack
@@ -55,6 +55,14 @@ CENTAURI's existing setup, where this repo has always lived behind a symlink of 
 Anything that references `~/Projects/active/local-lab-ai-stack` (systemd units, scripts using
 `$HOME`/`%h`) keeps working unmodified through the symlink; no other file needed to change when
 this moved (2026-07-29).
+
+**Relationship to `cortex`:** these are two independent git repos, not a monorepo — but they
+are no longer unrelated. `cortex`'s `cortex-stack` (task evaluation/model selection/delegation)
+and `mcp-local` (MCP tool execution) are designed to extend into this stack's Controller and
+Worker roles as they mature past their current single-user, local-only starting point. See the
+"Planned extension" notes in [`docs/roles/controller-role.md`](../roles/controller-role.md) and
+[`docs/roles/worker-role.md`](../roles/worker-role.md); `cortex`'s own design docs live under
+`cortex/docs/` (not duplicated here).
 
 ---
 
