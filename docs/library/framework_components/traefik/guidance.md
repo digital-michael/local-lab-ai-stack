@@ -1,5 +1,5 @@
 # Traefik — Guidance
-**Last Updated:** 2026-03-08 UTC
+**Last Updated:** 2026-08-07 UTC
 
 ## Purpose
 Project-specific preferences and opinionated decisions for Traefik within this AI stack.
@@ -55,4 +55,8 @@ Static config and dynamic config are separate concerns:
 - Access logs written to stdout; collected by Promtail via journald
 - Prometheus metrics at `/metrics` on internal entrypoint; scraped by Prometheus
 - TLS certificates stored at `$AI_STACK_DIR/configs/tls/`; certificate rotation requires remounting (or ACME auto-renewal)
+- To browse stack services from the operator's own Mac without browser/OS TLS warnings, trust the stack's internal CA in the **login** keychain (not System — scopes trust to the current macOS user account only):
+  ```
+  security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db $AI_STACK_DIR/configs/tls/ca.crt
+  ```
 - If a backend service is unhealthy and Traefik returns 502, check the backend container's health status first — Traefik is rarely the root cause
