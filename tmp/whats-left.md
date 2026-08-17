@@ -1,76 +1,59 @@
 # Retrofit: What's Left — local-lab-ai-stack
 
-**Created:** 2026-06-22
-**Context:** llm-agent-framework retrofit in progress. Risks 1–6 resolved. Remaining items below.
+**Created:** 2026-06-22 (CENTAURI, first attempt)
+**Updated:** 2026-07-29 (this Mac, retrofit completed against the plan below)
 
 ---
 
-## Decision Needed Before Step 4
+## Status: Retrofit Complete (this workstation), One Real Gap Remains
 
-### Where do the enforcement rules from `README-agent.md` go?
+The 2026-06-22 plan below was carried out on 2026-07-29, with one change: domain is
+`photon-datum`, not `cts` (this repo doesn't fit `cts`'s "Go desktop apps" scope; see
+`docs/governance/lessons-learned.md` retrospective). All path references now use the portable
+`~/Documents/Entities/frameworks/...` form instead of the CENTAURI-only absolute path.
 
-`./tmp/README-agent.md` §§6–12 contains project hard rules with no current home:
+**Done:**
+- `.llm-framework.yml` scaffolded (photon-datum domain)
+- `docs/governance/{README.md, lessons-learned.md, agent-assignment.md, session-context.md}` created
+- Enforcement rules from `README-agent.md` §§6–12 kept in `README-agent.md` itself (option 1 variant — restored to root rather than duplicated into `docs/governance/README.md`)
+- Architecture addendum: `## 16 Current-State Package Map` added to `ai_stack_architecture.md`
+- Retrospective logged in `docs/governance/lessons-learned.md`
 
-| Section | Rule |
-|---|---|
-| §6 | Credentials — no secrets in any tracked file, ever |
-| §7 | Commit hygiene — no AI attribution without explicit user request |
-| §8 | Script rules — shebang, `set -euo pipefail`, `main()` pattern, `--help`, `jq` for all config I/O |
-| §9 | Config rules — `config.json` is SSOT; changes via `configure.sh generate-quadlets` |
-| §10 | Doc rules — no duplication, component library 3-file structure, skill SKILL.md convention |
-| §11 | Deviation policy — note in commit, update guidance file if new standard |
-| §12 | File naming conventions — README.md / README-agent.md / best_practices.md / security.md / guidance.md |
+**⚠ NOT done — real content gap, not just a path fix:**
 
-**Options:**
-1. Inline in `docs/governance/README.md` — simplest; one file for load order + enforcement
-2. New file `docs/governance/project-rules.md` — cleaner separation of concerns
-3. Promote to `llm-agent-domains/cts/governance-overlay.md` — only if applicable cross-CTS-project (most rules are local-lab-ai-stack-specific; §7 commit hygiene applies broadly)
+The `dynamics.md` (I-1..I-19, E-1..E-7, L-1..L-13) and `review_log.md` files referenced below as
+the primary/secondary lessons sources live under a `meta` domain that was **never committed to
+the shared `llm-agent-domains` git repo** — they exist only on CENTAURI's local disk (uncommitted
+or on an unmerged branch). This machine has no copy of them, so none of that substance made it
+into `docs/governance/lessons-learned.md`. **Next time CENTAURI is used:** locate those files,
+decide what's still relevant, and either commit them properly into `photon-datum/` or fold the
+extracted lessons into `docs/governance/lessons-learned.md` directly. Until then, treat the
+lessons index in this repo as incomplete for anything predating 2026-06-22.
 
 ---
 
-## Remaining Retrofit Steps
+## Original Plan (2026-06-22, for reference)
 
-### Step 3 — Scaffold `.llm-framework.yml` (project root)
+### Decision Needed Before Step 4 — RESOLVED
 
-```yaml
-infrastructure: /home/3pdx7/Documents/Entities/frameworks/llm-agent-framework
-team: /home/3pdx7/Documents/Entities/frameworks/llm-agent-domains/cts
-```
+Enforcement rules from `README-agent.md` §§6–12 stayed in `README-agent.md` at the project root
+(option 1 variant) rather than moving into `docs/governance/README.md` — they're directive rules
+an agent needs before touching any file, not enrollment bookkeeping.
 
-### Step 4 — Create `docs/governance/` (4 files)
+### Step 3 — `.llm-framework.yml` — DONE (photon-datum, not cts)
 
-| File | Content |
-|---|---|
-| `docs/governance/README.md` | Session-start load order (mirrors domain entry); index of what to read and where; enforcement rules (pending decision above) |
-| `docs/governance/lessons-learned.md` | Framework-format index of existing lessons; see dynamics.md and component library for detail |
-| `docs/governance/agent-assignment.md` | Copy from `llm-agent-framework/templates/agent-assignment.md` |
-| `docs/governance/session-context.md` | Copy from `llm-agent-framework/templates/session-context.md` |
+### Step 4 — `docs/governance/` (4 files) — DONE
 
-### Step 5 — Populate `docs/governance/lessons-learned.md`
+### Step 5 — Populate `lessons-learned.md` — PARTIAL
 
-Index — do not duplicate — existing lessons:
-- Primary source: `llm-agent-domains/meta/local-lab-ai-stack/dynamics.md` (I-1..I-19, E-1..E-7, L-1..L-13)
-- Secondary source: per-session entries in `llm-agent-domains/meta/local-lab-ai-stack/review_log.md`
-- Tertiary source: `docs/library/framework_components/` guidance files (component-level lessons already in place)
+Indexed everything available on this machine (`docs/library/framework_components/*/lessons_learned.md`,
+`docs/wip/plan.md`, `docs/decisions.md`). Could not reach `llm-agent-domains/meta/local-lab-ai-stack/{dynamics,review_log}.md` — see gap above.
 
-Framework format has three sections: LLM Agent / Technologist / Tech Stack. Promote recurrent or framework-relevant lessons into those sections; leave project-specific detail in the source files.
+### Step 5b — Architecture Addendum — DONE
 
-### Step 5b — Architecture Addendum
+### Step 7 — Retrospective — DONE
 
-Add `## Current-State Package Map` section to `docs/ai_stack_blueprint/ai_stack_architecture.md`. Do not rewrite the existing doc — addendum only.
-
-Required subsections:
-- Package-to-layer mapping table (services/, scripts/, configs/, testing/, docs/)
-- Packages with known risks (e.g., god-object candidates, boundary violations)
-- External Reusable Components table (`llm-agent-framework`, `llm-agent-framework-tools`)
-- Composition rules if any base types must be composed by all implementations
-
-### Step 7 — Retrospective
-
-Log in `docs/governance/lessons-learned.md` under a `## Retrofit Session — 2026-06-22` heading:
-- What was created correctly (domain entry, meta migration, path fixes, protocol update)
-- What was corrected (llm-agent-local-2 → local-lab-ai-stack renames, broken /memories/ references)
-- What was deferred (enforcement rules placement, architecture addendum)
+See `docs/governance/lessons-learned.md` for the full 2026-07-29 retrospective entry.
 
 ---
 
@@ -78,9 +61,9 @@ Log in `docs/governance/lessons-learned.md` under a `## Retrofit Session — 202
 
 | What | Where |
 |---|---|
-| Domain session-start | `llm-agent-domains/cts/local-lab-ai-stack/README.md` |
-| Retrofit workflow | `llm-agent-framework/governance/workflows/retrofit-existing-project.md` |
-| Hard rules under review | `./tmp/README-agent.md` §§6–12 |
-| Meta review log | `llm-agent-domains/meta/local-lab-ai-stack/review_log.md` |
-| Meta dynamics | `llm-agent-domains/meta/local-lab-ai-stack/dynamics.md` |
-| Framework templates | `llm-agent-framework/templates/` |
+| Domain session-start | `~/Documents/Entities/frameworks/llm-agent-domains/photon-datum/local-lab-ai-stack/README.md` |
+| Retrofit workflow | `~/Documents/Entities/frameworks/llm-agent-framework/governance/workflows/retrofit-existing-project.md` |
+| Enforcement rules | `README-agent.md` §§6–12 (project root) |
+| Meta review log (CENTAURI-local, ungathered) | `llm-agent-domains/meta/local-lab-ai-stack/review_log.md` |
+| Meta dynamics (CENTAURI-local, ungathered) | `llm-agent-domains/meta/local-lab-ai-stack/dynamics.md` |
+| Framework templates | `~/Documents/Entities/frameworks/llm-agent-framework/templates/` |

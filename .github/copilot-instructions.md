@@ -5,15 +5,15 @@
 At the start of every new conversation, before responding to the user's first request, you MUST:
 
 1. **Determine context type:** `user-request` · `session-resume` · `delegation` · `unknown`
-2. **Select a profile** based on task scope (see `/home/3pdx7/Documents/Entities/frameworks/llm-agent-framework/governance/agent-context-protocol.md` for profile definitions):
+2. **Select a profile** based on task scope (see `~/Documents/Entities/frameworks/llm-agent-framework/governance/agent-context-protocol.md` for profile definitions):
    - Single narrow task / bug fix → `minimal`
    - Standard work session → `standard`
    - Architecture, design, L3/L4, cross-cutting → `full`
    - Invoked as subagent → `subagent` (confirm what parent injected; do not load autonomously)
 3. **Load context** for the selected profile:
    - `minimal`: scan `docs/governance/lessons-learned.md` for sections relevant to the task
-   - `standard`: above + read `/home/3pdx7/Documents/Entities/frameworks/llm-agent-domains/meta/local-lab-ai-stack/review_log.md` (last 20 lines) + check active todo list
-   - `full`: above + read `docs/decisions.md` (last 30 lines) + `/home/3pdx7/Documents/Entities/frameworks/llm-agent-domains/meta/local-lab-ai-stack/dynamics.md`
+   - `standard`: above + read `docs/governance/session-context.md` + check active todo list
+   - `full`: above + read `docs/decisions.md` (last 30 lines) + `docs/wip/plan.md`
 4. **Emit the declaration** as the first block of your first response:
 
 ```
@@ -30,9 +30,9 @@ Not Locked-In | <context-type> | profile:none
 
 **Do not repeat the declaration on subsequent turns.** Load once; do not reload unless the user explicitly requests it or a significant mid-session state change is detected. Note staleness inline as `[may be stale — loaded N turns ago]` rather than silently reloading.
 
-For delegation specifics (parent obligations, subagent receipt format, gap escalation), see `/home/3pdx7/Documents/Entities/frameworks/llm-agent-framework/governance/agent-context-protocol.md`.
+For delegation specifics (parent obligations, subagent receipt format, gap escalation), see `~/Documents/Entities/frameworks/llm-agent-framework/governance/agent-context-protocol.md`.
 
-Full protocol definition: `/home/3pdx7/Documents/Entities/frameworks/llm-agent-framework/governance/agent-context-protocol.md`.
+Full protocol definition: `~/Documents/Entities/frameworks/llm-agent-framework/governance/agent-context-protocol.md`.
 
 ---
 
@@ -58,7 +58,7 @@ Before staging any commit, verify all of the following are current. Announce: `"
 
 1. `docs/decisions.md` — all decisions made in session recorded
 2. `docs/wip/plan.md` — all BL status changes reflected
-3. `/home/3pdx7/Documents/Entities/frameworks/llm-agent-domains/meta/local-lab-ai-stack/review_log.md` — session entry written (what was done, decided, and is pending)
+3. `docs/governance/session-context.md` — session entry written (what was done, decided, and is pending)
 4. `docs/governance/lessons-learned.md` — all new lessons captured
 5. `output/CENTAURI-playbook.md` — new procedures or updated runbooks included
 6. `docs/features.md` — if features shipped or changed
@@ -71,16 +71,16 @@ Before staging any commit, verify all of the following are current. Announce: `"
 
 - **Default profile for this repo:** `standard`
 - **Lessons learned:** `docs/governance/lessons-learned.md`
-- **Meta review log:** `/home/3pdx7/Documents/Entities/frameworks/llm-agent-domains/meta/local-lab-ai-stack/review_log.md`
+- **Session context:** `docs/governance/session-context.md`
 - **Active decisions:** `docs/decisions.md`
 - **Machine-readable SSOT:** `configs/config.json`
-- **Session-start load order:** `/home/3pdx7/Documents/Entities/frameworks/llm-agent-domains/cts/local-lab-ai-stack/README.md`
+- **Session-start load order:** `~/Documents/Entities/frameworks/llm-agent-domains/photon-datum/local-lab-ai-stack/README.md`
 
 ---
 
 ## General Directives
 
-- Follow the session-start load order in `/home/3pdx7/Documents/Entities/frameworks/llm-agent-domains/cts/local-lab-ai-stack/README.md` before modifying any file in this repo.
+- Follow the session-start load order in `~/Documents/Entities/frameworks/llm-agent-domains/photon-datum/local-lab-ai-stack/README.md` before modifying any file in this repo.
 - When a task touches a specific component, read all three files in `docs/library/framework_components/<component>/` first.
 - Record new bugs, workarounds, and lessons in `docs/governance/lessons-learned.md`.
 - Keep todos active: mark in-progress before starting, completed immediately after finishing.
@@ -96,3 +96,10 @@ Git commit messages MUST contain only content explicitly provided or approved by
 - Any advertising, promotional, or branding content injected by a model or tool
 
 Write commit messages as if the human wrote them: type, scope, description, and body drawn entirely from the work done. Nothing else.
+
+<!-- mermaid-ai-skills:start -->
+## Mermaid Diagrams
+
+When the user asks to create, edit, or visualize a diagram, follow the
+instructions in `.github/instructions/mermaid.instructions.md`.
+<!-- mermaid-ai-skills:end -->

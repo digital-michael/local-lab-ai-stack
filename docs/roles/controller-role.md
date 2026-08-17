@@ -138,6 +138,18 @@ pick up the new weights. Does not start at boot; invoked during model provisioni
 1. `ai-stack-infer-ollama` (+ `ai-stack-infer-vllm` if GPU present, parallel)
 2. `ai-stack-infer-litellm` (after at least one runtime healthy)
 
+**Planned extension — task delegation layer (`cortex-stack`):**
+`cortex-stack`, developed in the separate `cortex` project, is expected to grow into a
+thin layer above this group — not replacing LiteLLM's request routing, but deciding
+*what* gets routed to it: evaluating incoming tasks, selecting an appropriately-sized
+model, and delegating locally or to registered worker capacity. `cortex-stack` calls
+this its **Cortex Federated** mode, as distinct from today's local-only, single-user
+**Cortex Solo** mode. It needs the queryable node-availability service noted under
+`ai-stack-know` below — the heartbeat data this role exposes today is receive-only, not
+query-able by another service yet. Not yet implemented. See
+`~/Documents/Entities/Photon Datum/cortex/docs/use-cases.md` for the full comparison and
+`cortex/docs/backlog.md` BL-008–012 for the sequenced implementation path.
+
 ---
 
 ### Group: `ai-stack-know`
@@ -162,6 +174,17 @@ The container joins both `ai-stack-know` and `ai-stack-infer` networks.
 
 1. `ai-stack-know-qdrant`
 2. `ai-stack-know-index` (after qdrant healthy)
+
+**Planned extension — queryable node-availability service:**
+`ai-stack-know-index` today only *receives* worker heartbeats (see worker-role.md's
+node state machine) — it has no endpoint for another service to *query* node status.
+`cortex-stack`'s planned task-delegation layer (`dispatch` domain, see the
+`ai-stack-infer` note above and `cortex/docs/backlog.md` BL-011) needs exactly that: a
+query endpoint reporting, per node, whether it's **available** (heartbeat current) and
+whether it's **dispatch-enabled** (opted in to receive delegated tasks, not just serve
+inference — a separate flag from online/offline, since a worker can be one without the
+other). Not yet implemented; this is new surface area on `ai-stack-know-index`, not a
+repurposing of the existing heartbeat-receive endpoint.
 
 ---
 

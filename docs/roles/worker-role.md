@@ -103,6 +103,16 @@ its API on port 11434; LiteLLM on the controller routes to it by tailnet/LAN IP.
 | `ai-stack-obs-promtail` | quadlet or systemd | Log shipping to controller Loki |
 | `ai-stack-heartbeat` | systemd timer | Reports node status to knowledge-index |
 
+**Planned extension — task-execution endpoint (`mcp-local`):**
+`mcp-local`, developed in the same `cortex` project as `cortex-stack`, is currently an
+experimental, stdio-only MCP tool server (Claude Code/VS Code integration). Part of what
+it's experimenting with is a non-local execution mode — letting tasks delegated by
+`cortex-stack`'s task-delegation layer (see controller-role.md) execute directly on
+whichever worker holds the target model, rather than only on the controller. Not yet
+implemented — workers today expose only inference capacity (Ollama/vLLM), no
+tool-execution surface. See
+`~/Documents/Entities/Photon Datum/cortex/docs/mcp-local.md` for the design.
+
 ---
 
 ## Worker Registration
@@ -169,6 +179,13 @@ Ollama should not be reachable from the public internet or untrusted LAN segment
 | `caution` | Last heartbeat 90–150s ago | Send 2 beats within 70s |
 | `failed` | Last heartbeat > 150s ago | Send 2 beats within 70s |
 | `offline` | Absent > 24h | Generate new join token from controller |
+
+**Planned extension — `dispatch-enabled` flag:** online/offline state answers whether a
+worker is *reachable*, not whether it should *receive delegated tasks*. Cortex
+Federated's `dispatch` domain (see controller-role.md's `ai-stack-know` planned
+extension) needs a second, independent flag per node — a worker can be `online` for
+inference but not dispatch-enabled (e.g. reserved for direct use, or not yet trusted for
+delegated execution). Not yet implemented; not part of the current heartbeat payload.
 
 Check node status from controller:
 
