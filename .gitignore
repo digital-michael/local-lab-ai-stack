@@ -28,6 +28,11 @@ testing/layer5_distributed/results/
 # Machine-local node profile override (not committed; set by configure.sh recommend)
 configs/node_profile
 
+# Live runtime config — moved to $AI_STACK_DIR/configs/config.json (2026-07-14) so that
+# git operations (pull/checkout/stash) on this repo can never touch live settings.
+# configs/config.json.example is the tracked bootstrap template (see `configure.sh init`).
+configs/config.json
+
 # Generated artifacts — point-in-time playbooks and other output files
 # Never committed; lives only on the local machine that generated them
 output/

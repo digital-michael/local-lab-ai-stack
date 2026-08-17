@@ -484,10 +484,10 @@
       }
     },
     "vllm": {
-      "_suspended": "GPU contention with Ollama on RTX 3070 Ti (8GB) — vllm 0.55 utilization + Ollama leaves <1GB free; masked 2026-07-09 to restore 2GB headroom; re-enable when GPU upgrade or workload separation is in place",
+      "_note": "2026-07-14: the 0.55→0.82 'greedy' experiment (see git history) starved the desktop compositor of VRAM and crashed the Plasma session, so gpu_memory_utilization was scaled back to 0.5 the same day. Ollama's GPU-tagged models (llama3.1:8b, qwen3.5:4b, qwen3:8b, llama3.2:3b, llama3.1:8b-instruct-q4_K_M, llama3.2:3b-instruct-q4_K_M) still contend for VRAM with vLLM. If throughput testing at higher utilization is needed again, do it from a non-graphical session (e.g. SSH) or stop the desktop session first — not while logged into Plasma on this GPU.",
       "image": "docker.io/vllm/vllm-openai",
       "tag": "v0.17.1",
-      "command": "--model /models/qwen2.5-1.5b --served-model-name qwen2.5-1.5b --tensor-parallel-size 1 --max-model-len 2048 --gpu-memory-utilization 0.55 --host 0.0.0.0 --port 8000 --enforce-eager",
+      "command": "--model /models/qwen2.5-1.5b --served-model-name qwen2.5-1.5b --tensor-parallel-size 1 --max-model-len 2048 --gpu-memory-utilization 0.5 --max-num-seqs 128 --swap-space 16 --host 0.0.0.0 --port 8000",
       "container_name": "vllm",
       "dns_alias": "vllm.ai-stack",
       "depends_on": [
@@ -505,7 +505,9 @@
         "MODEL_NAME": "/models/qwen2.5-1.5b",
         "TENSOR_PARALLEL_SIZE": "1",
         "MAX_MODEL_LEN": "2048",
-        "GPU_MEMORY_UTILIZATION": "0.55",
+        "GPU_MEMORY_UTILIZATION": "0.5",
+        "MAX_NUM_SEQS": "128",
+        "SWAP_SPACE_GB": "16",
         "PYTORCH_ALLOC_CONF": "expandable_segments:True"
       },
       "secrets": [],
@@ -622,7 +624,9 @@
       ],
       "environment": {
         "OPENAI_API_BASE": "http://litellm.ai-stack:4000",
-        "OLLAMA_BASE_URL": "http://ollama.ai-stack:11434"
+        "OLLAMA_BASE_URL": "http://ollama.ai-stack:11434",
+        "WEBUI_AUTH_TRUSTED_EMAIL_HEADER": "X-authentik-email",
+        "WEBUI_AUTH_TRUSTED_NAME_HEADER": "X-authentik-name"
       },
       "secrets": [
         {
@@ -852,7 +856,24 @@
       "environment": {
         "HOMEPAGE_ALLOWED_HOSTS": "homepage.ai-stack,homepage.ai-stack:3000,dashboard.stack.localhost,dashboard.localhost,localhost,localhost:3000,127.0.0.1,127.0.0.1:3002,dashboard.photondatum.space"
       },
-      "secrets": [],
+      "secrets": [
+        {
+          "name": "homepage_authentik_token",
+          "target": "HOMEPAGE_VAR_AUTHENTIK_TOKEN"
+        },
+        {
+          "name": "qdrant_api_key",
+          "target": "HOMEPAGE_VAR_QDRANT_API_KEY"
+        },
+        {
+          "name": "homepage_grafana_user",
+          "target": "HOMEPAGE_VAR_GRAFANA_USER"
+        },
+        {
+          "name": "homepage_grafana_pass",
+          "target": "HOMEPAGE_VAR_GRAFANA_PASS"
+        }
+      ],
       "health_check": {
         "command": "wget -qO- http://localhost:3000/api/healthcheck || exit 1",
         "interval": "30s",
