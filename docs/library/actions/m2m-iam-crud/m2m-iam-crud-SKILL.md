@@ -77,8 +77,8 @@ If you need issuer/JWKS wiring and smoke introspection:
 
 ```bash
 bash scripts/m2m-authentik-bootstrap.sh \
-  --issuer https://auth.stack.localhost/application/o/<slug>/ \
-  --jwks-url https://auth.stack.localhost/application/o/<slug>/jwks/ \
+  --issuer https://auth.photondatum.space/application/o/<slug>/ \
+  --jwks-url https://auth.photondatum.space/application/o/<slug>/jwks/ \
   --audience local-m2m-gateway \
   --apply-config
 ```
@@ -87,8 +87,8 @@ To generate a repeatable per-service Authentik provisioning template:
 
 ```bash
 bash scripts/m2m-authentik-bootstrap.sh \
-  --issuer https://auth.stack.localhost/application/o/<slug>/ \
-  --jwks-url https://auth.stack.localhost/application/o/<slug>/jwks/ \
+  --issuer https://auth.photondatum.space/application/o/<slug>/ \
+  --jwks-url https://auth.photondatum.space/application/o/<slug>/jwks/ \
   --service-id svc-ingest \
   --workflow-id wf_ingest_docs \
   --token-ttl-seconds 600 \
@@ -100,9 +100,9 @@ To send an endpoint-driven provisioning request directly to Authentik API:
 
 ```bash
 AUTHENTIK_API_TOKEN='<token>' bash scripts/m2m-authentik-bootstrap.sh \
-  --issuer https://auth.stack.localhost/application/o/<slug>/ \
-  --jwks-url https://auth.stack.localhost/application/o/<slug>/jwks/ \
-  --provision-url https://auth.stack.localhost/api/v3/<provider-endpoint> \
+  --issuer https://auth.photondatum.space/application/o/<slug>/ \
+  --jwks-url https://auth.photondatum.space/application/o/<slug>/jwks/ \
+  --provision-url https://auth.photondatum.space/api/v3/<provider-endpoint> \
   --provision-method POST \
   --provision-payload-file /tmp/authentik-provider-payload.json
 ```
@@ -147,8 +147,8 @@ Token smoke test:
 ```bash
 export M2M_TEST_TOKEN='<access-token>'
 bash scripts/m2m-authentik-bootstrap.sh \
-  --issuer https://auth.stack.localhost/application/o/<slug>/ \
-  --jwks-url https://auth.stack.localhost/application/o/<slug>/jwks/ \
+  --issuer https://auth.photondatum.space/application/o/<slug>/ \
+  --jwks-url https://auth.photondatum.space/application/o/<slug>/jwks/ \
   --audience local-m2m-gateway
 ```
 
@@ -165,7 +165,7 @@ spec.loader.exec_module(mod)
 
 client = mod.M2MGatewayClient(
     gateway_base_url="http://127.0.0.1:8787",
-    token_url="https://auth.stack.localhost/application/o/<slug>/token/",
+    token_url="https://auth.photondatum.space/application/o/<slug>/token/",
     client_id="svc-ingest",
     client_secret="<from-podman-secret>",
     scope="m2m.jobs.start m2m.jobs.heartbeat m2m.jobs.extend m2m.context.attach m2m.infer",
