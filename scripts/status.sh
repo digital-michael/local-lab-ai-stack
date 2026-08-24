@@ -23,7 +23,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CONFIG_FILE="${CONFIG_FILE:-$PROJECT_ROOT/configs/config.json}"
+AI_STACK_DIR="${AI_STACK_DIR:-$HOME/ai-stack}"
+# Runtime config lives with the deployed instance ($AI_STACK_DIR), not the repo checkout —
+# this is git-ignored and never touched by `git pull`/`checkout`/`stash` on the repo.
+# See configs/config.json.example for the tracked bootstrap template (used by `init`).
+CONFIG_FILE="${CONFIG_FILE:-$AI_STACK_DIR/configs/config.json}"
 NODE_PROFILE_FILE="${NODE_PROFILE_FILE:-$PROJECT_ROOT/configs/node_profile}"
 QUADLET_DIR="${QUADLET_DIR:-$HOME/.config/containers/systemd}"
 
@@ -60,7 +64,7 @@ Exit codes:
   2   Not deployed (no quadlet files found in QUADLET_DIR)
 
 Environment:
-  CONFIG_FILE   Path to config.json  (default: ./configs/config.json)
+  CONFIG_FILE   Path to config.json  (default: $AI_STACK_DIR/configs/config.json)
   QUADLET_DIR   Quadlet directory    (default: ~/.config/containers/systemd)
 EOF
 }
@@ -116,7 +120,6 @@ _svc_port() {
 _svc_url() {
     local svc="$1"
     case "$svc" in
-        authentik)       echo "https://auth.stack.localhost" ;;
         openwebui)       echo "https://openwebui.stack.localhost" ;;
         grafana)         echo "https://grafana.stack.localhost" ;;
         flowise)         echo "https://flowise.stack.localhost" ;;
@@ -132,6 +135,32 @@ _svc_url() {
         *)               echo "-" ;;
     esac
 }
+
+# Returns the display category for a service — groups status.sh output into
+# logical sections so it's clear at a glance what each service is *for*.
+# Mirrors the taxonomy already used in CENTAURI-playbook.md §2.2 (Service Inventory)
+# so the same mental model applies across docs and tooling.
+_svc_category() {
+    local svc="$1"
+    case "$svc" in
+        openwebui|flowise|homepage)       echo "Applications" ;;
+        traefik)                          echo "Edge & Routing" ;;
+        litellm|ollama|vllm)              echo "Model Serving" ;;
+        knowledge-index)                  echo "Knowledge / RAG" ;;
+        postgres|qdrant|minio)            echo "Storage & Data" ;;
+        grafana|prometheus|loki|promtail) echo "Observability & Metrics" ;;
+        *)                                echo "Other" ;;
+    esac
+}
+
+# Display order for categories follows a request's actual path through the
+# stack: in through the edge, into the user-facing apps, out to model serving,
+# out again to RAG/knowledge, down to the storage everything ultimately reads
+# and writes. Observability sits last — it watches the other five, but isn't
+# itself a hop a normal request passes through.
+# Empty categories (no services in scope for this node profile) are skipped
+# automatically at print time.
+CATEGORY_ORDER=("Edge & Routing" "Applications" "Model Serving" "Knowledge / RAG" "Storage & Data" "Observability & Metrics" "Other")
 
 # Returns container health (only for quadlet-managed active containers)
 _svc_health() {
@@ -408,38 +437,50 @@ if ! $QUIET; then
     printf "  %-${col}s %s\n" "tailnet" "$_ts_out"
 
     echo ""
-    # sep_width tracks the visual width of the separator line (excludes 2-space indent)
+    # sep_width tracks the visual width of the separator line (excludes 4-space indent,
+    # to match the nested service rows printed under each category below)
     sep_width=0
     if [[ $VERBOSE -ge 2 ]]; then
         sep_width=$((col + 46))
-        printf "  %-${col}s %-10s %-12s %s\n" "SERVICE" "STATE" "HEALTH" "URL"
+        printf "    %-${col}s %-10s %-12s %s\n" "SERVICE" "STATE" "HEALTH" "URL"
     elif [[ $VERBOSE -eq 1 ]]; then
         sep_width=$((col + 32))
-        printf "  %-${col}s %-10s %-12s %s\n" "SERVICE" "STATE" "HEALTH" "PORT"
+        printf "    %-${col}s %-10s %-12s %s\n" "SERVICE" "STATE" "HEALTH" "PORT"
     else
         sep_width=$((col + 22))
-        printf "  %-${col}s %-10s %s\n" "SERVICE" "STATE" "HEALTH"
+        printf "    %-${col}s %-10s %s\n" "SERVICE" "STATE" "HEALTH"
     fi
-    printf "  %s\n" "$(printf '─%.0s' $(seq 1 $sep_width))"
+    printf "    %s\n" "$(printf '─%.0s' $(seq 1 $sep_width))"
 
-    for svc in "${services[@]}"; do
-        display="${svc_states[$svc]}"
-        [[ "$display" == "inactive" ]] && display="stopped"
-        health_display="${svc_health[$svc]:-}"
-        [[ "$display" != "active" ]] && health_display="-"
-        [[ -z "$health_display" ]] && health_display="-"
-        if [[ $VERBOSE -ge 2 ]]; then
-            _url_val=$(_svc_url "$svc")
-            printf "  %-${col}s %-10s %-12s %s\n" "$svc" "$display" "$health_display" "${_url_val:--}"
-        elif [[ $VERBOSE -eq 1 ]]; then
-            _port_val=$(_svc_port "$svc")
-            printf "  %-${col}s %-10s %-12s %s\n" "$svc" "$display" "$health_display" "${_port_val:--}"
-        else
-            printf "  %-${col}s %-10s %s\n" "$svc" "$display" "$health_display"
-        fi
+    # Group services by category (§ CATEGORY_ORDER / _svc_category above) so it's
+    # clear at a glance what each service is for, not just whether it's up.
+    for cat in "${CATEGORY_ORDER[@]}"; do
+        cat_svcs=()
+        for svc in "${services[@]}"; do
+            [[ "$(_svc_category "$svc")" == "$cat" ]] && cat_svcs+=("$svc")
+        done
+        [[ ${#cat_svcs[@]} -eq 0 ]] && continue
+
+        printf "  %s\n" "$cat"
+        for svc in "${cat_svcs[@]}"; do
+            display="${svc_states[$svc]}"
+            [[ "$display" == "inactive" ]] && display="stopped"
+            health_display="${svc_health[$svc]:-}"
+            [[ "$display" != "active" ]] && health_display="-"
+            [[ -z "$health_display" ]] && health_display="-"
+            if [[ $VERBOSE -ge 2 ]]; then
+                _url_val=$(_svc_url "$svc")
+                printf "    %-${col}s %-10s %-12s %s\n" "$svc" "$display" "$health_display" "${_url_val:--}"
+            elif [[ $VERBOSE -eq 1 ]]; then
+                _port_val=$(_svc_port "$svc")
+                printf "    %-${col}s %-10s %-12s %s\n" "$svc" "$display" "$health_display" "${_port_val:--}"
+            else
+                printf "    %-${col}s %-10s %s\n" "$svc" "$display" "$health_display"
+            fi
+        done
+        echo ""
     done
 
-    echo ""
     if [[ $active -eq $total && $unhealthy_count -eq 0 ]]; then
         echo "  Summary: ${active}/${total} active, all healthy  [OK]"
     elif [[ $failed_count -gt 0 ]]; then
