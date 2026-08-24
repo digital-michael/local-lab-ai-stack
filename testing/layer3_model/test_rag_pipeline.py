@@ -59,9 +59,9 @@ def require_knowledge_index():
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
-def ki_client() -> httpx.Client:
-    """HTTP client pointed at knowledge-index."""
-    with httpx.Client(base_url=KNOWLEDGE_INDEX_URL, timeout=60.0) as client:
+def ki_client(ki_headers: dict) -> httpx.Client:
+    """HTTP client pointed at knowledge-index, authenticated when API_KEY is set."""
+    with httpx.Client(base_url=KNOWLEDGE_INDEX_URL, headers=ki_headers, timeout=60.0) as client:
         yield client
 
 

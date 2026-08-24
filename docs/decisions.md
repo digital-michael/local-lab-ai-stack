@@ -694,3 +694,36 @@ Concrete protocol specification for the **WAN** discovery profile.
 | **Driver** | User-led M2M localhost + KI interoperability alignment session |
 | **Trigger** | Need to preserve workflow-level design direction from wip interoperability notes without creating a second competing architecture path. |
 | **Commit** | *(pending)* |
+
+---
+
+### D-041 — MCP Auth: Authentik-Issued Tokens Instead of a Single Shared API_KEY (PROPOSED)
+
+| Field | Value |
+|---|---|
+| **Status** | Proposed — not implemented. Requires explicit approval before any Authentik or app.py change. |
+| **Decision (proposed)** | Register the Knowledge Index MCP surface as an Authentik OAuth2Provider/Application, the same pattern already used for Forgejo (OIDC) and implicitly for Flowise/Grafana/Prometheus (bundle-admin policy). Authentik becomes the *issuer* of the bearer token MCP clients present; `app.py` validates the token (signature + claims, e.g. via JWKS) instead of comparing against one static `knowledge_index_api_key` secret shared by every caller. |
+| **Context** | D-033 correctly ruled out Authentik **forwardAuth** for `/mcp/*` — forwardAuth needs a browser session cookie, and MCP clients (Claude Desktop, Cursor, VS Code Copilot, Claude.ai's remote-MCP connector) send a Bearer token, not a cookie. But D-033 didn't address *what the bearer token is*: today it's one static string, provisioned once, shared by every human and every client, with no per-user identity, no scoped revocation (rotating it breaks every client at once), and no audit trail of who called `ingest_document` or `search_knowledge`. Every other user-facing app in this stack gets Authentik-issued, policy-gated access; MCP is the outlier. |
+| **Why this doesn't contradict D-033** | This is not "add forwardAuth back." The transport stays Bearer-token-over-HTTP. What changes is the token's origin and validation: Authentik (as an OAuth2 Authorization Server) issues short-lived, per-user, policy-scoped JWTs; `app.py` validates them locally (or via introspection) instead of a `==` string compare. Fully compatible with MCP's 2025-03+ spec support for OAuth 2.1 on remote HTTP servers — this is also the mechanism Claude.ai's remote-MCP connector expects, so it unblocks that client type as a side effect. |
+| **What it would require** | (1) New Authentik OAuth2Provider + Application entry for `knowledge-index-mcp`, gated by a policy (e.g. `bundle-developer` or a new `bundle-mcp` group) mirroring the Forgejo pattern. (2) `app.py`: replace `_check_api_key`'s string comparison (for `/mcp/*` only — REST `/v1/*` can keep the existing model) with JWT validation against Authentik's JWKS endpoint, checking issuer/audience/expiry. (3) Client config docs updated for the OAuth device/auth-code flow instead of a static header. (4) Decide whether the CNC bearer path (`/v1/cnc/*`, D-009/BL-015) is in scope — recommend **no**, that's machine-to-machine node registration, not a human-facing developer tool, and should stay as-is. |
+| **Non-scope** | Does not touch `/v1/*` REST (LiteLLM/Flowise internal calls, D-033's "in-stack access" path) or `/v1/cnc/*` (D-009). Scoped exclusively to the external-developer-tool MCP surface D-015/D-033 already defined. |
+| **Open questions for approval** | Is per-user attribution/audit actually needed at current usage scale (single operator), or is this over-engineering for a one-person stack? If the answer is "not yet," this decision should stay PROPOSED and be revisited if/when a second person gets MCP access. |
+| **Driver** | User-requested prioritized MCP task list, category "Applications at the Authentik layer" |
+| **Trigger** | Review of MCP status (2026-07-21) found MCP's auth model is the one app in this stack still using a flat shared secret instead of the Authentik-application pattern used everywhere else. |
+| **Commit** | *(pending — not yet implemented)* |
+
+---
+
+### D-042 — Add Streamable HTTP Transport for MCP; Keep Legacy SSE Alongside
+
+| Field | Value |
+|---|---|
+| **Decision** | Add MCP's current-spec **Streamable HTTP** transport (single `POST/GET/DELETE /mcp` endpoint) alongside the existing legacy HTTP+SSE transport (`/mcp/sse` + `/mcp/messages`, D-015). Both are live; new client configs should use `/mcp`. |
+| **Context** | The MCP spec deprecated HTTP+SSE (protocol `2024-11-05`) in favor of Streamable HTTP as of `2025-03-26`. As of this review (2026-07-21), clients have been actively dropping the old transport (e.g. Microsoft Copilot Studio dropped SSE support in August 2025). D-015's implementation was correct when written but is now running a transport many current/future MCP clients (VS Code Copilot Chat, Claude.ai remote connectors, current Claude Desktop/Code) may not support at all. The `mcp` Python SDK already installed here (`>=1.6.0` per requirements.txt; `1.28.1` in practice) ships `StreamableHTTPSessionManager`, so this was an additive implementation, not a new dependency. |
+| **Implementation** | `services/knowledge-index/app.py`: `StreamableHTTPSessionManager(app=_mcp_server, stateless=True, security_settings=...)` mounted at `/mcp`, wired into the FastAPI app lifespan via `startup`/`shutdown` events. `stateless=True` — fresh transport per request, no `Mcp-Session-Id` persistence — matches the single-instance deployment behind Traefik/Caddy with no need for session affinity. Auth: same `_check_api_key` Bearer check as the legacy endpoints. |
+| **Transport security (spec-mandated)** | Streamable HTTP's spec section explicitly warns about DNS-rebinding attacks against local MCP servers and recommends binding to loopback plus validating `Host`/`Origin`. Added `TransportSecuritySettings(enable_dns_rebinding_protection=True, allowed_hosts=[...], allowed_origins=[...])` — see `_MCP_ALLOWED_HOSTS` in `app.py`. Any new hostname this service becomes reachable under must be added there or it gets `421 Invalid Host header`. |
+| **Bug found and fixed during implementation** | Starlette's automatic trailing-slash redirect (`/mcp` → `/mcp/`) generated a `Location: http://...` URL — Uvicorn had no way to know the real request arrived over HTTPS, since Traefik/Caddy terminate TLS in front of it. Strict HTTP clients (including the official `mcp` Python SDK, via httpx) correctly strip the `Authorization` header on an https→http redirect downgrade, silently breaking auth for any client that follows the redirect. Fixed by adding `--proxy-headers --forwarded-allow-ips=*` to the Containerfile's `uvicorn` CMD, so the app trusts `X-Forwarded-Proto` from the reverse proxy and reflects `https` correctly. Verified against the real `mcp` Python SDK client through both the LAN and remote (`ki.photondatum.space`) Traefik/Caddy-fronted URLs, not just `curl`. |
+| **Non-scope** | Did not remove the legacy SSE transport — still useful for any client that hasn't migrated. Did not change REST `/v1/*` or `/v1/cnc/*` auth. Did not address D-041 (Authentik-issued tokens) — orthogonal, still proposed/pending. |
+| **Driver** | User-requested prioritized MCP task list, category "with tools like VS Code and Claude" |
+| **Trigger** | Verifying MCP client compatibility found the deployed transport was already spec-deprecated and at risk of client-side removal. |
+| **Commit** | *(pending)* |

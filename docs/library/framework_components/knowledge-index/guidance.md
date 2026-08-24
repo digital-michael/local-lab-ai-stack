@@ -66,13 +66,28 @@ Project-specific preferences and opinionated decisions for the Knowledge Index S
 
 ## Client Configuration
 
+Two real endpoints, both routed through Traefik and requiring the `knowledge_index_api_key`
+Bearer token — never point a client at the raw container port (`:8100`); that bypasses
+Traefik entirely and, depending on host network config, may bypass auth too.
+
+- **LAN** (same network as CENTAURI): `https://ki.stack.localhost/mcp`
+- **Remote** (off-LAN, over the internet): `https://ki.photondatum.space/mcp`
+
+**Transport: Streamable HTTP is the one to use.** The MCP spec deprecated the old
+HTTP+SSE transport (`/mcp/sse` + `/mcp/messages`, protocol `2024-11-05`) as of `2025-03-26`
+in favor of Streamable HTTP (single `/mcp` endpoint). Several clients have already dropped
+SSE support entirely. This service exposes both — `/mcp` (Streamable HTTP, current spec,
+verified 2026-07-21 against the real `mcp` Python client and `curl`) and the legacy
+`/mcp/sse` + `/mcp/messages` pair kept only for any client that hasn't migrated yet. Point
+new client configs at `/mcp`.
+
 **Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
     "knowledge-index": {
-      "url": "https://<host>/mcp/sse",
-      "headers": { "Authorization": "Bearer <API_KEY>" }
+      "url": "https://ki.photondatum.space/mcp",
+      "headers": { "Authorization": "Bearer <knowledge_index_api_key value>" }
     }
   }
 }
@@ -83,8 +98,9 @@ Project-specific preferences and opinionated decisions for the Knowledge Index S
 {
   "servers": {
     "knowledge-index": {
-      "type": "sse",
-      "url": "http://localhost:8100/mcp/sse"
+      "type": "http",
+      "url": "https://ki.stack.localhost/mcp",
+      "headers": { "Authorization": "Bearer <knowledge_index_api_key value>" }
     }
   }
 }
@@ -93,9 +109,12 @@ Project-specific preferences and opinionated decisions for the Knowledge Index S
 **Python MCP SDK** (programmatic):
 ```python
 from mcp import ClientSession
-from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamablehttp_client
 
-async with sse_client("http://localhost:8100/mcp/sse") as (read, write):
+url = "https://ki.photondatum.space/mcp"  # or https://ki.stack.localhost/mcp on LAN
+headers = {"Authorization": "Bearer <knowledge_index_api_key value>"}
+
+async with streamablehttp_client(url, headers=headers) as (read, write, _):
     async with ClientSession(read, write) as session:
         await session.initialize()
         result = await session.call_tool(
@@ -103,6 +122,18 @@ async with sse_client("http://localhost:8100/mcp/sse") as (read, write):
             {"query": "my query", "collection": "default"}
         )
 ```
+
+**Legacy HTTP+SSE** (only if a client hasn't migrated to Streamable HTTP): swap the URL for
+`.../mcp/sse` and use `mcp.client.sse.sse_client` instead of `streamablehttp_client`. Same
+Bearer header.
+
+### Transport security
+
+Per the MCP spec's Streamable HTTP security guidance, both `/mcp` and the legacy endpoints
+validate the `Host` header (DNS-rebinding protection) against an allowlist in
+`services/knowledge-index/app.py` (`_MCP_ALLOWED_HOSTS`). If you add a new hostname this
+service is reachable under (new Traefik router, new public domain, etc.), add it to that
+list or clients using the new hostname will get `421 Invalid Host header`.
 
 ## Environment Variables
 
