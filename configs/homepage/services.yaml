@@ -1,0 +1,149 @@
+---
+- Application:
+    - OpenWebUI:
+        icon: mdi-chat
+        href: https://openwebui.stack.localhost/
+        description: AI Chat Interface
+        widget:
+          type: customapi
+          url: http://webui.ai-stack:8080/api/version
+          method: GET
+          mappings:
+            - field: version
+              label: Version
+    - Flowise:
+        icon: mdi-sitemap
+        href: https://flowise.stack.localhost/
+        description: AI Workflow Builder
+        widget:
+          type: customapi
+          url: http://flowise.ai-stack:3000/api/v1/version
+          method: GET
+          mappings:
+            - field: version
+              label: Version
+
+- Edge:
+    - Traefik:
+        icon: mdi-web
+        href: http://localhost:8080/
+        description: Reverse Proxy Dashboard
+        widget:
+          type: traefik
+          url: http://traefik.ai-stack:8080
+    - Authentik:
+        icon: mdi-shield-account
+        href: https://auth.photondatum.space/
+        description: Identity Provider (SSO)
+        widget:
+          type: authentik
+          url: https://auth.photondatum.space
+          key: "{{HOMEPAGE_VAR_AUTHENTIK_TOKEN}}"
+          version: 2
+
+- Inference:
+    - LiteLLM:
+        icon: mdi-swap-horizontal
+        href: https://litellm.stack.localhost/
+        description: Model Routing Gateway
+        widget:
+          type: customapi
+          url: http://litellm.ai-stack:4000/health/readiness
+          method: GET
+          mappings:
+            - field: status
+              label: Status
+    - Ollama:
+        icon: mdi-cube-outline
+        href: http://localhost:11434
+        description: Local Model Runner
+        widget:
+          type: customapi
+          url: http://ollama.ai-stack:11434/api/version
+          method: GET
+          mappings:
+            - field: version
+              label: Version
+
+- Knowledge:
+    - Knowledge Index:
+        icon: mdi-book-search
+        href: https://ki.photondatum.space/v1/catalog
+        description: Document Ingestion & RAG
+        widget:
+          type: customapi
+          url: http://knowledge-index.ai-stack:8100/health
+          method: GET
+          mappings:
+            - field: status
+              label: Status
+
+- Storage:
+    - PostgreSQL:
+        icon: mdi-database
+        description: Metadata Database
+        widget:
+          type: customapi
+          url: http://knowledge-index.ai-stack:8100/health
+          method: GET
+          mappings:
+            - field: database
+              label: DB Status
+    - Qdrant:
+        icon: mdi-vector-combine
+        href: https://qdrant.stack.localhost/dashboard
+        description: Vector Database
+        widget:
+          type: customapi
+          url: http://qdrant.ai-stack:6333/collections
+          method: GET
+          headers:
+            api-key: "{{HOMEPAGE_VAR_QDRANT_API_KEY}}"
+          mappings:
+            - field: result.collections
+              label: Collections
+              format: size
+    - MinIO:
+        icon: mdi-package-variant-closed
+        href: https://minio.stack.localhost/
+        description: S3-Compatible Object Storage
+
+- Observability:
+    - Grafana:
+        icon: mdi-chart-areaspline
+        href: https://grafana.stack.localhost/
+        description: Dashboards & Alerting
+        widget:
+          type: grafana
+          url: http://grafana.ai-stack:3000
+          username: "{{HOMEPAGE_VAR_GRAFANA_USER}}"
+          password: "{{HOMEPAGE_VAR_GRAFANA_PASS}}"
+          version: 2
+    - Prometheus:
+        icon: mdi-fire
+        href: https://prometheus.stack.localhost/
+        description: Metrics Collection
+        widget:
+          type: prometheus
+          url: http://prometheus.ai-stack:9090
+    - Loki:
+        icon: mdi-text-box-search
+        description: Log Aggregation (no direct UI — query via Grafana Explore)
+        widget:
+          type: customapi
+          url: http://loki.ai-stack:3100/loki/api/v1/status/buildinfo
+          method: GET
+          mappings:
+            - field: version
+              label: Version
+    - Promtail:
+        icon: mdi-file-send
+        description: Log Shipping Agent (no direct UI — metrics via Prometheus)
+        widget:
+          type: prometheusmetric
+          url: http://prometheus.ai-stack:9090
+          metrics:
+            - label: Entries Sent
+              query: promtail_sent_entries_total
+              format:
+                type: number
