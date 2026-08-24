@@ -1,6 +1,6 @@
 <!-- markdownlint-disable MD024 -->
 # Authentik — Lessons Learned
-**Last Updated:** 2026-07-11
+**Last Updated:** 2026-07-20
 
 ## Purpose
 Empirical findings from deploying Authentik in this stack. Records behaviour that diverged from documentation, assumptions, or prior expectations. See `guidance.md` for prescriptive decisions and `best_practices.md` for vendor recommendations.
@@ -28,6 +28,7 @@ Empirical findings from deploying Authentik in this stack. Records behaviour tha
 17. [Changing a User's Email Invalidates All Proxy Session Cookies](#17-changing-a-users-email-invalidates-all-proxy-session-cookies)
 18. [`access_token_validity` on ProxyProvider Must Be Set Explicitly — Defaults to 1 Hour](#18-access_token_validity-on-proxyprovider-must-be-set-explicitly--defaults-to-1-hour)
 19. [Malformed `access_token_validity` Causes Infinite Redirect Loop — Diagnose via Event Log](#19-malformed-access_token_validity-causes-infinite-redirect-loop--diagnose-via-event-log)
+20. [Migrating a ProxyProvider's `external_host` to Public Silently Kills LAN Access](#20-migrating-a-proxyproviders-external_host-to-public-silently-kills-lan-access)
 
 ---
 
@@ -745,3 +746,66 @@ Repeat for every affected provider. No restart needed.
 ### Rule
 
 > When all forwardAuth-gated services loop simultaneously and `ERR_TOO_MANY_REDIRECTS` persists across cleared cookies and incognito windows, check the Authentik event log first. Alternating "Application authorized" + "General system exception (127.0.0.1)" pairs always mean the embedded outpost is crashing during token exchange — not an outpost assignment, network, or browser issue.
+
+---
+
+## 20 Migrating a ProxyProvider's `external_host` to Public Silently Kills LAN Access
+
+**Version:** Authentik 2025.2.4
+**Discovered:** 2026-07-20, adding public Grafana/Prometheus access, then checking the older services
+
+### What Happened
+
+Changing Grafana's and Prometheus's ProxyProvider `external_host` from
+`*.stack.localhost` to `*.photondatum.space` (to expose them publicly) made
+their `*.stack.localhost` Traefik routes 404 — same symptom already fixed once
+for Knowledge Index (Lesson §16's sibling problem, not the outpost-enrollment
+issue itself). Checking further, `openwebui.stack.localhost`,
+`flowise.stack.localhost`, `dashboard.stack.localhost`, and
+`litellm.stack.localhost` **all 404'd the same way already**, unrelated to
+today's change — every one of those services' `external_host` had been
+migrated to its public hostname at some point in the past with nothing left
+behind to serve the LAN path. The 404 comes from Authentik itself
+(`x-powered-by: authentik` in the response), not Traefik — the outpost has no
+provider whose `external_host` matches the LAN Host header, so nothing
+matches.
+
+This matters more than it looks: every one of these backend container ports is
+bound to `127.0.0.1` only (`openwebui:9090`, `grafana:3000`, `prometheus:9091`,
+`litellm:9000`, `flowise:3001`, `homepage:3002`). The `*.stack.localhost`
+Traefik vhost is the *only* way another device on the LAN can reach them —
+CENTAURI's own `localhost` can still hit the raw port directly, which likely
+masked the breakage for whoever set each one up.
+
+### Root Cause
+
+A ProxyProvider has exactly one `external_host`. Migrating it from a LAN
+hostname to a public one is not "adding public access" — it's *replacing* LAN
+access with public access, unless a second provider is deliberately created to
+preserve the LAN path (as Lesson §16 already established for Knowledge Index,
+without generalizing the lesson).
+
+### Fix
+
+For each affected service, create a second ProxyProvider + Application (same
+`internal_host`, `mode=forward_single`, `external_host=https://<service>.stack.localhost`),
+bind it to the **same access policy** as the public application (not left
+unbound — see the note in `access-control.md` about `knowledge-index-lan`
+being an inconsistent exception), and enroll it in the Embedded Outpost
+(Lesson §16). Also separately check the Traefik side: Flowise had no
+`*.stack.localhost` router at all (a Traefik-only gap, nothing to do with
+Authentik) — a 404 with no `x-powered-by: authentik` header means Traefik
+itself has no matching router, which is a different problem from this one and
+won't be fixed by touching Authentik.
+
+### Rule
+
+> Before changing any ProxyProvider's `external_host` to a public hostname,
+> check whether anything else still needs the old (LAN) hostname to keep
+> working — especially if the backend port is bound to `127.0.0.1`, since that
+> makes the Traefik vhost the only LAN-reachable path. If so, create a second
+> "-lan" ProxyProvider + Application first, don't just repoint the existing one.
+> And when diagnosing a `*.stack.localhost` 404, check the response headers
+> first: `x-powered-by: authentik` means Authentik has no matching provider
+> (an Authentik-side fix); a plain 404 with no such header means Traefik has no
+> matching router at all (a `services.yaml` fix instead).

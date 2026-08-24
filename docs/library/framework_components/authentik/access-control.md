@@ -45,21 +45,28 @@ interface — they have no access to other services.
 | Application slug | Name | External URL | Allowed bundles |
 |---|---|---|---|
 | `agent` | Agent (OpenWebUI) | `https://agent.photondatum.space` | agent, agent-mcp, developer, admin, **agent-only** |
+| `agent-lan` | Agent (OpenWebUI) LAN | `https://openwebui.stack.localhost` | same as `agent` (bound to `access-agent`) |
 | `forgejo-oidc` | Forgejo (Git) | `https://git.photondatum.space` | developer, admin, forgejo-guest |
 | `homepage` | Homepage Dashboard | `https://dashboard.photondatum.space` | admin |
+| `homepage-lan` | Homepage Dashboard LAN | `https://dashboard.stack.localhost` | same as `homepage` (bound to `access-homepage`) |
 | `knowledge-index` | Knowledge Index | `https://ki.photondatum.space` | developer, admin |
-| `knowledge-index-lan` | Knowledge Index (LAN) | `https://ki.stack.localhost` | developer, admin |
-| `grafana` | Grafana | `https://grafana.stack.localhost` | admin |
-| `prometheus` | Prometheus | `https://prometheus.stack.localhost` | admin |
+| `knowledge-index-lan` | Knowledge Index (LAN) | `https://ki.stack.localhost` | **none bound** — see note below |
+| `grafana` | Grafana | `https://grafana.photondatum.space` | admin |
+| `grafana-lan` | Grafana LAN | `https://grafana.stack.localhost` | same as `grafana` (bound to `access-grafana`) |
+| `prometheus` | Prometheus | `https://prometheus.photondatum.space` | admin |
+| `prometheus-lan` | Prometheus LAN | `https://prometheus.stack.localhost` | same as `prometheus` (bound to `access-prometheus`) |
 | `mcp` | MCP | `https://ki.photondatum.space/mcp` (meta_launch_url) | agent-mcp, developer, admin |
 | `flowise` | Flowise | `https://flowise.photondatum.space` | admin |
+| `flowise-lan` | Flowise LAN | `https://flowise.stack.localhost` | same as `flowise` (bound to `access-flowise`) |
 | `litellm` | LiteLLM | `https://litellm.photondatum.space` | admin |
 
 > **Note — `forgejo-oidc`:** Forgejo uses an OAuth2Provider (OIDC), not a ProxyProvider. Caddy on the VPS serves `git.photondatum.space` directly with no forwardAuth middleware — Forgejo handles auth itself via the OIDC flow. A defunct ProxyProvider (pk=2, slug=`forgejo`) was removed during cleanup; only the OAuth2Provider (pk=9) remains. Do not add a ProxyProvider for Forgejo.
 >
-> **Note — `litellm`:** LiteLLM uses an OAuth2Provider (OIDC), not a ProxyProvider. LiteLLM manages its own Authentik OAuth SSO via `GENERIC_*` env vars in `litellm.env`. The Traefik `litellm-public` router has only `secure-headers` middleware — no Authentik forwardAuth — because LiteLLM's own OAuth handles auth. Adding forwardAuth would cause two Authentik round-trips per session. The OAuth2 provider does **not** need to be assigned to the Embedded Outpost (outpost is for ProxyProviders only).
+> **Note — `litellm`:** LiteLLM uses an OAuth2Provider (OIDC), not a ProxyProvider — and unlike the other services here, it has **no LAN ProxyProvider either**. The Traefik `litellm` (LAN) and `litellm-public` routers both have only `secure-headers` middleware — no Authentik forwardAuth on either — because LiteLLM's own OAuth handles auth regardless of which hostname is used. Adding forwardAuth would cause two Authentik round-trips per session. The OAuth2 provider does **not** need to be assigned to the Embedded Outpost (outpost is for ProxyProviders only).
 >
-> **Note — `knowledge-index-lan`:** A second ProxyProvider (`pk=10`, `external_host=https://ki.stack.localhost`) was created to restore LAN access after the public provider's `external_host` was changed from `ki.stack.localhost` to `ki.photondatum.space`. Both providers are enrolled in the embedded outpost. See [Lesson §16](../authentik/lessons_learned.md#16-new-proxyprovider-applications-are-not-auto-enrolled-in-the-embedded-outpost).
+> **Note — `*-lan` applications (`agent-lan`, `flowise-lan`, `homepage-lan`, `grafana-lan`, `prometheus-lan`, `knowledge-index-lan`):** Each of these six services has exactly one ProxyProvider whose `external_host` points at the **public** `*.photondatum.space` hostname. At some point each one's `external_host` was migrated from the LAN hostname to the public one with nothing left behind to serve the LAN path — since these backend container ports are bound to `127.0.0.1` only, that made `*.stack.localhost` the *only* way another LAN device could reach them, and it 404'd at Authentik (no provider matched). Fixed 2026-07-20 by creating a second "LAN" ProxyProvider + Application for each (`mode=forward_single`, `external_host=https://<service>.stack.localhost`, same `internal_host`), all enrolled in the Embedded Outpost alongside their public counterparts (required — see [Lesson §16](lessons_learned.md#16-new-proxyprovider-applications-are-not-auto-enrolled-in-the-embedded-outpost)). Five of the six were bound to the *same* access policy as their public counterpart (`access-agent`, `access-flowise`, `access-homepage`, `access-grafana`, `access-prometheus`) so LAN access requires the same group membership as public access. `knowledge-index-lan` predates this fix (2026-07-10) and was created with **no** policy binding at all — meaning it's open to any authenticated Authentik user regardless of bundle. That's an inconsistency with the pattern established here, not a deliberate design choice; worth revisiting.
+>
+> Flowise also had no LAN Traefik router at all until this fix — `configs/traefik/dynamic/services.yaml` only had `flowise-public`, so Homepage's `flowise.stack.localhost` tile link 404'd at Traefik itself (before ever reaching Authentik). Added a plain `flowise` router matching the pattern of the other LAN routers.
 
 Each application has an `access-<slug>` ExpressionPolicy bound to it that
 checks `ak_is_group_member` for the allowed bundles. Authentik enforces this

@@ -99,13 +99,16 @@ http:
         - secure-headers
       tls: {}
 
+    # No authentik middleware — LiteLLM has no ProxyProvider (uses its own OIDC via
+    # GENERIC_* env vars, see litellm-public below and access-control.md). Adding
+    # forwardAuth here would 404 (no matching provider) and, if one existed, would
+    # force two Authentik round-trips per session — same reasoning as litellm-public.
     litellm:
       rule: "Host(`litellm.stack.localhost`)"
       entryPoints:
         - websecure
       service: litellm
       middlewares:
-        - authentik
         - secure-headers
       tls: {}
 
@@ -146,6 +149,18 @@ http:
       entryPoints:
         - websecure
       service: homepage
+      middlewares:
+        - authentik
+        - secure-headers
+      tls: {}
+
+    # LAN entry — flowise.stack.localhost never had a router (gap found 2026-07-20:
+    # Homepage's tile linked here but Traefik had no matching rule, so it 404'd).
+    flowise:
+      rule: "Host(`flowise.stack.localhost`)"
+      entryPoints:
+        - websecure
+      service: flowise
       middlewares:
         - authentik
         - secure-headers
@@ -206,6 +221,28 @@ http:
       entryPoints:
         - websecure
       service: homepage
+      middlewares:
+        - authentik
+        - secure-headers
+      tls: {}
+
+    # Public entry — grafana.photondatum.space proxied via Caddy on photondatum.space.
+    grafana-public:
+      rule: "Host(`grafana.photondatum.space`)"
+      entryPoints:
+        - websecure
+      service: grafana
+      middlewares:
+        - authentik
+        - secure-headers
+      tls: {}
+
+    # Public entry — prometheus.photondatum.space proxied via Caddy on photondatum.space.
+    prometheus-public:
+      rule: "Host(`prometheus.photondatum.space`)"
+      entryPoints:
+        - websecure
+      service: prometheus
       middlewares:
         - authentik
         - secure-headers

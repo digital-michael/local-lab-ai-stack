@@ -136,8 +136,8 @@ photondatum.space). This PostgreSQL instance serves only application data.
 
 | Container | Port bind | Notes |
 |---|---|---|
-| `ai-stack-obs-prometheus` | `127.0.0.1:9091:9090` | Metrics (localhost only) |
-| `ai-stack-obs-grafana` | via Traefik | `https://grafana.stack.localhost` |
+| `ai-stack-obs-prometheus` | `127.0.0.1:9091:9090` | LAN: `https://prometheus.stack.localhost`. Public (bundle-admin, 2026-07-20): `https://prometheus.photondatum.space` |
+| `ai-stack-obs-grafana` | via Traefik | LAN: `https://grafana.stack.localhost`. Public (bundle-admin, 2026-07-20): `https://grafana.photondatum.space` |
 | `ai-stack-obs-loki` | `127.0.0.1:3100:3100` | Log ingestion (Promtail → here) |
 | `ai-stack-obs-promtail` | none | Ships from this node + workers |
 
