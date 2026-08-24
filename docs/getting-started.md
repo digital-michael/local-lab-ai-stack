@@ -1,6 +1,6 @@
 # Getting Started
 
-**Last Updated:** 2026-07-10
+**Last Updated:** 2026-08-24
 
 A step-by-step guide to installing, configuring, deploying, and verifying the AI stack on a new Linux controller node.
 
@@ -65,9 +65,21 @@ Creates a local CA and a server certificate under `~/ai-stack/configs/tls/`. Tra
 
 ---
 
-## Step 5 — Review and edit configuration
+## Step 5 — Initialize the runtime config
 
-Open `configs/config.json` to verify defaults. Most values are ready to use, but you should at minimum review:
+```bash
+bash scripts/configure.sh init
+```
+
+Copies the repo's tracked template (`configs/config.json.example`) to `$AI_STACK_DIR/configs/config.json` — this is the **live runtime config** from here on. It is deliberately kept outside the git checkout (git-ignored) so that `git pull`/`checkout`/`stash` on this repo can never touch live settings. Every `configure.sh` subcommand and the deployed services read from this file by default; the repo's own `configs/config.json.example` is only ever a bootstrap template, never live config.
+
+To back up the live config, it's already included in `scripts/backup.sh`'s regular archive (it tars all of `$AI_STACK_DIR/configs/`) — no separate step needed. To refresh the tracked bootstrap template itself from this node's config, `cp ~/ai-stack/configs/config.json configs/config.json.example` — note that this **overwrites `config.json.example`**, the actual file every future `configure.sh init` seeds new nodes from, not a separate reference copy. Review the diff before committing and strip anything specific to this node (hostnames, this node's `node_profile`, model choices tuned to this hardware) that shouldn't become another node's default.
+
+---
+
+## Step 6 — Review and edit configuration
+
+Open `~/ai-stack/configs/config.json` (i.e. `$AI_STACK_DIR/configs/config.json` — **not** the repo's `configs/config.json.example`) to verify defaults. Most values are ready to use, but you should at minimum review:
 
 - `"node_profile"` — should be `"controller"` on the primary machine
 - `"models"` — add or remove models depending on your hardware (see [How-To: Add a Model](operator-faq.md#add-a-new-ollama-model))
@@ -82,7 +94,7 @@ bash scripts/configure.sh recommend
 
 ---
 
-## Step 6 — Generate LiteLLM model config
+## Step 7 — Generate LiteLLM model config
 
 ```bash
 bash scripts/configure.sh generate-litellm-config
@@ -92,7 +104,7 @@ Reads `models[]` from `config.json` and writes `configs/models.json`, which Lite
 
 ---
 
-## Step 7 — Provision secrets
+## Step 8 — Provision secrets
 
 ```bash
 bash scripts/configure.sh generate-secrets
@@ -115,7 +127,7 @@ Prompts you to enter values for each required secret and stores them in the Podm
 
 ---
 
-## Step 8 — Validate configuration
+## Step 9 — Validate configuration
 
 ```bash
 bash scripts/configure.sh validate
@@ -125,7 +137,7 @@ Checks that all required fields are present, no tags are `TBD`, and the node pro
 
 ---
 
-## Step 9 — Deploy
+## Step 10 — Deploy
 
 ```bash
 bash scripts/deploy.sh
@@ -135,7 +147,7 @@ Validates config, generates systemd quadlet files into `~/.config/containers/sys
 
 ---
 
-## Step 10 — Start services
+## Step 11 — Start services
 
 ```bash
 bash scripts/start.sh
@@ -151,7 +163,7 @@ bash scripts/status.sh
 
 ---
 
-## Step 11 — Pull and register models
+## Step 12 — Pull and register models
 
 ```bash
 # Pull models into Ollama's model store
@@ -163,7 +175,7 @@ bash scripts/pull-models.sh
 
 ---
 
-## Step 12 — Verify
+## Step 13 — Verify
 
 ```bash
 bash scripts/status.sh -v
@@ -179,7 +191,7 @@ bats testing/layer0_preflight.bats
 
 ---
 
-## Step 12b — Remove stale Authentik if migrating from controller to edge node
+## Step 13b — Remove stale Authentik if migrating from controller to edge node
 
 **Only applies when Authentik was previously running on this controller node and has been migrated to the edge node (photondatum.space).**
 
@@ -203,7 +215,7 @@ See [Authentik lessons learned §12](library/framework_components/authentik/less
 
 ---
 
-## Step 13 — Enroll the node in the Headscale tailnet (multi-node deployments)
+## Step 14 — Enroll the node in the Headscale tailnet (multi-node deployments)
 
 If this node needs to reach the controller (or peers) across the internet, enroll it in the WireGuard overlay mesh managed by Headscale at `headscale.photondatum.space`.
 
@@ -255,11 +267,11 @@ For per-node commands specific to this cluster, see the CENTAURI playbook §7.8.
 
 ---
 
-## Step 14 — Enable Tailscale SSH (optional, multi-node deployments)
+## Step 15 — Enable Tailscale SSH (optional, multi-node deployments)
 
-Once all nodes are enrolled (Step 13), enable zero-config SSH between them via the Headscale ACL policy. No public key distribution required — authentication is handled by the tailnet.
+Once all nodes are enrolled (Step 14), enable zero-config SSH between them via the Headscale ACL policy. No public key distribution required — authentication is handled by the tailnet.
 
-**Prerequisites:** Step 13 complete on all target nodes; ACL `ssh` block present in `/etc/headscale/acl.json` (see CENTAURI playbook §7.9 for the full block).
+**Prerequisites:** Step 14 complete on all target nodes; ACL `ssh` block present in `/etc/headscale/acl.json` (see CENTAURI playbook §7.9 for the full block).
 
 ### 1. Enable the SSH server on each Linux target node
 
@@ -305,9 +317,9 @@ A SELinux health warning (`SELinux is enabled; Tailscale SSH may not work`) appe
 
 ---
 
-## Step 15 — Configure the public reverse proxy (optional, internet-facing deployments)
+## Step 16 — Configure the public reverse proxy (optional, internet-facing deployments)
 
-If you need to expose AI stack services to the internet, a Caddy instance on a public host acts as the TLS-terminating reverse proxy. Traffic is forwarded to CENTAURI through the WireGuard tailnet established in Steps 13–14.
+If you need to expose AI stack services to the internet, a Caddy instance on a public host acts as the TLS-terminating reverse proxy. Traffic is forwarded to CENTAURI through the WireGuard tailnet established in Steps 14–15.
 
 ### Architecture
 
@@ -325,7 +337,7 @@ Browser (HTTPS)
 ### What you need
 
 - Caddy installed on the public host (`caddy` package or via [caddyserver.com](https://caddyserver.com/download))
-- Public host enrolled in the Headscale tailnet (Step 13)
+- Public host enrolled in the Headscale tailnet (Step 14)
 - Port 443 open and publicly reachable on the public host (for TLS-ALPN-01 certificate issuance)
 - DNS `A` records pointing each subdomain at the public host's IP
 - Port 80 is **not** required — Caddy uses TLS-ALPN-01
@@ -402,12 +414,23 @@ This preserves SSO for both local and external users but requires a second Authe
 
 Works when the service has its own authentication (e.g., OpenWebUI) and you don't want to modify the existing Authentik outpost:
 
-1. Add a dedicated Traefik router for the external hostname that intentionally omits the `authentik` middleware (see `openwebui-public` in `configs/traefik/dynamic/services.yaml`).
+1. Add a dedicated Traefik router, scoped to just the paths that need to bypass Authentik, that intentionally omits the `authentik` middleware (see `openwebui-public-static` in `configs/traefik/dynamic/services.yaml`).
 2. Use `header_up Host chat.yourdomain.com` in Caddy so Traefik matches that router.
 
-Local users continue to use Authentik SSO through the existing `*.stack.localhost` router. External users authenticate directly with the service.
+Local users continue to use Authentik SSO through the existing `*.stack.localhost` router. External users authenticate directly with the service, for the bypassed paths only.
 
-The AI stack ships with Option B configured for `chat.photondatum.space` / OpenWebUI.
+The AI stack ships with a **hybrid**, not a whole-domain Option B: `agent.photondatum.space`'s main router (`openwebui-public`) keeps the `authentik` middleware, so external users go through Authentik SSO the same as local ones. Only `/_app` (static assets) and `/ws` (Socket.IO — WebSocket upgrades can't follow a 302 redirect, so forwardAuth must not intercept them) bypass it, via the separate, path-scoped `openwebui-public-static` router. OpenWebUI's own session cookie is what actually gates those two paths — see the Trusted-header auto-login note below for how that cookie gets set, and CENTAURI playbook §13 L-21 for a real CORS misconfiguration that was found and fixed on exactly those two paths.
+
+**Trusted-header auto-login:** Option B alone only gates access — it does not sign
+the user into OpenWebUI. For Authentik's forwardAuth to also auto-sign the user
+into OpenWebUI (no second, separate OpenWebUI login form), set
+`WEBUI_AUTH_TRUSTED_EMAIL_HEADER=X-authentik-email` and
+`WEBUI_AUTH_TRUSTED_NAME_HEADER=X-authentik-name` in the `openwebui` service's
+`environment` block in `config.json`, then `bash scripts/configure.sh generate-quadlets`
+and restart `openwebui.service`. Because quadlets are regenerated from `config.json`,
+adding these vars directly to the quadlet file instead of `config.json` will silently
+regress on the next `generate-quadlets` run — always edit `config.json`. See
+[OpenWebUI lessons learned §1](library/framework_components/openwebui/lessons_learned.md#1-webui_auth_trusted_email_header--how-auto-login-works).
 
 ### Firewall rules on the public host
 
