@@ -8,7 +8,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CONFIG_FILE="${CONFIG_FILE:-$PROJECT_ROOT/configs/config.json}"
+AI_STACK_DIR="${AI_STACK_DIR:-$HOME/ai-stack}"
+# Runtime config lives with the deployed instance ($AI_STACK_DIR), not the repo checkout —
+# this is git-ignored and never touched by `git pull`/`checkout`/`stash` on the repo.
+# See configs/config.json.example for the tracked bootstrap template (used by `init`).
+CONFIG_FILE="${CONFIG_FILE:-$AI_STACK_DIR/configs/config.json}"
 QUADLET_DIR="${QUADLET_DIR:-$HOME/.config/containers/systemd}"
 
 YES=false
@@ -26,7 +30,7 @@ Options:
   -h, --help    Show this message
 
 Environment:
-  CONFIG_FILE   Path to config.json  (default: ./configs/config.json)
+  CONFIG_FILE   Path to config.json  (default: $AI_STACK_DIR/configs/config.json)
   QUADLET_DIR   Quadlet directory    (default: ~/.config/containers/systemd)
 EOF
 }
