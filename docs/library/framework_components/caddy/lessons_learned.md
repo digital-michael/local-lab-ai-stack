@@ -1,6 +1,6 @@
 # Caddy — Lessons Learned
 
-**Last Updated:** 2026-07-11
+**Last Updated:** 2026-07-20
 
 ## Purpose
 
@@ -12,6 +12,7 @@ Empirical findings from operating Caddy in this stack. Records behaviour that di
 
 1. [Caddy Overwrites X-Forwarded-Host When Proxying forwardAuth](#1-caddy-overwrites-x-forwarded-host-when-proxying-forwardauth)
 2. [`header_up Host` Must Match the Traefik Router Rule Hostname Exactly](#2-header_up-host-must-match-the-traefik-router-rule-hostname-exactly)
+3. [No `dial_timeout` or Access Logging Left an "Offline" Incident Undiagnosable](#3-no-dial_timeout-or-access-logging-left-an-offline-incident-undiagnosable)
 
 ---
 
@@ -95,3 +96,62 @@ https://flowise.photondatum.space {
 > must match the hostname in the corresponding Traefik router's `rule:` exactly.
 > Traefik routes by `Host` header — if it doesn't match a router rule, the
 > request returns 404 regardless of the original URL the browser used.
+
+---
+
+## 3 No `dial_timeout` or Access Logging Left an "Offline" Incident Undiagnosable
+
+**Version:** Caddy 2.x
+**Discovered:** 2026-07-20, investigating a reported delay on `agent.photondatum.space`
+
+### What Happened
+
+A user reported hitting `agent.photondatum.space` and getting the
+`handle_errors` "AI Stack is currently offline" fallback for about two minutes,
+even though CENTAURI was awake and `tailscale status` on the VPS showed it
+reachable. By the time the report reached investigation, there was no way to
+confirm what actually failed: `/etc/caddy/Caddyfile` had no `log` directive on
+any site block, so Caddy emitted zero per-request access log lines — only its
+own internal admin/TLS/ACME logs reached `journalctl -u caddy`. A month of
+those internal logs contained no dial-failure entries for `100.64.0.4:443`
+either, so the CENTAURI-proxied `reverse_proxy` blocks also had no explicit
+`dial_timeout` — if a request ever does hang on a dead/asleep peer, nothing
+bounds how long Caddy waits before falling through to `handle_errors`.
+
+### Fix
+
+Add `log` (per-request JSON access log, timestamp + duration + status + error)
+and `transport http { dial_timeout 5s }` to every CENTAURI-proxied block:
+
+```caddy
+https://agent.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host agent.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+            dial_timeout 5s
+        }
+    }
+    log
+    handle_errors {
+        respond "AI Stack is currently offline. Services will resume when the controller comes back online." 503
+    }
+}
+```
+
+Validate before reloading production: `caddy validate --config /etc/caddy/Caddyfile`.
+
+### Rule
+
+> A `handle_errors` fallback that silently swallows the underlying failure is
+> not enough — without `log`, a real incident leaves no timestamped evidence on
+> either side of the proxy, and without `dial_timeout`, a hung connection to a
+> dead upstream has no bound. Add both to any `reverse_proxy` block whose
+> upstream can legitimately go offline (a suspend/wake node, a worker that
+> comes and goes), before the first incident, not after.
+
+Active health checks (`health_uri`) were deliberately not added in this pass —
+each backend app needs a verified no-auth probe path first (OpenWebUI has one:
+`/_app/version.json`, bypasses forwardAuth), and a wrong path would falsely
+mark a healthy CENTAURI down. Fast-follow once the other apps' probe paths are
+confirmed.

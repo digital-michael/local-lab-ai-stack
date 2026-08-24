@@ -33,7 +33,10 @@
 | `chat.photondatum.space` | A | VPS public IP | Reserved — future social chat |
 | `dashboard.photondatum.space` | A | VPS public IP | CENTAURI stack homepage dashboard |
 | `flowise.photondatum.space` | A | VPS public IP | Flowise AI workflow builder (bundle-admin) |
-| `ki.photondatum.space` | A | VPS public IP (`66.228.37.60`) | Knowledge Index API + admin panel (pending) |
+| `ki.photondatum.space` | A | VPS public IP (`66.228.37.60`) | Knowledge Index API + admin panel |
+| `litellm.photondatum.space` | A | VPS public IP (`66.228.37.60`) | LiteLLM proxy (own OAuth SSO, bundle-admin) |
+| `grafana.photondatum.space` | A | VPS public IP (`66.228.37.60`) | Grafana dashboards (bundle-admin) — added 2026-07-20 |
+| `prometheus.photondatum.space` | A | VPS public IP (`66.228.37.60`) | Prometheus metrics (bundle-admin) — added 2026-07-20 |
 
 All `*.photondatum.space` subdomains point at this VPS — Caddy proxies
 CENTAURI-hosted services through to `100.64.0.4:443` via tailnet.
@@ -165,16 +168,27 @@ git.photondatum.space {
 
 # Authentik
 https://auth.photondatum.space {
-    reverse_proxy 127.0.0.1:9000
+    reverse_proxy 127.0.0.1:9000 {
+        header_up X-Forwarded-Host {http.request.header.X-Forwarded-Host}
+    }
 }
 
 # CENTAURI services — proxied via tailnet (100.64.0.4)
-# These routes are only reachable when CENTAURI is online
+# These routes are only reachable when CENTAURI is online.
+# dial_timeout bounds how long Caddy waits on a dead/asleep CENTAURI before
+# failing to handle_errors, instead of hanging. `log` emits a per-request JSON
+# access-log line via `journalctl -u caddy` (duration, status, error) — added
+# 2026-07-20 after an undiagnosable "AI Stack offline" incident with no timestamped
+# evidence on either side. See centauri-integration-plan.md Completed log.
 https://agent.photondatum.space {
     reverse_proxy 100.64.0.4:443 {
         header_up Host agent.photondatum.space
-        transport http { tls_insecure_skip_verify }
+        transport http {
+            tls_insecure_skip_verify
+            dial_timeout 5s
+        }
     }
+    log
     handle_errors {
         respond "AI Stack is currently offline. Services will resume when the controller comes back online." 503
     }
@@ -192,21 +206,31 @@ chat.photondatum.space {
 https://dashboard.photondatum.space {
     reverse_proxy 100.64.0.4:443 {
         header_up Host dashboard.photondatum.space
-        transport http { tls_insecure_skip_verify }
+        transport http {
+            tls_insecure_skip_verify
+            dial_timeout 5s
+        }
     }
+    log
 }
 ```
 
 Additional CENTAURI service routes follow the same pattern — proxy to
-`100.64.0.4:443` with `header_up Host <public-hostname>`:
+`100.64.0.4:443` with `header_up Host <public-hostname>` (the public hostname,
+**not** the `*.stack.localhost` LAN name — that was a bug fixed 2026-07-11 for
+Flowise, see Completed log below):
 
 ```caddy
 # Flowise — AI workflow builder (bundle-admin only, via Authentik forwardAuth)
 https://flowise.photondatum.space {
     reverse_proxy 100.64.0.4:443 {
-        header_up Host flowise.stack.localhost
-        transport http { tls_insecure_skip_verify }
+        header_up Host flowise.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+            dial_timeout 5s
+        }
     }
+    log
 }
 
 # Knowledge Index — API + admin panel (bundle-admin via Authentik; /v1 and /mcp use app API key)
@@ -214,8 +238,48 @@ https://flowise.photondatum.space {
 https://ki.photondatum.space {
     reverse_proxy 100.64.0.4:443 {
         header_up Host ki.photondatum.space
-        transport http { tls_insecure_skip_verify }
+        transport http {
+            tls_insecure_skip_verify
+            dial_timeout 5s
+        }
     }
+    log
+}
+
+# LiteLLM — manages its own Authentik OAuth SSO, no forwardAuth on this router
+https://litellm.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host litellm.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+            dial_timeout 5s
+        }
+    }
+    log
+}
+
+# Grafana — metrics/logs explorer (bundle-admin). Added 2026-07-20.
+https://grafana.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host grafana.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+            dial_timeout 5s
+        }
+    }
+    log
+}
+
+# Prometheus — metrics store (bundle-admin). Added 2026-07-20.
+https://prometheus.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host prometheus.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+            dial_timeout 5s
+        }
+    }
+    log
 }
 ```
 
