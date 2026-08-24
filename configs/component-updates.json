@@ -1,0 +1,402 @@
+{
+  "$schema_note": "Manifest for scripts/check-updates.sh. `deploy` drives how the script detects whether a component is actually installed on the host it's run on, and where to read its current version from: 'quadlet' (Podman Quadlet .container file in QUADLET_DIR — works for both CENTAURI's stack and photondatum.space's ai-stack-iam-* stack), 'native' (OS-level binary/service, version detected via a small per-component check in the script), 'compose' (podman-compose-managed, see compose_file/compose_systemd_unit). A component absent from the current host is skipped by default (see --include-uninstalled). Extend known_issues/workflow_deps as new gotchas are discovered — mirrors the pattern already used in docs/decisions.md and the per-component lessons_learned.md files under docs/library/framework_components/.",
+  "roles": {
+    "edge": "photondatum.space (Edge role) — identity, mesh coordination, public ingress",
+    "backplane": "CENTAURI (Controller role) — inference, knowledge pipeline, user-facing apps, observability",
+    "node": "Worker role — extends inference capacity (Ollama/vLLM), registers with the backplane"
+  },
+  "components": [
+    {
+      "id": "traefik",
+      "name": "Traefik",
+      "roles": ["backplane"],
+      "custom_built": false,
+      "image": "docker.io/library/traefik",
+      "config_path": "services.traefik.tag",
+      "registry": "dockerhub",
+      "registry_repo": "library/traefik",
+      "release_repo": "traefik/traefik",
+      "workflow_deps": ["authentik"],
+      "known_issues": [
+        {
+          "severity": "info",
+          "summary": "forwardAuth-gated routers need a 'nocache' Cache-Control middleware or browser HTTP caching bypasses forwardAuth entirely on session expiry (CORS error loop).",
+          "source": "docs/library/framework_components/openwebui/lessons_learned.md #3"
+        }
+      ],
+      "deploy": "quadlet"
+    },
+    {
+      "id": "litellm",
+      "name": "LiteLLM proxy",
+      "roles": ["backplane"],
+      "custom_built": false,
+      "image": "ghcr.io/berriai/litellm",
+      "config_path": "services.litellm.tag",
+      "registry": "ghcr",
+      "registry_repo": "berriai/litellm",
+      "release_repo": "BerriAI/litellm",
+      "workflow_deps": ["openwebui", "knowledge-index"],
+      "known_issues": [
+        {
+          "severity": "critical",
+          "summary": "openwebui_api_key Podman secret must equal LITELLM_MASTER_KEY exactly; a LiteLLM upgrade that rotates/regenerates the master key breaks OpenWebUI model listing and inference with 401s.",
+          "source": "docs/library/framework_components/openwebui/best_practices.md #6.3"
+        }
+      ],
+      "deploy": "quadlet"
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama",
+      "roles": ["backplane", "node"],
+      "custom_built": false,
+      "image": "docker.io/ollama/ollama",
+      "config_path": "services.ollama.tag",
+      "registry": "dockerhub",
+      "registry_repo": "ollama/ollama",
+      "release_repo": "ollama/ollama",
+      "workflow_deps": ["knowledge-index"],
+      "known_issues": [
+        {
+          "severity": "medium",
+          "summary": "Ollama's CUDA path is opportunistic and will claim the GPU if available; on a controller also running vLLM, an Ollama upgrade that changes GPU auto-detection behavior can reintroduce VRAM contention (D-016 pinned Ollama to CPU-only for this reason).",
+          "source": "docs/decisions.md D-016"
+        }
+      ],
+      "deploy": "quadlet"
+    },
+    {
+      "id": "vllm",
+      "name": "vLLM",
+      "roles": ["backplane", "node"],
+      "custom_built": false,
+      "image": "docker.io/vllm/vllm-openai",
+      "config_path": "services.vllm.tag",
+      "registry": "dockerhub",
+      "registry_repo": "vllm/vllm-openai",
+      "release_repo": "vllm-project/vllm",
+      "workflow_deps": ["ollama"],
+      "known_issues": [
+        {
+          "severity": "info",
+          "summary": "Currently suspended on CENTAURI due to GPU contention with Ollama (commit bc22666). Confirm GPU allocation strategy before re-enabling on any upgrade.",
+          "source": "git log: chore(vllm): suspend vllm on CENTAURI — GPU contention with Ollama"
+        }
+      ],
+      "deploy": "quadlet"
+    },
+    {
+      "id": "qdrant",
+      "name": "Qdrant",
+      "roles": ["backplane"],
+      "custom_built": false,
+      "image": "docker.io/qdrant/qdrant",
+      "config_path": "services.qdrant.tag",
+      "registry": "dockerhub",
+      "registry_repo": "qdrant/qdrant",
+      "release_repo": "qdrant/qdrant",
+      "workflow_deps": ["knowledge-index"],
+      "known_issues": [],
+      "deploy": "quadlet"
+    },
+    {
+      "id": "postgres",
+      "name": "PostgreSQL",
+      "roles": ["backplane", "edge"],
+      "custom_built": false,
+      "image": "docker.io/library/postgres",
+      "config_path": "services.postgres.tag",
+      "registry": "dockerhub",
+      "registry_repo": "library/postgres",
+      "release_repo": "postgres/postgres",
+      "workflow_deps": [],
+      "known_issues": [
+        {
+          "severity": "high",
+          "summary": "Major-version Postgres upgrades require a dump/restore or pg_upgrade — never just a tag bump. Separate instances exist on the backplane (aistack DB) and edge (Authentik DB); check both independently.",
+          "source": "general PostgreSQL upgrade practice — no in-repo incident yet, flagged proactively"
+        }
+      ],
+      "deploy": "quadlet"
+    },
+    {
+      "id": "openwebui",
+      "name": "Open WebUI",
+      "roles": ["backplane"],
+      "custom_built": false,
+      "image": "ghcr.io/open-webui/open-webui",
+      "config_path": "services.openwebui.tag",
+      "registry": "ghcr",
+      "registry_repo": "open-webui/open-webui",
+      "release_repo": "open-webui/open-webui",
+      "workflow_deps": ["litellm", "authentik", "knowledge-index"],
+      "known_issues": [
+        {
+          "severity": "high",
+          "summary": "OLLAMA_BASE_URL is only honored at first-boot DB initialization; the Docker Compose default (host.docker.internal:11434) gets baked into webui.db on every fresh deploy regardless of env var. Requires the diagnose.sh --fix DB patch after any fresh install/major upgrade that resets the DB.",
+          "source": "docs/library/framework_components/openwebui/best_practices.md #6.2"
+        },
+        {
+          "severity": "medium",
+          "summary": "Native MCP tool-server support (Streamable HTTP, auth_type=bearer/oauth_2.1) is present in the currently-deployed v0.8.10 build; confirm this remains true after any version bump before assuming MCP integration still works — verify via GET /api/v1/configs/tool_servers or the admin UI, not just changelog claims.",
+          "source": "verified empirically 2026-07-21 against the running container (see docs/decisions.md D-042 discussion)"
+        }
+      ],
+      "deploy": "quadlet"
+    },
+    {
+      "id": "knowledge-index",
+      "name": "Knowledge Index Service",
+      "roles": ["backplane", "node"],
+      "custom_built": true,
+      "image": "localhost/knowledge-index",
+      "config_path": "services.knowledge-index.tag",
+      "registry": "custom",
+      "registry_repo": null,
+      "release_repo": null,
+      "workflow_deps": ["litellm", "qdrant", "postgres", "ollama"],
+      "known_issues": [
+        {
+          "severity": "info",
+          "summary": "Custom-built from services/knowledge-index/ in this repo — there is no upstream registry to check. 'Update' means rebuilding after a source change, not pulling a new tag. Bump the tag in config.json when the built image changes meaningfully.",
+          "source": "n/a — structural note"
+        }
+      ],
+      "deploy": "quadlet"
+    },
+    {
+      "id": "flowise",
+      "name": "Flowise",
+      "roles": ["backplane"],
+      "custom_built": false,
+      "image": "docker.io/flowiseai/flowise",
+      "config_path": "services.flowise.tag",
+      "registry": "dockerhub",
+      "registry_repo": "flowiseai/flowise",
+      "release_repo": "FlowiseAI/Flowise",
+      "workflow_deps": ["litellm"],
+      "known_issues": [],
+      "deploy": "quadlet"
+    },
+    {
+      "id": "prometheus",
+      "name": "Prometheus",
+      "roles": ["backplane"],
+      "custom_built": false,
+      "image": "docker.io/prom/prometheus",
+      "config_path": "services.prometheus.tag",
+      "registry": "dockerhub",
+      "registry_repo": "prom/prometheus",
+      "release_repo": "prometheus/prometheus",
+      "workflow_deps": ["grafana"],
+      "known_issues": [],
+      "deploy": "quadlet"
+    },
+    {
+      "id": "grafana",
+      "name": "Grafana",
+      "roles": ["backplane"],
+      "custom_built": false,
+      "image": "docker.io/grafana/grafana",
+      "config_path": "services.grafana.tag",
+      "registry": "dockerhub",
+      "registry_repo": "grafana/grafana",
+      "release_repo": "grafana/grafana",
+      "workflow_deps": ["prometheus", "loki"],
+      "known_issues": [
+        {
+          "severity": "info",
+          "summary": "Grafana provisioning directory is empty by design — no dashboards load on first start. Not a regression if an upgrade shows a blank dashboard list.",
+          "source": "docs/features.md — Observability status"
+        }
+      ],
+      "deploy": "quadlet"
+    },
+    {
+      "id": "loki",
+      "name": "Loki",
+      "roles": ["backplane"],
+      "custom_built": false,
+      "image": "docker.io/grafana/loki",
+      "config_path": "services.loki.tag",
+      "registry": "dockerhub",
+      "registry_repo": "grafana/loki",
+      "release_repo": "grafana/loki",
+      "workflow_deps": ["promtail", "grafana"],
+      "known_issues": [],
+      "deploy": "quadlet"
+    },
+    {
+      "id": "promtail",
+      "name": "Promtail",
+      "roles": ["backplane", "node"],
+      "custom_built": false,
+      "image": "docker.io/grafana/promtail",
+      "config_path": "services.promtail.tag",
+      "registry": "dockerhub",
+      "registry_repo": "grafana/promtail",
+      "release_repo": "grafana/loki",
+      "workflow_deps": ["loki"],
+      "known_issues": [
+        {
+          "severity": "info",
+          "summary": "Promtail is in maintenance mode upstream (Grafana Labs recommends Grafana Alloy for new deployments). Not an immediate break risk, but worth planning a migration rather than expecting indefinite Promtail updates.",
+          "source": "general upstream project status — flagged proactively, verify current status before acting"
+        }
+      ],
+      "deploy": "quadlet"
+    },
+    {
+      "id": "minio",
+      "name": "MinIO",
+      "roles": ["backplane"],
+      "custom_built": false,
+      "image": "docker.io/minio/minio",
+      "config_path": "services.minio.tag",
+      "registry": "dockerhub",
+      "registry_repo": "minio/minio",
+      "release_repo": "minio/minio",
+      "workflow_deps": ["knowledge-index"],
+      "known_issues": [
+        {
+          "severity": "medium",
+          "summary": "A leaked MinIO access/secret key pair was found in this repo's git history (keys.txt, commit 57b4ad5, redacted in b2afa4c but still present in history). Any credential rotation triggered by an update should also prompt rotating the original leaked pair if that hasn't already happened.",
+          "source": "security review 2026-07-21 — flagged during MCP work, unrelated to this script but recorded here since MinIO is the affected component"
+        }
+      ],
+      "deploy": "quadlet"
+    },
+    {
+      "id": "homepage",
+      "name": "Homepage dashboard",
+      "roles": ["backplane"],
+      "custom_built": false,
+      "image": "ghcr.io/gethomepage/homepage",
+      "config_path": "services.homepage.tag",
+      "registry": "ghcr",
+      "registry_repo": "gethomepage/homepage",
+      "release_repo": "gethomepage/homepage",
+      "workflow_deps": [],
+      "known_issues": [],
+      "deploy": "quadlet"
+    },
+    {
+      "id": "m2m-gateway",
+      "name": "M2M Gateway",
+      "roles": ["backplane"],
+      "custom_built": true,
+      "image": "localhost/m2m-gateway",
+      "config_path": "services.m2m-gateway.tag",
+      "registry": "custom",
+      "registry_repo": null,
+      "release_repo": null,
+      "workflow_deps": ["knowledge-index"],
+      "known_issues": [
+        {
+          "severity": "info",
+          "summary": "Custom-built from services/m2m-gateway/ — no upstream registry to check; 'update' means rebuilding after a source change.",
+          "source": "n/a — structural note"
+        }
+      ],
+      "deploy": "quadlet"
+    },
+    {
+      "id": "rustdesk-server",
+      "name": "RustDesk server (hbbs/hbbr)",
+      "roles": ["edge"],
+      "custom_built": false,
+      "image": "docker.io/rustdesk/rustdesk-server",
+      "config_path": null,
+      "registry": "dockerhub",
+      "registry_repo": "rustdesk/rustdesk-server",
+      "release_repo": "rustdesk/rustdesk-server",
+      "workflow_deps": [],
+      "known_issues": [
+        {
+          "severity": "info",
+          "summary": "Managed by podman-compose, not ai-stack quadlets. Version pin lives in configs/compose/rustdesk/docker-compose.yml, not config.json — this script reads the compose file directly for current version.",
+          "source": "docs/instances/photondatum.md — RustDesk section"
+        }
+      ],
+      "deploy": "compose",
+      "compose_file": "configs/compose/rustdesk/docker-compose.yml",
+      "compose_container": "rustdesk-hbbs",
+      "compose_systemd_unit": "podman-compose@rustdesk-server.service"
+    },
+    {
+      "id": "caddy",
+      "name": "Caddy",
+      "roles": ["edge"],
+      "custom_built": false,
+      "image": null,
+      "config_path": null,
+      "registry": "github",
+      "registry_repo": null,
+      "release_repo": "caddyserver/caddy",
+      "workflow_deps": ["authentik", "traefik"],
+      "known_issues": [
+        {
+          "severity": "info",
+          "summary": "Headscale route requires 'tls { alpn http/1.1 }' — HTTP/1.1 only, since DERP uses WebSocket upgrade, not HTTP/2. Verify this survives any Caddy upgrade that changes ALPN negotiation defaults.",
+          "source": "docs/instances/photondatum.md Caddyfile"
+        }
+      ],
+      "deploy": "native"
+    },
+    {
+      "id": "headscale",
+      "name": "Headscale",
+      "roles": ["edge"],
+      "custom_built": false,
+      "image": null,
+      "config_path": null,
+      "registry": "github",
+      "registry_repo": null,
+      "release_repo": "juanfont/headscale",
+      "workflow_deps": ["tailscale"],
+      "known_issues": [
+        {
+          "severity": "high",
+          "summary": "Embedded DERP relay requires derp.server.enabled=true and specific config fields; a config-schema change in a Headscale upgrade previously required fixes (see commit 25f0723). Diff the config file schema before upgrading.",
+          "source": "git log: fix(headscale): enable embedded DERP relay and document required config fields"
+        }
+      ],
+      "deploy": "native"
+    },
+    {
+      "id": "forgejo",
+      "name": "Forgejo",
+      "roles": ["edge"],
+      "custom_built": false,
+      "image": null,
+      "config_path": null,
+      "registry": "manual",
+      "registry_repo": null,
+      "release_repo": null,
+      "workflow_deps": ["authentik"],
+      "known_issues": [
+        {
+          "severity": "medium",
+          "summary": "Hosted on codeberg.org, not GitHub — this script cannot auto-check its latest release via the GitHub API. Check https://codeberg.org/forgejo/forgejo/releases manually. ROOT_URL must be set in app.ini or OIDC redirect_uris are sent as http:// and Authentik rejects them.",
+          "source": "docs/instances/centauri.md — Known Issues table"
+        }
+      ],
+      "deploy": "native"
+    },
+    {
+      "id": "tailscale",
+      "name": "Tailscale agent",
+      "roles": ["edge", "backplane", "node"],
+      "custom_built": false,
+      "image": null,
+      "config_path": null,
+      "registry": "github",
+      "registry_repo": null,
+      "release_repo": "tailscale/tailscale",
+      "workflow_deps": ["headscale"],
+      "known_issues": [],
+      "deploy": "native"
+    }
+  ]
+}
