@@ -3,7 +3,7 @@
   "default_models": [
     {
       "id": "llama3.1:8b",
-      "description": "llama3.1:8b — GPU inference via Ollama (RTX 3070 Ti)",
+      "description": "llama3.1:8b \u2014 CPU inference via Ollama",
       "litellm_params": {
         "model": "ollama_chat/llama3.1:8b",
         "api_base": "http://ollama.ai-stack:11434",
@@ -18,7 +18,7 @@
     },
     {
       "id": "qwen3.5:4b",
-      "description": "qwen3.5:4b — GPU inference via Ollama (RTX 3070 Ti)",
+      "description": "qwen3.5:4b \u2014 CPU inference via Ollama",
       "litellm_params": {
         "model": "ollama_chat/qwen3.5:4b",
         "api_base": "http://ollama.ai-stack:11434",
@@ -33,7 +33,7 @@
     },
     {
       "id": "qwen3:8b",
-      "description": "qwen3:8b — GPU inference via Ollama (RTX 3070 Ti). Thinking mode disabled by default (set think:true in extra_body to enable).",
+      "description": "qwen3:8b \u2014 CPU inference via Ollama",
       "litellm_params": {
         "model": "ollama_chat/qwen3:8b",
         "api_base": "http://ollama.ai-stack:11434",
@@ -47,10 +47,100 @@
       }
     },
     {
-      "id": "llama3.2:3b",
-      "description": "llama3.2:3b — GPU inference via Ollama (RTX 3070 Ti)",
+      "id": "llama3.2:latest",
+      "description": "llama3.2:latest \u2014 CPU inference via Ollama",
       "litellm_params": {
-        "model": "ollama_chat/llama3.2:3b",
+        "model": "ollama_chat/llama3.2:latest",
+        "api_base": "http://ollama.ai-stack:11434",
+        "api_key": "none",
+        "max_tokens": 4096
+      },
+      "model_info": {
+        "mode": "chat",
+        "input_cost_per_token": 0,
+        "output_cost_per_token": 0
+      }
+    },
+    {
+      "id": "bit-sync-dev/nexus1:3b",
+      "description": "bit-sync-dev/nexus1:3b \u2014 CPU inference via Ollama",
+      "litellm_params": {
+        "model": "ollama_chat/bit-sync-dev/nexus1:3b",
+        "api_base": "http://ollama.ai-stack:11434",
+        "api_key": "none",
+        "max_tokens": 4096
+      },
+      "model_info": {
+        "mode": "chat",
+        "input_cost_per_token": 0,
+        "output_cost_per_token": 0
+      }
+    },
+    {
+      "id": "bit-sync-dev/nexus1:1b",
+      "description": "bit-sync-dev/nexus1:1b \u2014 CPU inference via Ollama",
+      "litellm_params": {
+        "model": "ollama_chat/bit-sync-dev/nexus1:1b",
+        "api_base": "http://ollama.ai-stack:11434",
+        "api_key": "none",
+        "max_tokens": 4096
+      },
+      "model_info": {
+        "mode": "chat",
+        "input_cost_per_token": 0,
+        "output_cost_per_token": 0
+      }
+    },
+    {
+      "id": "qwen:latest",
+      "description": "qwen:latest \u2014 CPU inference via Ollama",
+      "litellm_params": {
+        "model": "ollama_chat/qwen:latest",
+        "api_base": "http://ollama.ai-stack:11434",
+        "api_key": "none",
+        "max_tokens": 4096
+      },
+      "model_info": {
+        "mode": "chat",
+        "input_cost_per_token": 0,
+        "output_cost_per_token": 0
+      }
+    },
+    {
+      "id": "phi4:14b-q8_0",
+      "description": "phi4:14b-q8_0 \u2014 CPU inference via Ollama",
+      "litellm_params": {
+        "model": "ollama_chat/phi4:14b-q8_0",
+        "api_base": "http://ollama.ai-stack:11434",
+        "api_key": "none",
+        "max_tokens": 4096
+      },
+      "model_info": {
+        "mode": "chat",
+        "input_cost_per_token": 0,
+        "output_cost_per_token": 0
+      }
+    },
+    {
+      "id": "granite4:small-h",
+      "description": "granite4:small-h \u2014 CPU inference via Ollama",
+      "litellm_params": {
+        "model": "ollama_chat/granite4:small-h",
+        "api_base": "http://ollama.ai-stack:11434",
+        "api_key": "none",
+        "max_tokens": 4096
+      },
+      "model_info": {
+        "mode": "chat",
+        "input_cost_per_token": 0,
+        "output_cost_per_token": 0
+      }
+    },
+    {
+      "id": "qwen3-coder-next:latest",
+      "description": "qwen3-coder-next:latest \u2014 CPU inference via Ollama",
+      "litellm_params": {
+        "model": "ollama_chat/qwen3-coder-next:latest",
         "api_base": "http://ollama.ai-stack:11434",
         "api_key": "none",
         "max_tokens": 4096
@@ -137,7 +227,7 @@
       "description": "llama3.1:8b-instruct-q4_K_M \u2014 remote Ollama on macbook-m1",
       "litellm_params": {
         "model": "ollama_chat/llama3.1:8b-instruct-q4_K_M",
-        "api_base": "http://TC25.mynetworksettings.com:11434",
+        "api_base": "http://10.19.208.118:11434",
         "api_key": "none",
         "max_tokens": 4096
       },
