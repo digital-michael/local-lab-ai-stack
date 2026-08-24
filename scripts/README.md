@@ -15,7 +15,7 @@ Run any script with `--help` or `-h` for full usage details, options, and exampl
 - [Running Operations](#running-operations) — `start.sh` · `status.sh` · `backup.sh` · `inhibit.sh`
 - [Reconfiguration](#reconfiguration)
 - [M2M Auth Wiring](#m2m-auth-wiring) — `m2m-authentik-bootstrap.sh`
-- [Troubleshooting](#troubleshooting) — `diagnose.sh`
+- [Troubleshooting](#troubleshooting) — `diagnose.sh` · `model-inventory.sh`
 - [Shutdown and Teardown](#shutdown-and-teardown) — `stop.sh` · `undeploy.sh`
 - [Worker Node Scripts](#worker-node-scripts) — `node.sh` · `bootstrap.sh` · `heartbeat.sh` · `register-node.sh`
 - [Subdirectory Scripts](#subdirectory-scripts) — `bare_metal/setup-macos.sh` · `podman/setup-worker.sh`
@@ -83,6 +83,9 @@ Validates Authentik OIDC issuer/JWKS endpoints for M2M, optionally writes issuer
 
 ### `diagnose.sh`
 Per-service diagnostic walkthrough. `quick` mode (default): systemd state, container health, network existence, dependency reachability, model availability. `full` mode: adds integration probes, config validation, secret inventory, volume paths, resource pressure, and API readiness probes. Exit codes: `0` all pass, `1` warnings/failures, `2` stack not deployed.
+
+### `model-inventory.sh`
+Per-node model inventory. For the controller and every node in `configs/nodes/*.json`: live-probes reachability (Ollama `/api/tags`; vLLM `/v1/models` on the controller) and cross-references against LiteLLM's actually-registered routes (via its authenticated `/model/info` API — `litellm_params` is encrypted at rest, so raw SQL can't read `api_base`). Flags models available-but-unregistered and registered-but-not-available (stale routes). Cloud/API-hosted models (openai/groq/anthropic/mistral) are reported separately — registration + secret-provisioned status only, no live provider calls. `--json` emits structured output for a future web UI; `--color` dims unregistered/unavailable/stale entries in red.
 
 ---
 
