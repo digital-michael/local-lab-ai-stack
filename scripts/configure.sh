@@ -377,7 +377,11 @@ EOF
                     echo "EnvironmentFile=${ai_stack_dir//\$HOME/%h}/configs/run/${svc}.env"
                 fi
             fi
-            jq -r --arg s "$svc" '.services[$s].environment // {} | to_entries[] | select(.key != "DATABASE_URL") | "Environment=" + .key + "=" + .value' "$CONFIG_FILE"
+            # Value is quoted via @json (JSON's \" / \\ escaping matches systemd's
+            # own quoted-string escaping) — unquoted values silently truncate at
+            # the first space when systemd parses Environment=, since it splits
+            # on whitespace outside quotes.
+            jq -r --arg s "$svc" '.services[$s].environment // {} | to_entries[] | select(.key != "DATABASE_URL") | "Environment=" + .key + "=" + (.value | @json)' "$CONFIG_FILE"
 
             # Ports
             jq -r --arg s "$svc" '.services[$s].ports[]? | "PublishPort=" + (if .bind then .bind + ":" else "" end) + (.host|tostring) + ":" + (.container|tostring)' "$CONFIG_FILE"
