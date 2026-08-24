@@ -210,49 +210,54 @@ here so that when they are brought back online, the deployment path is clear.
 | LiteLLM external access enabled | 2026-07-11 | New OAuth2 provider + Application created in VPS Authentik (old credentials were from decommissioned CENTAURI Authentik). `litellm-public` Traefik router added for `litellm.photondatum.space`. Caddy block added. `GENERIC_CLIENT_ID`, `GENERIC_CLIENT_SECRET`, `GENERIC_REDIRECT_URI`, `PROXY_BASE_URL` updated in `litellm.env`. LiteLLM restarted. No forwardAuth on public router — LiteLLM manages its own OAuth SSO. |
 | Traefik `nocache` middleware added | 2026-07-11 | `Cache-Control: no-store` on all auth-gated routers (`openwebui`, `openwebui-public`); prevents browser cache from bypassing forwardAuth on session expiry. Briefly removed during redirect loop investigation (false hypothesis); re-added once actual root cause identified. |
 | Redirect loop on agent.photondatum.space and flowise.photondatum.space resolved | 2026-07-11 | Root cause: `access_token_validity` on both ProxyProviders stored as `1 day, 0:00:00` (Python timedelta repr, no `=` separator). `timedelta_from_string()` crashed on every token exchange — callback returned 302 without Set-Cookie, no session ever created. Diagnosed via Authentik event log: alternating "Application authorized" + "General system exception (127.0.0.1)" pairs. Fixed by setting `hours=24` in both Agent (OpenWebUI) and Flowise Proxy providers via admin UI. See Authentik lessons §18 caveat and §19. |
+| OpenWebUI trusted email header SSO — re-applied | 2026-07-20 | Regressed since 2026-07-11: the row above recorded the vars added directly to `openwebui.container`, but `config.json` (both live `~/ai-stack/configs/config.json` and the repo's `configs/config.json.example` template) never had them, so a subsequent `generate-quadlets` run silently dropped them again — confirmed missing via `podman inspect openwebui`. Verified `akadmin` and `digital-michael` both resolve to the same Authentik email (`michaelbiggerstaff7@gmail.com`) before enabling, so no orphaned OpenWebUI account would be created. Re-added `WEBUI_AUTH_TRUSTED_EMAIL_HEADER` / `WEBUI_AUTH_TRUSTED_NAME_HEADER` to `config.json` this time (not just the quadlet) so it survives future `generate-quadlets` runs; ran `generate-quadlets` + restarted `openwebui.service`. |
+| Caddy `dial_timeout` + access logging added to CENTAURI routes | 2026-07-20 | Investigating a one-off "AI Stack offline" delay report (CENTAURI awake, tailscale reachable, ~2 min of failures) found Caddy had **no access logging at all** (`log` directive absent from every site block) and no `reverse_proxy` `dial_timeout` — so the incident left no timestamped evidence on either side, and a dead/asleep CENTAURI could hang a request rather than fail fast. Added `dial_timeout 5s` and `log` to the `agent`, `dashboard`, `ki`, `flowise`, and `litellm` blocks in `/etc/caddy/Caddyfile` (validated with `caddy validate` before reload, backup taken first). Root cause of the original delay was not conclusively identified — no matching dial-failure entries found in 30 days of prior Caddy logs — but a repeat is now diagnosable. Active health checks (`health_uri`) were deliberately not added — each backend app needs a verified no-auth probe path first, and a wrong one would falsely mark a healthy CENTAURI down. |
+| `docs/instances/photondatum.md` Caddyfile mirror corrected | 2026-07-20 | Despite the "Flowise Caddyfile host header fixed" row above claiming "Repo Caddyfile updated to match," this doc's embedded Caddyfile still showed `header_up Host flowise.stack.localhost` — the update never actually happened. Corrected to `flowise.photondatum.space` and refreshed the whole embedded block to match the live file (dial_timeout/log additions above, litellm block added — it was missing entirely). |
+| `m2m-iam-crud` playbook — stale `auth.stack.localhost` replaced | 2026-07-20 | `configs/traefik/dynamic/services.yaml` records that the `auth.stack.localhost` Traefik router was removed when Authentik moved to the VPS, so all 8 references in `docs/library/actions/m2m-iam-crud/m2m-iam-crud-SKILL.md` (issuer/JWKS/provision/token URLs) pointed at a hostname with no route. Replaced with `auth.photondatum.space` throughout. |
+| Grafana + Prometheus exposed publicly | 2026-07-20 | DNS A records added (`grafana.photondatum.space`, `prometheus.photondatum.space` → `66.228.37.60` — first attempt had a typo, `66.226.37.60`, caught and corrected). Traefik `grafana-public`/`prometheus-public` routers added to `services.yaml`. Caddy blocks added on the VPS (with `dial_timeout 5s` + `log`, matching the pattern above). Authentik Grafana/Prometheus ProxyProviders' `external_host`/`redirect_uris` updated from `*.stack.localhost` to `*.photondatum.space` via the API (PATCH required `internal_host` + `mode` explicitly in the request body even though unchanged — DRF partial-update validator reads the raw payload, not the merged instance; a bare `external_host`-only PATCH 400'd with "Internal host cannot be empty"). |
+| Homepage widget secrets wired (Authentik, Qdrant, Grafana) | 2026-07-20 | `services.yaml` referenced `{{HOMEPAGE_VAR_AUTHENTIK_TOKEN}}`, `{{HOMEPAGE_VAR_QDRANT_API_KEY}}`, `{{HOMEPAGE_VAR_GRAFANA_USER}}`, `{{HOMEPAGE_VAR_GRAFANA_PASS}}` but none were ever wired into `config.json` — same regression class as the OpenWebUI SSO fix. Created Podman secrets (`homepage_authentik_token` — the existing non-expiring `homepage-widget` Authentik token, never actually used; `homepage_grafana_user`/`homepage_grafana_pass` — existing `admin`/`admin` from `grafana.ini`) and wired all four (plus the pre-existing `qdrant_api_key`) into `homepage.secrets` in both `config.json` and `config.json.example`. Verified: Authentik 403s gone, Qdrant proxy returns 200, Grafana basic auth confirmed working against `/api/org` despite `auth.proxy` being enabled. See [Homepage lessons learned §1](../library/framework_components/homepage/lessons_learned.md#1-homepage_var-placeholders-silently-resolve-empty-if-never-wired-into-configjson). |
+| `configs/homepage/` tracked in the repo for the first time | 2026-07-20 | Never existed in the repo at all (unlike Traefik's dynamic config, which is tracked and synced) — `services.yaml`, `settings.yaml`, `custom.js`, `custom.css`, `bookmarks.yaml`, `docker.yaml`, `kubernetes.yaml`, `proxmox.yaml` copied in from the deployed `~/ai-stack/configs/homepage/`. Added `homepage/` to the framework_components README-agent.md table (along with `caddy/`, also previously missing despite having its own docs directory). |
+| Dashboard LAN/public link toggle added (`custom.js`) | 2026-07-20 | Homepage's service tiles mixed `*.stack.localhost` and `*.photondatum.space` hrefs inconsistently. Added client-side link rewriting in `custom.js`: when the dashboard itself is viewed via `dashboard.photondatum.space`, LAN hrefs (`openwebui`, `flowise`, `litellm`, `ki`, `grafana`, `prometheus` `.stack.localhost`) are rewritten to their public equivalents; viewed locally, links stay LAN as-is. Has to be client-side — the server can't know which hostname the viewer used. See [Homepage lessons learned §2](../library/framework_components/homepage/lessons_learned.md#2-toggling-lan-vs-public-service-links-requires-client-side-customjs). |
+| LAN (`*.stack.localhost`) access restored for 6 services | 2026-07-20 | Building the link toggle above surfaced that the LAN routes it points to were already broken for every service except Knowledge Index: `openwebui`, `flowise`, `dashboard`, `litellm`, and (freshly, from the Grafana/Prometheus change above) `grafana`/`prometheus` all 404'd — Authentik itself returns the 404 (`x-powered-by: authentik`), because each service's single ProxyProvider had its `external_host` migrated to the public hostname at some point with nothing preserving the LAN path. Since these backend ports are all bound to `127.0.0.1` only, the Traefik vhost was the *only* way another LAN device could reach them. Fixed by creating a second "LAN" ProxyProvider + Application for `agent`, `flowise`, `homepage`, `grafana`, and `prometheus` (mirroring the existing `knowledge-index-lan` pattern), each bound to the *same* access policy as its public counterpart, all enrolled in the Embedded Outpost. `litellm` handled differently — it has no ProxyProvider at all (public or LAN); removed the stray `authentik` middleware from its LAN Traefik router instead, matching `litellm-public`'s no-forwardAuth design (avoids a double OIDC round-trip). Flowise additionally had **no LAN Traefik router at all** — added one. Verified all 6 end-to-end (302/200 instead of 404). See [Authentik lessons learned §20](../library/framework_components/authentik/lessons_learned.md#20-migrating-a-proxyproviders-external_host-to-public-silently-kills-lan-access). |
 
 ## Outstanding — Known Gaps
 
-### B. Create akadmin Forgejo Account and Promote to Admin
+### D. File Transfer Performance — photondatum.space → CENTAURI
 
-**Why:** akadmin is the Authentik admin but has no Forgejo account. Without a Forgejo account, akadmin cannot administer the git service.
+**Why:** File uploads through the stack (Caddy → WireGuard tunnel → Traefik → service) are noticeably slow. Investigation and optimization deferred from 2026-07-11.
 
-**Action (as `3pdx7a` on photondatum.space):**
+**Context from discussion:**
 
-```bash
-# 1. Create the Forgejo user
-sudo forgejo admin user create \
-  --username akadmin \
-  --email akadmin@photondatum.space \
-  --password <temporary-password> \
-  --admin \
-  --must-change-password=false
+WireGuard does not compress — compression must happen above the transport layer, before data enters the tunnel. The VPS uplink is likely the primary constraint, not WireGuard overhead itself.
 
-# 2. Verify the user was created and has admin flag
-sudo forgejo admin user list | grep akadmin
-```
+**Two axes to investigate:**
 
-Then, to link akadmin's Authentik OIDC identity to the Forgejo account:
+**A) Compression options:**
 
-1. Log into Forgejo as `akadmin` (with the temporary password set above)
-2. User Settings → Security → Linked Accounts → Link **Authentik** account
-3. Complete the Authentik SSO flow
-4. After linking, akadmin logs in via Authentik SSO and Forgejo recognises them as admin
+- `rsync -z` / `scp -C` — compress at transfer layer before WireGuard encryption. Effective for config files, text, logs. Negligible gain on binary model files (GGUF already compressed).
+- `zstd` via `tar -I zstd | ssh ...` — faster than gzip at similar ratios; prefer for any large-file admin ops.
+- `rsync --skip-compress=gguf,bin,safetensors` — avoid wasting CPU compressing already-binary formats.
+- Caddy `encode gzip zstd` — compresses HTTP *responses* only, not user uploads. Limited applicability here.
 
-**See:** [Forgejo lessons learned §4](../library/framework_components/forgejo/lessons_learned.md#4-first-oidc-login-requires-link_account-flow--pre-create-user-to-simplify)
+**B) Structural improvements:**
+
+- **rsync delta sync** for config/repo pushes — only transfers changed byte ranges. A 50MB file with 2KB of changes transfers in milliseconds.
+- **Pull rather than push** — CENTAURI pulling from Forgejo (`git pull`) is more efficient than pushing from photondatum.space.
+- **`rsync --bwlimit`** during inference hours — prevent large transfers from saturating the tunnel while Ollama is serving requests.
+- **Direct tailnet for large KI ingests** — route bulk document ingestion to `100.64.0.4:8443/v1` directly instead of through Caddy, bypassing one buffering hop.
+- **MTU fragmentation check** — WireGuard default MTU is 1420. If VPS upstream MTU is lower, packets fragment. Test: `ping -M do -s 1400 100.64.0.4`. If this fails, lower WireGuard interface MTU to 1280–1380 on both ends.
+
+**First step when picking this up:**
+
+Baseline the actual throughput: `rsync --progress --stats <test-file> 3pdx7@100.64.0.4:~/` and compare against the VPS provider's stated bandwidth cap. If throughput is near the cap, the fix is VPS tier or direct tailnet routing. If it's well below, MTU fragmentation or TCP-over-UDP overhead is the likely culprit.
 
 ---
 
-### C. Agent-Only Role + Invitation Flow
+### E. `knowledge-index-lan` Application Has No Access Policy Binding
 
-**Why:** External users (e.g. testers, guests) should be able to access `agent.photondatum.space` only — no other stack services. First invitee: `tlvulcan7@gmail.com`.
+**Why:** Found 2026-07-20 while creating the same `-lan` pattern for 5 other services (see Completed log). `knowledge-index-lan` (created 2026-07-10) has **no** `PolicyBinding` at all — unlike the 5 new `-lan` applications, which are each bound to the same access policy as their public counterpart. This means `ki.stack.localhost` is currently open to *any* authenticated Authentik user, regardless of bundle membership — inconsistent with `knowledge-index`'s public route, which requires `bundle-developer`/`bundle-admin`.
 
-**Planned work:**
-
-1. Create an `agent-only` group in Authentik
-2. Create an ExpressionPolicy that allows `bundle-admin` OR `agent-only` group membership for the Agent (OpenWebUI) application
-3. Configure Authentik invitation flow so that invited users land in `agent-only` group automatically on signup
-4. Send invitation to `tlvulcan7@gmail.com` and verify they can reach `agent.photondatum.space` but not flowise, dashboard, etc.
+**Fix:** In Authentik admin → Applications → `Knowledge Index (LAN)` → bind the existing `access-knowledge-index` policy (order=0, enabled=true), matching the pattern used for the other five `-lan` applications.
 
 ---
 
