@@ -6,7 +6,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CONFIG_FILE="${CONFIG_FILE:-$PROJECT_ROOT/configs/config.json}"
+AI_STACK_DIR="${AI_STACK_DIR:-$HOME/ai-stack}"
+# Runtime config lives with the deployed instance ($AI_STACK_DIR), not the repo checkout —
+# this is git-ignored and never touched by `git pull`/`checkout`/`stash` on the repo.
+# See configs/config.json.example for the tracked bootstrap template (used by `init`).
+CONFIG_FILE="${CONFIG_FILE:-$AI_STACK_DIR/configs/config.json}"
 QUADLET_DIR="${QUADLET_DIR:-$HOME/.config/containers/systemd}"
 NODE_PROFILE_FILE="${NODE_PROFILE_FILE:-$PROJECT_ROOT/configs/node_profile}"
 
@@ -48,7 +52,8 @@ Commands:
   help                      Show this message
 
 Environment:
-  CONFIG_FILE   Path to config.json  (default: ./configs/config.json)
+  AI_STACK_DIR  Deployed instance root (default: ~/ai-stack)
+  CONFIG_FILE   Path to config.json  (default: $AI_STACK_DIR/configs/config.json)
   QUADLET_DIR   Output dir for quadlets (default: ~/.config/containers/systemd)
 EOF
 }
@@ -79,11 +84,12 @@ cmd_init() {
         return 0
     fi
     mkdir -p "$(dirname "$CONFIG_FILE")"
-    cp "$PROJECT_ROOT/configs/config.json" "$CONFIG_FILE" 2>/dev/null || {
-        echo "ERROR: Default config template not found at $PROJECT_ROOT/configs/config.json" >&2
+    cp "$PROJECT_ROOT/configs/config.json.example" "$CONFIG_FILE" 2>/dev/null || {
+        echo "ERROR: Default config template not found at $PROJECT_ROOT/configs/config.json.example" >&2
         exit 1
     }
     echo "Config initialized at $CONFIG_FILE"
+    echo "Review it before deploying — it was copied from the repo's tracked example, not generated fresh for this node."
 }
 
 cmd_get() {
