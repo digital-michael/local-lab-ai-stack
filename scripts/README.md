@@ -12,7 +12,7 @@ Run any script with `--help` or `-h` for full usage details, options, and exampl
 
 - [Environment Setup](#environment-setup) — `validate-system.sh` · `install.sh` · `generate-tls.sh`
 - [First Deployment](#first-deployment) — `configure.sh` · `deploy.sh` · `pull-models.sh`
-- [Running Operations](#running-operations) — `start.sh` · `status.sh` · `backup.sh` · `inhibit.sh`
+- [Running Operations](#running-operations) — `start.sh` · `status.sh` · `backup.sh` · `cleanup.sh` · `inhibit.sh`
 - [Reconfiguration](#reconfiguration)
 - [M2M Auth Wiring](#m2m-auth-wiring) — `m2m-authentik-bootstrap.sh`
 - [Troubleshooting](#troubleshooting) — `diagnose.sh` · `model-inventory.sh`
@@ -58,6 +58,9 @@ Shows per-service health. Reads quadlet state from systemd and container health 
 
 ### `backup.sh`
 Backs up all persistent stack data to `$AI_STACK_DIR/backups/<timestamp>/`: PostgreSQL (`pg_dump`), Qdrant (REST snapshot), libraries directory, and configs (excluding TLS private keys). Retains the 7 most recent sets. Designed to run as a systemd timer or cron job.
+
+### `cleanup.sh`
+Placeholder for future maintenance needs — currently just `images` (`podman image prune`, dangling ai-stack images only), `images-all` (`podman image prune -a`, all unused ai-stack images incl. tagged), and `postgres` (`VACUUM ANALYZE` every database in the cluster). Image pruning is filtered to this stack's own images via its `com.docker.compose.project=ai-stack` label, so it won't touch unrelated podman workloads on the same host. `report` shows disk usage and postgres dead-tuple counts without changing anything. `--dry-run` available on every command.
 
 ### `inhibit.sh`
 Sleep/hibernation inhibitor for worker nodes. Acquires a sleep lock (`caffeinate` on macOS, `systemd-inhibit` on Linux) while the stack is running. Opt-in via `"sleep_inhibit": true` in `config.json`. Controller nodes are always skipped.
