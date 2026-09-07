@@ -24,7 +24,7 @@ _Nothing in flight._
 
 1. ✅ **Phase 1 — MD⇄PDF, full access-surface scaffold** — `services/conversions/` (FastAPI
    app, `converters/` registry, `client.py`, `cli.py`, Jinja2 web UI), registered in
-   `configs/config.json` (port 8300), Traefik routes added (`conversions`,
+   `configs/config.json.example` (port 8300), Traefik routes added (`conversions`,
    `conversions-api`, `conversions-mcp`), pytest suite under `testing/conversions/`,
    component docs under `docs/library/framework_components/conversions/`. REST API, CLI,
    browser UI, and MCP tool (`convert_document`) all implemented together per D-043.
