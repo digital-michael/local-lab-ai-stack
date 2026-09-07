@@ -697,7 +697,7 @@ Concrete protocol specification for the **WAN** discovery profile.
 
 ---
 
-### D-041 — Conversions Service: Architecture, Engine Choices, and Access Surfaces
+### D-043 — Conversions Service: Architecture, Engine Choices, and Access Surfaces
 
 | Field | Value |
 |---|---|

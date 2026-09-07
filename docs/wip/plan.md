@@ -18,7 +18,7 @@ _Nothing in flight._
 ### BL-018 — Conversions Service: Document Format Conversion
 **Priority:** P2
 **Status:** Phase 1 implemented 2026-08-12 (not yet deployed/verified in a running stack) — Phases 2–4 queued
-**Decisions:** D-041
+**Decisions:** D-043
 
 **Steps:**
 
@@ -27,7 +27,7 @@ _Nothing in flight._
    `configs/config.json` (port 8300), Traefik routes added (`conversions`,
    `conversions-api`, `conversions-mcp`), pytest suite under `testing/conversions/`,
    component docs under `docs/library/framework_components/conversions/`. REST API, CLI,
-   browser UI, and MCP tool (`convert_document`) all implemented together per D-041.
+   browser UI, and MCP tool (`convert_document`) all implemented together per D-043.
 
 2. ⬜ **Deploy and verify** — `podman build` the image, `scripts/configure.sh
    generate-quadlets`, provision the `conversions_api_key` secret, start the service, run
