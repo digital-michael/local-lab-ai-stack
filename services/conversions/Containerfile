@@ -1,0 +1,30 @@
+FROM docker.io/library/python:3.12-slim
+
+# pandoc: MD/HTML/DOCX conversion engine
+# libpango/libcairo + fonts: WeasyPrint's HTML->PDF rendering backend
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pandoc \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libgdk-pixbuf2.0-0 \
+        libcairo2 \
+        fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app.py client.py cli.py ./
+COPY converters ./converters
+COPY templates ./templates
+
+# Non-root: conversions handles untrusted uploaded documents (crafted PDFs,
+# zip-bomb-style docx/xlsx in later phases) — least privilege inside the container.
+RUN useradd --no-create-home --shell /usr/sbin/nologin conversions
+USER conversions
+
+EXPOSE 8300
+
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8300"]

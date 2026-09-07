@@ -15,6 +15,35 @@ _Nothing in flight._
 
 ## Next (selected)
 
+### BL-018 — Conversions Service: Document Format Conversion
+**Priority:** P2
+**Status:** Phase 1 implemented 2026-08-12 (not yet deployed/verified in a running stack) — Phases 2–4 queued
+**Decisions:** D-041
+
+**Steps:**
+
+1. ✅ **Phase 1 — MD⇄PDF, full access-surface scaffold** — `services/conversions/` (FastAPI
+   app, `converters/` registry, `client.py`, `cli.py`, Jinja2 web UI), registered in
+   `configs/config.json` (port 8300), Traefik routes added (`conversions`,
+   `conversions-api`, `conversions-mcp`), pytest suite under `testing/conversions/`,
+   component docs under `docs/library/framework_components/conversions/`. REST API, CLI,
+   browser UI, and MCP tool (`convert_document`) all implemented together per D-041.
+
+2. ⬜ **Deploy and verify** — `podman build` the image, `scripts/configure.sh
+   generate-quadlets`, provision the `conversions_api_key` secret, start the service, run
+   the verification steps from the conversions ADR / implementation plan (health check, CLI
+   round-trip, browser upload through Authentik, MCP tool call, `pytest testing/conversions/`).
+
+3. ⬜ **Phase 2 — HTML⇄{md,pdf}** — new `converters/` modules, likely via pandoc's native
+   HTML support; no router/CLI/MCP changes expected (registry-driven).
+
+4. ⬜ **Phase 3 — DOCX⇄{md,pdf,html}** — pandoc native first; evaluate LibreOffice-headless
+   fallback only if fidelity proves insufficient (see conversions `guidance.md`).
+
+5. ⬜ **Phase 4 — XLSX→{csv,md,json}** — output shape not yet decided; resolve at phase start.
+
+---
+
 ### BL-011 — Headscale Architecture Migration: Phase 1 (ACL hardening + LAN break-glass)
 **Priority:** P1  
 **Status:** ✅ done — all 4 steps complete 2026-05-05  

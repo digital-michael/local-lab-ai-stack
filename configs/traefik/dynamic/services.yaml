@@ -114,6 +114,38 @@ http:
         - secure-headers
       tls: {}
 
+    # conversions: web UI (form + download) is browser-facing, gated by Authentik SSO
+    # like any other dashboard service. /v1 (API/CLI) and /mcp (agents) cannot present
+    # a browser session, so they use API-key auth in app.py instead — same split as
+    # knowledge-index's /mcp and /admin routers above.
+    conversions:
+      rule: "Host(`conversions.stack.localhost`)"
+      entryPoints:
+        - websecure
+      service: conversions
+      middlewares:
+        - authentik
+        - secure-headers
+      tls: {}
+
+    conversions-api:
+      rule: "Host(`conversions.stack.localhost`) && PathPrefix(`/v1`)"
+      entryPoints:
+        - websecure
+      service: conversions
+      middlewares:
+        - secure-headers
+      tls: {}
+
+    conversions-mcp:
+      rule: "Host(`conversions.stack.localhost`) && PathPrefix(`/mcp`)"
+      entryPoints:
+        - websecure
+      service: conversions
+      middlewares:
+        - secure-headers
+      tls: {}
+
     litellm:
       rule: "Host(`litellm.stack.localhost`)"
       entryPoints:
@@ -180,6 +212,11 @@ http:
       tls: {}
 
   services:
+    conversions:
+      loadBalancer:
+        servers:
+          - url: "http://conversions.ai-stack:8300"
+
     openwebui:
       loadBalancer:
         servers:

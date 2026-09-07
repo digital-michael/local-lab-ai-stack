@@ -297,6 +297,49 @@
         "gpu": null
       }
     },
+    "conversions": {
+      "image": "localhost/conversions",
+      "tag": "0.1.0",
+      "container_name": "conversions",
+      "dns_alias": "conversions.ai-stack",
+      "depends_on": [],
+      "ports": [
+        {
+          "host": 8300,
+          "container": 8300,
+          "bind": "127.0.0.1"
+        }
+      ],
+      "volumes": [],
+      "environment": {
+        "MAX_UPLOAD_BYTES": "26214400"
+      },
+      "secrets": [
+        {
+          "name": "conversions_api_key",
+          "target": "API_KEY"
+        }
+      ],
+      "health_check": {
+        "command": "bash -c 'echo > /dev/tcp/localhost/8300'",
+        "interval": "30s",
+        "retries": 3,
+        "timeout": "5s"
+      },
+      "mcp": {
+        "sse_endpoint": "/mcp/sse",
+        "message_endpoint": "/mcp/messages",
+        "tools": [
+          "convert_document"
+        ],
+        "transport": "http-sse"
+      },
+      "resources": {
+        "cpus": 1,
+        "memory": "1024m",
+        "gpu": null
+      }
+    },
     "authentik": {
       "image": "ghcr.io/goauthentik/server",
       "tag": "2026.2.1",
