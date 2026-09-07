@@ -1,0 +1,50 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"import litellm; print\\(litellm.__file__\\)\")",
+      "Read(//opt/homebrew/lib/python3.14/site-packages/litellm/**)",
+      "Read(//opt/homebrew/lib/python3.14/site-packages/litellm/experimental_mcp_client/**)",
+      "Bash(python3 -c \"import mcp; print\\(mcp.__file__\\)\")",
+      "Read(//opt/homebrew/lib/python3.14/site-packages/mcp/**)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d['choices'][0]['message']['content']\\)\")",
+      "Bash('/Users/michaelbiggerstaff/Documents/Entities/Photon Datum/cortex/mcp-console/bin/mcp-console' -server '/Users/michaelbiggerstaff/Documents/Entities/Photon Datum/cortex/mcp-local/bin/mcp-local' -run ledger_create_item project=mcp-local type=defect 'title=litellm.yaml'\\\\''s mcp_servers.mcp_local.env block is missing LITELLM_MASTER_KEY/OLLAMA_HOST -- delegate_call would fail via LiteLLM'\\\\''s own MCP gateway' 'description=Found 2026-08-11 while freshening cortex-stack-implementation.md against the current install base. Verified directly in litellm python package source \\(/opt/homebrew/lib/python3.14/site-packages/litellm/experimental_mcp_client/client.py, _get_safe_stdio_env\\): when litellm.yaml'\\\\''s mcp_servers.mcp_local.env block is explicitly set \\(it is\\), LiteLLM uses ONLY those listed keys for the mcp-local subprocess it spawns -- it does NOT merge with or fall back to any parent-environment allowlist. That fallback-allowlist behavior only applies when no env: block is given at all. *)",
+      "Bash(python3 -c ' *)",
+      "Bash(sort -t- -k2 -n)",
+      "Bash(python3 -c \"import httpx, pytest; print\\('deps ok'\\)\")",
+      "Bash(make clean *)",
+      "Bash(make help *)",
+      "mcp__mcp-local__ledger_get_item",
+      "mcp__mcp-local__ledger_update_item",
+      "Bash(claude mcp *)",
+      "Bash(make register-claude *)",
+      "Bash(make status *)",
+      "Bash(make unregister *)",
+      "Bash(rm -f \"/Users/michaelbiggerstaff/.local/bin/mcp-common-echo-example\" *)",
+      "Bash(./bin/echo-server-local -version)",
+      "Bash(./bin/echo-server-federated -version)",
+      "Bash(./bin/echo-server-global -version)",
+      "Bash(make test *)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(./bin/mcp-local -run delegate_call target=qwen3.5:0.8b prompt=\"say hi\" backend=direct_ollama context_window=12000 stream=false)",
+      "Bash(curl -s http://127.0.0.1:11434/api/ps)",
+      "Bash(./bin/mcp-local -run delegate_call target=cortex-local-nano prompt=\"say hi\" think=false context_window=10000 stream=false)",
+      "Bash(LITELLM_MASTER_KEY=<LITELLM_MASTER_KEY> ./bin/mcp-local -run delegate_call target=cortex-local-nano prompt=\"say hi\" think=false context_window=10000 stream=false)",
+      "Bash(LITELLM_MASTER_KEY=<LITELLM_MASTER_KEY> ./bin/mcp-local -run delegate_call target=cortex-local-nano prompt=\"say hi\" context_window=99999 stream=false)",
+      "Bash(curl -s -m 5 http://127.0.0.1:4000/v1/models -H \"Authorization: Bearer <LITELLM_MASTER_KEY>\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(len\\(d['data']\\), 'models loaded'\\)\")",
+      "Bash(LITELLM_MASTER_KEY=<LITELLM_MASTER_KEY> ./bin/mcp-local -run delegate_call target=cortex-local-nano prompt=\"say hi\" think=false stream=false)",
+      "Bash(LITELLM_MASTER_KEY=<LITELLM_MASTER_KEY> ./bin/mcp-local -run delegate_call target=qwen3.5:2b prompt=\"say hi\" think=false stream=false)",
+      "mcp__mcp-local__ledger_list_items",
+      "mcp__mcp-local__ledger_search",
+      "Bash(gofmt -l internal/tools/diagnostics/ internal/tools/system/ internal/tools/workspace/)",
+      "Bash(gofmt -d internal/tools/system/system_test.go)",
+      "Bash(GOFLAGS=-mod=mod GOPROXY=off go mod tidy)",
+      "Bash(gofmt -l internal/tools/conversion/)",
+      "Bash(./bin/echo-server-local)",
+      "Bash(python3 -m json.tool)"
+    ],
+    "additionalDirectories": [
+      "/Users/michaelbiggerstaff/.local/bin"
+    ]
+  }
+}
