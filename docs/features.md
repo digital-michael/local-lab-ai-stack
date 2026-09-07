@@ -189,10 +189,11 @@ The full stack state — databases, vector store, model files, configs — can b
 ### `[X]` MCP Tool Integration
 AI agents can call external tools during a conversation by following the Model Context Protocol standard.
 - REST API for knowledge search and document ingestion: **available**
-- MCP SSE/HTTP transport for agent tool-calling over `/mcp/sse`: **available**
-- `search_knowledge` and `ingest_document` MCP tools; auth guard on `API_KEY`
+- MCP Streamable HTTP transport (current spec) over `/mcp`: **available** — use this for new clients
+- MCP legacy HTTP+SSE transport over `/mcp/sse` + `/mcp/messages`: **available** — kept for clients not yet migrated off the spec-deprecated transport (D-042)
+- `search_knowledge` and `ingest_document` MCP tools; auth guard on `API_KEY`; DNS-rebinding protection via Host/Origin allowlist
 - Cross-node routing in `search_knowledge` mirrors REST `/query` behaviour
-- _Powered by: [Knowledge Index Service](../services/knowledge-index/app.py)_ · _Delivered: [Phase 7](ai_stack_blueprint/ai_stack_checklist.md#phase-7--knowledge-index-mcp-integration)_
+- _Powered by: [Knowledge Index Service](../services/knowledge-index/app.py)_ · _Delivered: [Phase 7](ai_stack_blueprint/ai_stack_checklist.md#phase-7--knowledge-index-mcp-integration)_, Streamable HTTP added [D-042](decisions.md#d-042--add-streamable-http-transport-for-mcp-keep-legacy-sse-alongside)
 
 ### `[X]` Localhost Library Discovery
 The knowledge base can be populated by scanning a local filesystem directory for pre-packaged `.ai-library` bundles — no manual upload required.

@@ -144,7 +144,7 @@ class TestCleanContent:
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
-def ki_client():
+def ki_client(ki_headers: dict):
     """Skip if knowledge-index is not reachable."""
     try:
         resp = httpx.get(f"{KNOWLEDGE_INDEX_URL}/health", timeout=5.0)
@@ -153,9 +153,7 @@ def ki_client():
     except Exception as exc:
         pytest.skip(f"knowledge-index not reachable: {exc}")
 
-    ki_key = os.environ.get("KNOWLEDGE_INDEX_API_KEY", "")
-    headers = {"Authorization": f"Bearer {ki_key}"} if ki_key else {}
-    return httpx.Client(base_url=KNOWLEDGE_INDEX_URL, headers=headers, timeout=10.0)
+    return httpx.Client(base_url=KNOWLEDGE_INDEX_URL, headers=ki_headers, timeout=10.0)
 
 
 @pytest.mark.requires_ki

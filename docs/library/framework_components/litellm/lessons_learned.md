@@ -1,5 +1,5 @@
 # LiteLLM — Lessons Learned
-**Last Updated:** 2026-03-21 UTC (Phase 9c)
+**Last Updated:** 2026-07-11
 
 ## Purpose
 Empirical findings from operating LiteLLM as a routing proxy in the ai-stack. Records behaviour that diverged from documentation, assumptions, or prior expectations. See `guidance.md` for prescriptive decisions and `best_practices.md` for vendor recommendations.
@@ -10,6 +10,7 @@ Empirical findings from operating LiteLLM as a routing proxy in the ai-stack. Re
 
 1. [LITELLM_MASTER_KEY Is a Podman Secret — Cannot Be Read with `jq` from config.json](#1-litellm_master_key-is-a-podman-secret--cannot-be-read-with-jq-from-configjson)
 2. [Unit File Changed Warning Requires `daemon-reload` Before `restart`](#2-unit-file-changed-warning-requires-daemon-reload-before-restart)
+3. [OAuth2 Credentials Do Not Survive Authentik Migration — Must Recreate](#3-oauth2-credentials-do-not-survive-authentik-migration--must-recreate)
 
 ---
 
@@ -75,3 +76,43 @@ systemctl --user is-active litellm.service
 
 ## Rule
 > Any time `configure.sh` or another generator script runs, issue `systemctl --user daemon-reload` before the subsequent `restart`. Make this the standard sequence in runbooks and scripts: generate → pull-models → daemon-reload → restart → health check.
+
+---
+
+## 3 OAuth2 Credentials Do Not Survive Authentik Migration — Must Recreate
+
+**Version:** LiteLLM 1.x, Authentik 2025.2.4
+**Discovered:** 2026-07-11, post-migration to VPS Authentik
+
+## What Happened
+
+After Authentik was migrated from CENTAURI to the VPS (`auth.photondatum.space`),
+the `GENERIC_CLIENT_ID` and `GENERIC_CLIENT_SECRET` in `litellm.env` still
+referenced the old CENTAURI Authentik instance. The OAuth endpoints had been
+updated to `auth.photondatum.space`, but the client credentials were never
+recreated in the new Authentik. LiteLLM's SSO flow silently failed — the
+credentials were simply absent from the new Authentik's database.
+
+## Root Cause
+
+OAuth2 provider client IDs and secrets are stored in Authentik's database. When
+Authentik is decommissioned and replaced with a fresh instance (even at the same
+URL), all previous OAuth2 provider records are gone. Updating the endpoint URLs
+in `litellm.env` is not sufficient — new credentials must also be generated.
+
+## Fix
+
+1. In the new Authentik: Applications → Providers → Create → OAuth2/OpenID Provider
+2. Set redirect URI to `https://litellm.photondatum.space/sso/callback`
+3. Note: the OAuth2 provider does **not** need to be assigned to the Embedded Outpost
+   (outpost is for ProxyProviders only — attempting to assign it will show no
+   available options)
+4. Create an Application linked to the new provider
+5. Update `litellm.env`: `GENERIC_CLIENT_ID`, `GENERIC_CLIENT_SECRET`
+6. Restart LiteLLM
+
+## Rule
+
+> After any Authentik migration, treat all OAuth2 client credentials as invalidated.
+> Audit every service that uses `GENERIC_CLIENT_ID` / `GENERIC_CLIENT_SECRET` or
+> equivalent and recreate the provider records in the new Authentik before testing SSO.

@@ -27,8 +27,10 @@ When proposing, reviewing, or implementing changes that involve a component list
 | Directory | Component |
 |---|---|
 | `authentik/` | Identity provider and SSO gateway |
+| `caddy/` | Public-edge reverse proxy (VPS) and TLS termination |
 | `flowise/` | Low-code AI workflow builder |
 | `grafana/` | Visualization and dashboarding |
+| `homepage/` | Operator dashboard (service tiles, widgets, custom.js/css) |
 | `knowledge-index/` | Query-to-library routing microservice (FastAPI) |
 | `litellm/` | LLM API gateway and proxy |
 | `loki/` | Log aggregation backend |

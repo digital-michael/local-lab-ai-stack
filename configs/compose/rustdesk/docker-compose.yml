@@ -1,0 +1,40 @@
+# RustDesk self-hosted server — photondatum.space
+#
+# Managed by: podman-compose@rustdesk-server.service (user unit, 3pdx7a)
+# Working dir on VPS: /home/3pdx7a/rustdesk-server/
+# Data volume: ./data -> /root (keypair + logs stored here)
+#
+# network_mode: host is required — RustDesk uses non-HTTP ports that cannot
+# route through a Podman container network. No web UI in the standard image.
+#
+# Key mode (-k _): auto-generate a keypair on first run; public key is
+# printed to logs and stored in ./data/. Share the public key with RustDesk
+# clients under Settings → Network → Key.
+#
+# Ports (all direct on host, no proxy):
+#   hbbs — 21115/tcp (NAT type test), 21116/tcp+udp (rendezvous), 21118/tcp (WebSocket)
+#   hbbr — 21117/tcp (relay), 21119/tcp (relay WebSocket)
+#
+# No web UI exists in this image. Authentik cannot protect relay endpoints
+# (non-HTTP protocol). Administrative access is via CLI inside the container.
+
+services:
+  hbbs:
+    container_name: rustdesk-hbbs
+    image: docker.io/rustdesk/rustdesk-server:1.1.15
+    command: hbbs -r photondatum.space:21117 -k _
+    volumes:
+      - ./data:/root:Z
+    network_mode: host
+    userns: keep-id
+    restart: always
+
+  hbbr:
+    container_name: rustdesk-hbbr
+    image: docker.io/rustdesk/rustdesk-server:1.1.15
+    command: hbbr
+    volumes:
+      - ./data:/root:Z
+    network_mode: host
+    userns: keep-id
+    restart: always

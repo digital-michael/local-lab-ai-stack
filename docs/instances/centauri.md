@@ -70,15 +70,11 @@ Cross-group network memberships:
 - LAN: `*.stack.localhost` → self-signed cert, browser trust required
 - External: `*.photondatum.space` → Host header forwarded from Caddy on photondatum.space
 
-**Stale router to remove:**
-`openwebui-public-com` in `configs/traefik/dynamic/services.yaml` references
-`chat.photondatum.com` — a domain not owned by this deployment. Remove this router.
+**Traefik router notes:**
 
-**Temporary bypass to resolve after Authentik moves to VPS:**
-`openwebui-public` bypasses `authentik` middleware because the Authentik outpost
-External URL is currently `auth.stack.localhost` (LAN-only), which breaks external
-browser redirects. Once Authentik is running on the VPS at `https://auth.photondatum.space`,
-restore the `authentik` middleware on this router and remove the bypass.
+- `openwebui-public` — serves `agent.photondatum.space`; `authentik` middleware active
+- `homepage-public` — serves `dashboard.photondatum.space` → homepage container
+- `openwebui-public-com` — removed (referenced `chat.photondatum.com`, not owned)
 
 ---
 
@@ -115,9 +111,9 @@ Chunk size: 400 tokens
 
 | Container | Internal URL (via Traefik) | External URL |
 |---|---|---|
-| `ai-stack-app-openwebui` | `https://openwebui.stack.localhost` | `https://chat.photondatum.space` |
-| `ai-stack-app-flowise` | `https://flowise.stack.localhost` | _(add Caddy route on photondatum.space)_ |
-| `ai-stack-app-homepage` | `https://dashboard.stack.localhost` | _(LAN only currently)_ |
+| `ai-stack-app-openwebui` | `https://openwebui.stack.localhost` | `https://agent.photondatum.space` |
+| `ai-stack-app-flowise` | `https://flowise.stack.localhost` | `https://flowise.photondatum.space` (bundle-admin) |
+| `ai-stack-app-homepage` | `https://dashboard.stack.localhost` | `https://dashboard.photondatum.space` |
 
 OpenWebUI: `openwebui_api_key` must equal `litellm_master_key` — see §4.3 of playbook.
 
@@ -140,8 +136,8 @@ photondatum.space). This PostgreSQL instance serves only application data.
 
 | Container | Port bind | Notes |
 |---|---|---|
-| `ai-stack-obs-prometheus` | `127.0.0.1:9091:9090` | Metrics (localhost only) |
-| `ai-stack-obs-grafana` | via Traefik | `https://grafana.stack.localhost` |
+| `ai-stack-obs-prometheus` | `127.0.0.1:9091:9090` | LAN: `https://prometheus.stack.localhost`. Public (bundle-admin, 2026-07-20): `https://prometheus.photondatum.space` |
+| `ai-stack-obs-grafana` | via Traefik | LAN: `https://grafana.stack.localhost`. Public (bundle-admin, 2026-07-20): `https://grafana.photondatum.space` |
 | `ai-stack-obs-loki` | `127.0.0.1:3100:3100` | Log ingestion (Promtail → here) |
 | `ai-stack-obs-promtail` | none | Ships from this node + workers |
 
@@ -163,10 +159,12 @@ Prometheus config: `configs/prometheus/prometheus.yml`
 
 | Issue | Status | Resolution |
 |---|---|---|
-| `openwebui-public` bypasses `authentik` middleware | Temporary | Remove bypass after Authentik moves to VPS and External URL updated to `https://auth.photondatum.space` |
-| Stale router `openwebui-public-com` (refs `chat.photondatum.com`) | Pending cleanup | Remove from `configs/traefik/dynamic/services.yaml` |
-| Authentik in this stack (before VPS migration) | Pre-migration | Authentik currently runs here; will move to edge node once VPS RAM is confirmed |
-| Forgejo+Authentik OIDC auth | Not wired | Configured on photondatum.space Forgejo, not this node |
+| `openwebui-public` bypasses `authentik` middleware | **Resolved** | `authentik` middleware restored; Authentik now on VPS |
+| Stale router `openwebui-public-com` (refs `chat.photondatum.com`) | **Resolved** | Removed from `configs/traefik/dynamic/services.yaml` |
+| Authentik in this stack (before VPS migration) | **Resolved** | Authentik now runs on edge node (photondatum.space) |
+| Forgejo+Authentik OIDC auth | **Resolved** | Wired via Authentik OAuth2Provider `Forgejo OIDC`; `digital-michael` linked |
+| Stale `authentik.service` on CENTAURI causing forwardAuth 500s | **Pending** | Run: `systemctl --user stop authentik && systemctl --user disable authentik` |
+| Forgejo `ROOT_URL` not set — sends `http://` redirect_uris to Authentik | **Pending** | Add `ROOT_URL = https://git.photondatum.space` to `/etc/forgejo/app.ini` under `[server]`, then `sudo systemctl restart forgejo` |
 
 ---
 

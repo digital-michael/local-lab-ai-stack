@@ -16,9 +16,6 @@
 # Host header: when the upstream is an IP+TLS address, Caddy sets Host to the IP.
 #   Each CENTAURI block uses header_up Host to set the value Traefik expects.
 #
-# SSO: chat.photondatum.space bypasses Authentik — the outpost External URL is
-#   auth.stack.localhost (LAN-only). OpenWebUI's own auth handles external access.
-
 # ══════════════════════════════════════════════════════════════════════════════
 # Static site — served by Caddy's file_server on :80 and :443
 # ══════════════════════════════════════════════════════════════════════════════
@@ -61,20 +58,20 @@ git.photondatum.space {
 # CENTAURI services — proxied over WireGuard tailnet to 100.64.0.4:443
 # ══════════════════════════════════════════════════════════════════════════════
 
-# ── Authentik SSO ─────────────────────────────────────────────────────────────
+# ── Authentik SSO — ai-stack-iam-authentik (local Podman container) ──────────
+# header_up: Traefik forwardAuth passes X-Forwarded-Host with the original
+# service host (e.g. agent.photondatum.space). Caddy must not overwrite it —
+# the Authentik outpost uses it to match the correct proxy provider.
 https://auth.photondatum.space {
-    reverse_proxy 100.64.0.4:443 {
-        header_up Host auth.stack.localhost
-        transport http {
-            tls_insecure_skip_verify
-        }
+    reverse_proxy 127.0.0.1:9000 {
+        header_up X-Forwarded-Host {http.request.header.X-Forwarded-Host}
     }
 }
 
-# ── OpenWebUI — AI chat interface ─────────────────────────────────────────────
-https://chat.photondatum.space {
+# ── OpenWebUI — AI agent interface ───────────────────────────────────────────
+https://agent.photondatum.space {
     reverse_proxy 100.64.0.4:443 {
-        header_up Host chat.photondatum.space
+        header_up Host agent.photondatum.space
         transport http {
             tls_insecure_skip_verify
         }
@@ -85,15 +82,60 @@ https://chat.photondatum.space {
     }
 }
 
+# ── Chat portal — reserved for future social chat (Mattermost) ───────────────
+chat.photondatum.space {
+    root * /var/www/photondatum
+    file_server
+}
+
+# ── Homepage dashboard — CENTAURI stack dashboard ─────────────────────────────
+https://dashboard.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host dashboard.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+        }
+    }
+}
+
 # ── Additional CENTAURI services — uncomment to expose ───────────────────────
 # Pattern: header_up Host to the *.stack.localhost Traefik router for the service.
 
-# https://flowise.photondatum.space {
-#     reverse_proxy 100.64.0.4:443 {
-#         header_up Host flowise.stack.localhost
-#         transport http { tls_insecure_skip_verify }
-#     }
-# }
+# ── Knowledge Index — API + admin panel (knowledge-index service) ─────────────
+# MCP endpoint (/mcp) is also at this URL. Browser access is Authentik-protected.
+# API (/v1) and MCP (/mcp) use application-level API key auth.
+# DNS: ki.photondatum.space A → VPS public IP (must exist before Caddy can get a cert).
+https://ki.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host ki.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+        }
+    }
+}
+
+# ── Flowise — AI workflow builder (admin only) ────────────────────────────────
+https://flowise.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host flowise.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+        }
+    }
+}
+
+# ── LiteLLM — AI proxy / model gateway ───────────────────────────────────────
+# LiteLLM handles its own OAuth SSO (GENERIC_* env vars pointing to Authentik).
+# No Authentik forwardAuth middleware on the Traefik side — double-auth would
+# force two Authentik round-trips per session.
+https://litellm.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host litellm.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+        }
+    }
+}
 
 # https://grafana.photondatum.space {
 #     reverse_proxy 100.64.0.4:443 {

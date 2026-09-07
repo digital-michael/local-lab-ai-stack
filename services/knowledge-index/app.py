@@ -21,9 +21,12 @@
 #     3. If still empty and origin node known — proxy to origin worker KI (fallback)
 #   On workers (knowledge-worker): local Qdrant only; no routing.
 #
-# MCP (Model Context Protocol) — HTTP/SSE transport (D-015):
-#   GET  /mcp/sse            — establish SSE stream (MCP clients connect here)
-#   POST /mcp/messages       — MCP message channel
+# MCP (Model Context Protocol):
+#   POST/GET/DELETE /mcp     — Streamable HTTP transport (current spec, D-042).
+#                              Use this for new clients.
+#   GET  /mcp/sse            — legacy HTTP/SSE transport (D-015; spec deprecated
+#                              2025-03-26). Kept only for clients not yet migrated.
+#   POST /mcp/messages       — legacy HTTP/SSE message channel
 #   Tools: search_knowledge, ingest_document
 #
 # Embedding is performed via the Ollama /api/embeddings endpoint.
@@ -39,7 +42,9 @@ import json
 import os
 import pathlib
 import re
+import socket
 import sys
+from datetime import datetime, timezone
 import uuid
 from typing import Any
 
@@ -50,6 +55,8 @@ import httpx
 from fastapi import FastAPI, HTTPException
 from mcp.server import Server as McpServer
 from mcp.server.sse import SseServerTransport
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import TextContent, Tool
 from pydantic import BaseModel
 from starlette.requests import Request
@@ -703,7 +710,8 @@ def health() -> dict:
 
 
 @app.post("/documents", status_code=201)
-def ingest_document(req: IngestRequest) -> dict:
+def ingest_document(req: IngestRequest, request: Request) -> dict:
+    _check_api_key(request)
     _review_content(req.content, source_endpoint="/documents")
     collection = req.metadata.get("collection", "default")
     _db_set_doc(req.id, collection, req.metadata)
@@ -715,7 +723,8 @@ def ingest_document(req: IngestRequest) -> dict:
 
 
 @app.put("/documents/{doc_id}")
-def update_document(doc_id: str, req: UpdateRequest) -> dict:
+def update_document(doc_id: str, req: UpdateRequest, request: Request) -> dict:
+    _check_api_key(request)
     collection = req.metadata.get("collection", _db_get_doc_collection(doc_id))
     _delete_doc_points(collection, doc_id)
     _db_set_doc(doc_id, collection, req.metadata)
@@ -727,7 +736,8 @@ def update_document(doc_id: str, req: UpdateRequest) -> dict:
 
 
 @app.delete("/documents/{doc_id}")
-def delete_document(doc_id: str) -> dict:
+def delete_document(doc_id: str, request: Request) -> dict:
+    _check_api_key(request)
     collection = _db_get_doc_collection(doc_id)
     _delete_doc_points(collection, doc_id)
     _db_del_doc(doc_id)
@@ -735,8 +745,9 @@ def delete_document(doc_id: str) -> dict:
 
 
 @app.post("/query")
-def query_documents(req: QueryRequest) -> dict:
+def query_documents(req: QueryRequest, request: Request) -> dict:
     """Vector search with cross-node custody routing on controller nodes."""
+    _check_api_key(request)
     try:
         vec = _embed(req.query)
     except httpx.HTTPStatusError as exc:
@@ -1291,13 +1302,43 @@ async def web_search(req: SearchRequest, request: Request) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# MCP — HTTP/SSE transport (D-015)
+# MCP — HTTP transport
 # Two tools: search_knowledge, ingest_document
 # Auth: Bearer token checked against API_KEY env var (when set)
+#
+# Two transports are exposed:
+#   /mcp/sse + /mcp/messages — legacy HTTP+SSE (protocol 2024-11-05, D-015).
+#     Kept for older clients; deprecated by the spec as of 2025-03-26.
+#   /mcp                     — Streamable HTTP (current spec, single endpoint,
+#     POST/GET/DELETE). Prefer this for new clients (VS Code Copilot Chat,
+#     Claude.ai remote connectors, current Claude Desktop/Code).
 # ---------------------------------------------------------------------------
 
 _mcp_server = McpServer("knowledge-index")
-_sse_transport = SseServerTransport("/mcp/messages")
+_sse_transport = SseServerTransport("/mcp/messages/")
+
+# Per MCP spec transport security guidance: validate Host/Origin to prevent
+# DNS-rebinding attacks against a server that (on this host) is also reachable
+# on a plain container port in addition to the Traefik-fronted hostnames below.
+_MCP_ALLOWED_HOSTS = [
+    "127.0.0.1:8100", "localhost:8100",
+    "ki.stack.localhost",
+    "100.64.0.4", "100.64.0.4:8443",
+    "ki.photondatum.space",
+]
+_MCP_ALLOWED_ORIGINS = [f"https://{h.split(':')[0]}" for h in _MCP_ALLOWED_HOSTS] + [
+    "http://127.0.0.1:8100", "http://localhost:8100",
+]
+_streamable_security = TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=_MCP_ALLOWED_HOSTS,
+    allowed_origins=_MCP_ALLOWED_ORIGINS,
+)
+_streamable_manager = StreamableHTTPSessionManager(
+    app=_mcp_server,
+    stateless=True,
+    security_settings=_streamable_security,
+)
 
 
 @_mcp_server.list_tools()
@@ -1336,6 +1377,94 @@ async def _list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["id", "content"],
+            },
+        ),
+        # -------------------------------------------------------------------
+        # Testing-utility tools — no side effects, added to assist manual and
+        # automated MCP verification (client round-trip, routing/path checks,
+        # deployment/version confirmation, dependency health, node/model status).
+        # -------------------------------------------------------------------
+        Tool(
+            name="echo",
+            description=(
+                "Echo back the provided text along with a server-generated timestamp. "
+                "Simplest possible MCP round-trip / connectivity check — has no "
+                "dependency on Qdrant, Ollama, or the database."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Text to echo back"},
+                },
+                "required": ["text"],
+            },
+        ),
+        Tool(
+            name="current_date_time",
+            description=(
+                "Return the knowledge-index server's current date/time (UTC and "
+                "server-local), plus epoch seconds. Useful for testing MCP "
+                "round-trip and diagnosing clock or timezone issues."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="current_network_location",
+            description=(
+                "Return the server's network identity: hostname, container DNS "
+                "alias, NODE_PROFILE, and local IP addresses. Useful for "
+                "confirming which node/container actually answered an MCP call "
+                "during testing (e.g. LAN vs tailnet vs remote routing)."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="server_version",
+            description=(
+                "Return the knowledge-index service's version/build info and "
+                "Python runtime version. Useful after a rebuild to confirm a "
+                "client is actually talking to the code you expect."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="service_health",
+            description=(
+                "Check reachability of this service's dependencies individually: "
+                "Qdrant, the database, and Ollama. More granular than GET /health, "
+                "which only reports the process itself is up."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="node_and_model_status",
+            description=(
+                "Report registered stack nodes (from the node registry: status, "
+                "last_seen, profile, address) and their models. Model lists for "
+                "remote nodes come from registration-time data and can go stale "
+                "between heartbeats (known gap — heartbeats don't yet refresh "
+                "models_loaded). The node this call actually lands on additionally "
+                "gets a live Ollama probe, marked live=true."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="list_tools",
+            description=(
+                "List this MCP server's own available tools, optionally filtered "
+                "by a keyword match against tool name/description. Call this from "
+                "chat to discover what else is callable here — it only covers this "
+                "server (knowledge-index); it cannot see other MCP servers or "
+                "Claude Code skills."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Optional keyword filter (case-insensitive substring match on name/description). Omit to list everything.",
+                    },
+                },
             },
         ),
     ]
@@ -1378,6 +1507,145 @@ async def _call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         n = await asyncio.to_thread(_do_ingest)
         return [TextContent(type="text", text=json.dumps({"id": doc_id, "chunks": n}))]
+
+    elif name == "echo":
+        text_in = str(arguments["text"])
+        result = {
+            "echo": text_in,
+            "received_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    elif name == "current_date_time":
+        now_utc = datetime.now(timezone.utc)
+        now_local = datetime.now().astimezone()
+        result = {
+            "utc_iso": now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "epoch": int(now_utc.timestamp()),
+            "server_local_iso": now_local.isoformat(),
+            "server_timezone": str(now_local.tzinfo),
+        }
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    elif name == "current_network_location":
+        def _do_network_location() -> dict:
+            hostname = socket.gethostname()
+            try:
+                _, _, ip_list = socket.gethostbyname_ex(hostname)
+            except socket.gaierror:
+                ip_list = []
+            return {
+                "hostname": hostname,
+                "container_dns_alias": "knowledge-index.ai-stack",
+                "node_profile": NODE_PROFILE,
+                "local_ip_addresses": ip_list,
+            }
+
+        result = await asyncio.to_thread(_do_network_location)
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    elif name == "server_version":
+        result = {
+            "service": app.title,
+            "version": app.version,
+            "node_profile": NODE_PROFILE,
+            "python_version": sys.version.split()[0],
+        }
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    elif name == "service_health":
+        def _check_qdrant() -> bool:
+            try:
+                resp = _qdrant.get("/collections", timeout=5.0)
+                return resp.status_code == 200
+            except Exception:
+                return False
+
+        def _check_database() -> bool:
+            try:
+                with _db.connect() as conn:
+                    conn.execute(text("SELECT 1"))
+                return True
+            except Exception:
+                return False
+
+        def _check_ollama() -> bool:
+            try:
+                resp = httpx.get(f"{OLLAMA_URL}/api/tags", timeout=5.0)
+                return resp.status_code == 200
+            except Exception:
+                return False
+
+        qdrant_ok, db_ok, ollama_ok = await asyncio.gather(
+            asyncio.to_thread(_check_qdrant),
+            asyncio.to_thread(_check_database),
+            asyncio.to_thread(_check_ollama),
+        )
+        result = {
+            "qdrant":   {"reachable": qdrant_ok},
+            "database": {"reachable": db_ok},
+            "ollama":   {"reachable": ollama_ok},
+        }
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    elif name == "node_and_model_status":
+        def _do_node_status() -> dict:
+            nodes = []
+            with _db.connect() as conn:
+                rows = conn.execute(
+                    text("""
+                        SELECT node_id, display_name, profile, address,
+                               capabilities, status, last_seen, alias
+                        FROM nodes ORDER BY registered_at
+                    """)
+                ).fetchall()
+            for r in rows:
+                caps = json.loads(r[4] or "{}") if isinstance(r[4], str) else (r[4] or {})
+                models_loaded = caps.get("models_loaded", []) if isinstance(caps, dict) else []
+                nodes.append({
+                    "node_id":      r[0],
+                    "display_name": r[1],
+                    "profile":      r[2],
+                    "address":      r[3],
+                    "status":       r[5],
+                    "last_seen":    str(r[6]) if r[6] else None,
+                    "alias":        r[7] or "",
+                    "models_loaded": models_loaded,
+                    "models_source": "registration-time snapshot (may be stale — heartbeats do not yet refresh it)",
+                })
+
+            local_models: list[str] = []
+            local_probe_ok = False
+            try:
+                resp = httpx.get(f"{OLLAMA_URL}/api/tags", timeout=5.0)
+                if resp.status_code == 200:
+                    local_probe_ok = True
+                    local_models = [m["name"] for m in resp.json().get("models", [])]
+            except Exception:
+                pass
+
+            return {
+                "nodes": nodes,
+                "this_node": {
+                    "node_profile": NODE_PROFILE,
+                    "live_probe_ok": local_probe_ok,
+                    "live": True,
+                    "models": local_models,
+                },
+            }
+
+        result = await asyncio.to_thread(_do_node_status)
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    elif name == "list_tools":
+        query = str(arguments.get("query", "")).lower()
+        all_tools = await _list_tools()
+        matches = [
+            {"name": t.name, "description": t.description or ""}
+            for t in all_tools
+            if not query or query in t.name.lower() or query in (t.description or "").lower()
+        ]
+        return [TextContent(type="text", text=json.dumps({"tools": matches}))]
 
     else:
         raise ValueError(f"Unknown MCP tool: {name!r}")
@@ -1580,3 +1848,38 @@ async def _mcp_messages_asgi(scope, receive, send) -> None:  # type: ignore[type
 
 
 app.mount("/mcp/messages", app=_mcp_messages_asgi)
+
+
+# Streamable HTTP (current MCP spec) — single /mcp endpoint, POST/GET/DELETE.
+# stateless=True: fresh transport per request, no Mcp-Session-Id persistence
+# needed — simplest match for a single-instance deployment behind Traefik/Caddy.
+_streamable_ctx = None
+
+
+@app.on_event("startup")
+async def _start_streamable_http() -> None:
+    global _streamable_ctx
+    _streamable_ctx = _streamable_manager.run()
+    await _streamable_ctx.__aenter__()
+
+
+@app.on_event("shutdown")
+async def _stop_streamable_http() -> None:
+    if _streamable_ctx is not None:
+        await _streamable_ctx.__aexit__(None, None, None)
+
+
+async def _mcp_streamable_asgi(scope, receive, send) -> None:  # type: ignore[type-arg]
+    """ASGI handler for /mcp (Streamable HTTP) — bypasses FastAPI response
+    wrapping so the session manager can own the full request/response cycle
+    (including SSE upgrades), matching the /mcp/messages pattern above."""
+    if API_KEY:
+        req = Request(scope, receive)
+        auth = req.headers.get("Authorization", "")
+        if not auth.startswith("Bearer ") or auth[7:] != API_KEY:
+            await Response("Unauthorized", status_code=401)(scope, receive, send)
+            return
+    await _streamable_manager.handle_request(scope, receive, send)
+
+
+app.mount("/mcp", app=_mcp_streamable_asgi)

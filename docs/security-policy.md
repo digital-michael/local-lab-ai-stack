@@ -90,7 +90,51 @@ For every new service added to the stack:
 
 ---
 
-## 5 Backend-Only Services
+## 5 Operational Access Model — Configuration vs. Execution
+
+### Principle
+
+**The user who configures a system must not be the same user who owns what runs on it.**
+
+Two distinct access roles must be defined for every deployment:
+
+| Role | Purpose | Lifecycle | Owns containers? |
+| --- | --- | --- | --- |
+| **Setup user** (e.g. `llmagent`) | Install packages, enable system services, one-time configuration | Temporary — privileges revoked after deployment complete | **No** |
+| **Execution owner** (e.g. `3pdx7a`) | Runs rootless Podman; owns all container state, volumes, secrets | Permanent — this is who the containers run as | **Yes** |
+
+### Why this matters
+
+Rootless Podman uses the **real UID** of the process — not the effective UID from `su` or `sudo`. If a setup user runs `su - execution-owner` and then invokes Podman, the kernel-level real UID remains that of the setup user. Podman will look for `/run/user/<setup-uid>`, the wrong subuid ranges, and the wrong user namespace — and fail or run in an incorrect security context.
+
+The execution owner **must** be accessed via a proper login session (direct SSH, console login, or `systemd --user` with linger enabled). There is no shortcut.
+
+### Setup user constraints
+
+- Narrowly privileged: only `sudo dnf`, `sudo systemctl`, and explicit admin scripts — nothing broader
+- Does not own any persistent state (no volumes, no Podman secrets, no container images)
+- Nothing running in production depends on the setup user's account existing
+- Privileges are revoked (or the account locked) once deployment is complete
+
+### Execution owner constraints
+
+- Has a proper login session (SSH key access)
+- Owns all Podman container state under their home directory
+- Has `subuid`/`subgid` ranges configured in `/etc/subuid` and `/etc/subgid`
+- Linger enabled so containers survive logout: `loginctl enable-linger <user>`
+- Has `sudo` access only with a **manual password prompt** — never NOPASSWD — so that container escape does not grant silent root escalation
+
+### Instance mapping
+
+| Host | Setup user | Execution owner |
+| --- | --- | --- |
+| photondatum.space | `llmagent` | `3pdx7a` |
+| CENTAURI | TBD | TBD |
+| Worker nodes | TBD | TBD |
+
+---
+
+## 6 Backend-Only Services
 
 These services have no user-facing web UI and are not routed through Traefik:
 

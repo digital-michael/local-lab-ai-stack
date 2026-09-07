@@ -9,4 +9,14 @@ COPY app.py node_registry.py ./
 
 EXPOSE 8100
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8100"]
+# --proxy-headers: trust X-Forwarded-Proto/-For from the reverse proxy in front
+# of this container (Traefik/Caddy) so redirects and request.url reflect the
+# real external scheme (https) instead of the plain-HTTP scheme uvicorn sees
+# on its own socket. Without this, Starlette's trailing-slash redirect for
+# /mcp -> /mcp/ emits a Location: http://... URL, and strict HTTP clients
+# (correctly) strip the Authorization header on that https->http downgrade,
+# breaking MCP auth for any client that follows the redirect. Allow-list is
+# '*' because this container is only reachable via the stack's own proxies
+# (Traefik) or loopback — trusting forwarded headers here only affects
+# scheme/client-IP reflection, not authentication.
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8100", "--proxy-headers", "--forwarded-allow-ips=*"]

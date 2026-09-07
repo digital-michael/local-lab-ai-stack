@@ -1,5 +1,5 @@
 # OpenWebUI — Guidance
-**Last Updated:** 2026-03-08 UTC
+**Last Updated:** 2026-07-11
 
 ## Purpose
 Project-specific preferences and opinionated decisions for OpenWebUI within this AI stack.
@@ -31,7 +31,8 @@ Project-specific preferences and opinionated decisions for OpenWebUI within this
 
 # 3 Integration Patterns
 
-- Authentication: Authentik OIDC (deferrable — direct auth acceptable for initial deployment)
+- Authentication: Authentik forwardAuth with trusted email header (`WEBUI_AUTH_TRUSTED_EMAIL_HEADER=X-authentik-email`, `WEBUI_AUTH_TRUSTED_NAME_HEADER=X-authentik-name`). Authentik injects the user's email after validating the proxy session; OpenWebUI auto-signs the user in via the injected header — no login form is shown. See [lessons_learned.md §1](lessons_learned.md#1-webui_auth_trusted_email_header--how-auto-login-works).
+- Admin account: the first registered user becomes OpenWebUI admin. Currently `michaelbiggerstaff7@gmail.com`. To add a second admin, promote via admin panel → Workspace → Users → change role to Admin after their first login.
 - API: OpenWebUI → LiteLLM internal DNS (`http://litellm.ai-stack:4000`)
 - Flowise workflows accessible through OpenWebUI as tool integrations when available
 - No direct database connection from OpenWebUI; all data flows through APIs

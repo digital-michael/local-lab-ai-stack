@@ -1,0 +1,27 @@
+[Unit]
+Description=AI Stack IAM — PostgreSQL
+After=network-online.target
+
+[Container]
+Image=docker.io/library/postgres:16.14
+ContainerName=ai-stack-iam-postgres
+Network=ai-stack
+Environment=POSTGRES_DB=authentik
+Environment=POSTGRES_USER=authentik
+Secret=ai-stack-iam-postgres-password,type=env,target=POSTGRES_PASSWORD
+Volume=ai-stack-iam-postgres-data:/var/lib/postgresql/data:Z
+PublishPort=127.0.0.1:5432:5432
+HealthCmd=pg_isready -U authentik
+HealthInterval=10s
+HealthRetries=5
+HealthTimeout=5s
+Label=ai-stack.group=iam
+Label=ai-stack.service=postgres
+PodmanArgs=--cpus=0.5 --memory=256m
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=ai-stack-iam.target

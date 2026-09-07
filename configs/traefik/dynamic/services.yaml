@@ -19,6 +19,7 @@ http:
       middlewares:
         - authentik
         - secure-headers
+        - nocache
       tls: {}
 
     grafana:
@@ -26,16 +27,6 @@ http:
       entryPoints:
         - websecure
       service: grafana
-      middlewares:
-        - authentik
-        - secure-headers
-      tls: {}
-
-    flowise:
-      rule: "Host(`flowise.stack.localhost`)"
-      entryPoints:
-        - websecure
-      service: flowise
       middlewares:
         - authentik
         - secure-headers
@@ -51,15 +42,8 @@ http:
         - secure-headers
       tls: {}
 
-    # Exception: Authentik is the identity provider — cannot forwardAuth to itself.
-    authentik:
-      rule: "Host(`auth.stack.localhost`)"
-      entryPoints:
-        - websecure
-      service: authentik
-      middlewares:
-        - secure-headers
-      tls: {}
+    # Note: auth.stack.localhost router removed — Authentik now runs on
+    # photondatum.space VPS. Access via https://auth.photondatum.space.
 
     # Exception: MCP + admin endpoints use API key auth (machine-to-machine, not browser SSO).
     # Access control: knowledge_index_api_key Podman secret (API_KEY env var in app).
@@ -88,6 +72,7 @@ http:
       service: knowledge-index
       middlewares:
         - authentik
+        - ki-api-key
         - secure-headers
       tls: {}
 
@@ -146,13 +131,28 @@ http:
         - secure-headers
       tls: {}
 
+    # No authentik middleware — LiteLLM has no ProxyProvider (uses its own OIDC via
+    # GENERIC_* env vars, see litellm-public below and access-control.md). Adding
+    # forwardAuth here would 404 (no matching provider) and, if one existed, would
+    # force two Authentik round-trips per session — same reasoning as litellm-public.
     litellm:
       rule: "Host(`litellm.stack.localhost`)"
       entryPoints:
         - websecure
       service: litellm
       middlewares:
-        - authentik
+        - secure-headers
+      tls: {}
+
+    # Public entry — litellm.photondatum.space proxied via Caddy on photondatum.space.
+    # LiteLLM manages its own Authentik OAuth SSO (GENERIC_* env vars). No forwardAuth
+    # middleware here — it would force two Authentik round-trips per session.
+    litellm-public:
+      rule: "Host(`litellm.photondatum.space`)"
+      entryPoints:
+        - websecure
+      service: litellm
+      middlewares:
         - secure-headers
       tls: {}
 
@@ -186,13 +186,37 @@ http:
         - secure-headers
       tls: {}
 
-    # Public entry — chat.photondatum.space proxied via Caddy on photondatum.space.
-    # Caddy forwards Host: chat.photondatum.space so this router matches.
-    # Intentionally excludes the authentik middleware: the Authentik outpost External URL
-    # is auth.stack.localhost (LAN-only), so forwardAuth redirects would fail in external
-    # browsers. OpenWebUI's own authentication handles external access.
-    openwebui-public:
-      rule: "Host(`chat.photondatum.space`)"
+    # LAN entry — flowise.stack.localhost never had a router (gap found 2026-07-20:
+    # Homepage's tile linked here but Traefik had no matching rule, so it 404'd).
+    flowise:
+      rule: "Host(`flowise.stack.localhost`)"
+      entryPoints:
+        - websecure
+      service: flowise
+      middlewares:
+        - authentik
+        - secure-headers
+      tls: {}
+
+    # Public entry — flowise.photondatum.space proxied via Caddy on photondatum.space.
+    flowise-public:
+      rule: "Host(`flowise.photondatum.space`)"
+      entryPoints:
+        - websecure
+      service: flowise
+      middlewares:
+        - authentik
+        - secure-headers
+      tls: {}
+
+    # SvelteKit static assets and WebSocket — no forwardAuth on these paths.
+    # /_app/*: hashed immutable JS/CSS bundles + version.json. Bypassing auth prevents
+    # SvelteKit's background version.json poll from 302ing to Authentik cross-origin
+    # (fetch() can't complete a login redirect → CORS failure → error boundary).
+    # /ws/*: Socket.IO WebSocket. WebSocket upgrades can't follow 302 redirects, so
+    # Authentik forwardAuth must not intercept them. OpenWebUI's own JWT gates these.
+    openwebui-public-static:
+      rule: "Host(`agent.photondatum.space`) && (PathPrefix(`/_app`) || PathPrefix(`/ws`))"
       entryPoints:
         - websecure
       service: openwebui
@@ -200,13 +224,101 @@ http:
         - secure-headers
       tls: {}
 
-    # Public: chat.photondatum.com → same pattern as openwebui-public above.
-    # auth.photondatum.com needs no router here — Caddy rewrites Host to auth.stack.localhost.
-    openwebui-public-com:
-      rule: "Host(`chat.photondatum.com`)"
+    openwebui-static:
+      rule: "Host(`openwebui.stack.localhost`) && (PathPrefix(`/_app`) || PathPrefix(`/ws`))"
       entryPoints:
         - websecure
       service: openwebui
+      middlewares:
+        - secure-headers
+      tls: {}
+
+    # Public entry — agent.photondatum.space proxied via Caddy on photondatum.space.
+    # Caddy forwards Host: agent.photondatum.space so this router matches.
+    # Authentik is now on the VPS (always-on), so forwardAuth works for external browsers.
+    openwebui-public:
+      rule: "Host(`agent.photondatum.space`)"
+      entryPoints:
+        - websecure
+      service: openwebui
+      middlewares:
+        - authentik
+        - secure-headers
+        - nocache
+      tls: {}
+
+    # Public entry — dashboard.photondatum.space proxied via Caddy on photondatum.space.
+    homepage-public:
+      rule: "Host(`dashboard.photondatum.space`)"
+      entryPoints:
+        - websecure
+      service: homepage
+      middlewares:
+        - authentik
+        - secure-headers
+      tls: {}
+
+    # Public entry — grafana.photondatum.space proxied via Caddy on photondatum.space.
+    grafana-public:
+      rule: "Host(`grafana.photondatum.space`)"
+      entryPoints:
+        - websecure
+      service: grafana
+      middlewares:
+        - authentik
+        - secure-headers
+      tls: {}
+
+    # Public entry — prometheus.photondatum.space proxied via Caddy on photondatum.space.
+    prometheus-public:
+      rule: "Host(`prometheus.photondatum.space`)"
+      entryPoints:
+        - websecure
+      service: prometheus
+      middlewares:
+        - authentik
+        - secure-headers
+      tls: {}
+
+    # Public entry — ki.photondatum.space proxied via Caddy on photondatum.space.
+    # Root path: redirect to /admin for browser users navigating to the base URL.
+    ki-public-root:
+      rule: "Host(`ki.photondatum.space`) && Path(`/`)"
+      entryPoints:
+        - websecure
+      middlewares:
+        - redirect-to-admin
+        - secure-headers
+      service: knowledge-index
+      tls: {}
+
+    # /admin: browser admin panel, protected by Authentik.
+    # /v1 and /mcp: machine-to-machine API key auth at app level; no Authentik middleware.
+    ki-public-admin:
+      rule: "Host(`ki.photondatum.space`) && PathPrefix(`/admin`)"
+      entryPoints:
+        - websecure
+      service: knowledge-index
+      middlewares:
+        - authentik
+        - ki-api-key
+        - secure-headers
+      tls: {}
+
+    ki-public-api:
+      rule: "Host(`ki.photondatum.space`) && PathPrefix(`/v1`)"
+      entryPoints:
+        - websecure
+      service: knowledge-index
+      middlewares:
+        - secure-headers
+      tls: {}
+
+    ki-public-mcp:
+      rule: "Host(`ki.photondatum.space`) && PathPrefix(`/mcp`)"
+      entryPoints:
+        - websecure
+      service: knowledge-index
       middlewares:
         - secure-headers
       tls: {}
@@ -236,11 +348,6 @@ http:
       loadBalancer:
         servers:
           - url: "http://flowise.ai-stack:3000"
-
-    authentik:
-      loadBalancer:
-        servers:
-          - url: "http://authentik.ai-stack:9000"
 
     knowledge-index:
       loadBalancer:

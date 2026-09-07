@@ -29,9 +29,17 @@
 | `headscale.photondatum.space` | A | VPS public IP | Headscale coordination + DERP |
 | `auth.photondatum.space` | A | VPS public IP | Authentik SSO |
 | `git.photondatum.space` | A | VPS public IP | Forgejo git hosting |
+| `agent.photondatum.space` | A | VPS public IP | OpenWebUI (AI agent interface) |
+| `chat.photondatum.space` | A | VPS public IP | Reserved — future social chat |
+| `dashboard.photondatum.space` | A | VPS public IP | CENTAURI stack homepage dashboard |
+| `flowise.photondatum.space` | A | VPS public IP | Flowise AI workflow builder (bundle-admin) |
+| `ki.photondatum.space` | A | VPS public IP (`66.228.37.60`) | Knowledge Index API + admin panel |
+| `litellm.photondatum.space` | A | VPS public IP (`66.228.37.60`) | LiteLLM proxy (own OAuth SSO, bundle-admin) |
+| `grafana.photondatum.space` | A | VPS public IP (`66.228.37.60`) | Grafana dashboards (bundle-admin) — added 2026-07-20 |
+| `prometheus.photondatum.space` | A | VPS public IP (`66.228.37.60`) | Prometheus metrics (bundle-admin) — added 2026-07-20 |
 
-All additional `*.photondatum.space` subdomains for CENTAURI services are also
-pointed at this VPS — Caddy proxies them through to CENTAURI via tailnet.
+All `*.photondatum.space` subdomains point at this VPS — Caddy proxies
+CENTAURI-hosted services through to `100.64.0.4:443` via tailnet.
 
 ---
 
@@ -55,24 +63,52 @@ Network=ai-stack
 | Container | Port bind | Resource limits |
 |---|---|---|
 | `ai-stack-iam-authentik` | `127.0.0.1:9000:9000`, `127.0.0.1:9443:9443` | `--cpus=1 --memory=512m` |
-| `ai-stack-iam-authentik-worker` | none | `--cpus=0.5 --memory=256m` |
+| `ai-stack-iam-authentik-worker` | none | `--cpus=0.5 --memory=512m` |
 | `ai-stack-iam-postgres` | `127.0.0.1:5432:5432` | `--cpus=0.5 --memory=256m` |
 | `ai-stack-iam-redis` | `127.0.0.1:6379:6379` | `--cpus=0.25 --memory=128m` |
 
 **Authentik outpost External URL:** `https://auth.photondatum.space`
 
-**Social login sources to configure in Authentik admin:**
-- GitHub (OAuth2)
-- Google (OAuth2)
-- Microsoft (OAuth2)
-- GitLab (OAuth2)
-- (others as needed — each is a config entry, not a new container)
+**Social login sources configured:**
 
-**Forgejo + Authentik:**
-Forgejo is a native systemd service on this host (not a container, not managed
-by the ai-stack group system). Configure Authentik as an OIDC source in
-Forgejo admin → Site Administration → Authentication Sources → Add OAuth2.
-Forgejo keeps its own SQLite database; Authentik handles identity only.
+- GitHub (slug: `github`) — OAuth2, configured
+- Google (slug: `google`) — OAuth2, configured
+- GitLab (slug: `gitlab`) — OAuth2, configured
+- Microsoft — skipped (requires Azure portal; add later if needed)
+- BitBucket — not supported in this Authentik version
+
+**Forgejo + Authentik OIDC:**
+Forgejo is a native systemd service on this host (not a container). Authentik
+acts as an OIDC source — Forgejo authenticates users against Authentik, not the
+reverse (no forwardAuth on Forgejo).
+
+Authentik OAuth2 provider `Forgejo (Git)` (pk=2):
+- `client_id`: `0LAu1ulhUacuK0ApS73LCwjCsQxLhMJrEi98sjHv`
+- `redirect_uri`: `https://git.photondatum.space/user/oauth2/Authentik/callback`
+- Discovery URL: `https://auth.photondatum.space/application/o/forgejo/.well-known/openid-configuration`
+- Policy: `access-forgejo` (bundle-developer, bundle-admin, superuser)
+
+To complete the connection, add the auth source in Forgejo admin UI:
+**`https://git.photondatum.space/admin/auths/new`**
+(Forgejo 15 uses `/admin/` not `/-/admin/` — the `/-/` prefix returns 404)
+
+| Field | Value |
+|---|---|
+| Authentication Type | OAuth2 |
+| Authentication Name | `Authentik` |
+| OAuth2 Provider | OpenID Connect |
+| Client ID | `0LAu1ulhUacuK0ApS73LCwjCsQxLhMJrEi98sjHv` |
+| Client Secret | Copy from Authentik admin → Applications → Forgejo (Git) → Edit |
+| OpenID Connect URL | `https://auth.photondatum.space/application/o/forgejo/.well-known/openid-configuration` |
+
+After adding the source, to restrict local logins to admin only, add to `/etc/forgejo/app.ini`:
+```ini
+[service]
+ALLOW_ONLY_EXTERNAL_SELF_REGISTRATION = true
+```
+
+The planned `forgejo-guest` group (read-only, public repos, no forks) is a
+Forgejo-side group permission setting — no Authentik changes needed for it.
 
 ---
 
@@ -132,25 +168,120 @@ git.photondatum.space {
 
 # Authentik
 https://auth.photondatum.space {
-    reverse_proxy 127.0.0.1:9000
+    reverse_proxy 127.0.0.1:9000 {
+        header_up X-Forwarded-Host {http.request.header.X-Forwarded-Host}
+    }
 }
 
 # CENTAURI services — proxied via tailnet (100.64.0.4)
-# These routes are only reachable when CENTAURI is online
-https://chat.photondatum.space {
+# These routes are only reachable when CENTAURI is online.
+# dial_timeout bounds how long Caddy waits on a dead/asleep CENTAURI before
+# failing to handle_errors, instead of hanging. `log` emits a per-request JSON
+# access-log line via `journalctl -u caddy` (duration, status, error) — added
+# 2026-07-20 after an undiagnosable "AI Stack offline" incident with no timestamped
+# evidence on either side. See centauri-integration-plan.md Completed log.
+https://agent.photondatum.space {
     reverse_proxy 100.64.0.4:443 {
-        header_up Host chat.photondatum.space
-        transport http { tls_insecure_skip_verify }
+        header_up Host agent.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+            dial_timeout 5s
+        }
     }
+    log
     handle_errors {
-        respond "AI Stack is currently offline" 503
+        respond "AI Stack is currently offline. Services will resume when the controller comes back online." 503
     }
+}
+
+# Chat portal — reserved for future social chat (Mattermost)
+chat.photondatum.space {
+    root * /var/www/photondatum
+    file_server
+}
+
+# Homepage dashboard — CENTAURI stack dashboard
+# header_up sends the public hostname so Traefik routes via homepage-public router
+# and Authentik's forwardAuth X-Forwarded-Host matches the proxy provider external_host.
+https://dashboard.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host dashboard.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+            dial_timeout 5s
+        }
+    }
+    log
 }
 ```
 
-Additional CENTAURI service routes (flowise, grafana, etc.) follow the same
-pattern as `chat.photondatum.space` — proxy to `100.64.0.4:443` with
-`header_up Host <service>.photondatum.space`.
+Additional CENTAURI service routes follow the same pattern — proxy to
+`100.64.0.4:443` with `header_up Host <public-hostname>` (the public hostname,
+**not** the `*.stack.localhost` LAN name — that was a bug fixed 2026-07-11 for
+Flowise, see Completed log below):
+
+```caddy
+# Flowise — AI workflow builder (bundle-admin only, via Authentik forwardAuth)
+https://flowise.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host flowise.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+            dial_timeout 5s
+        }
+    }
+    log
+}
+
+# Knowledge Index — API + admin panel (bundle-admin via Authentik; /v1 and /mcp use app API key)
+# Requires ki.photondatum.space A record in DNS before Caddy can obtain a TLS cert.
+https://ki.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host ki.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+            dial_timeout 5s
+        }
+    }
+    log
+}
+
+# LiteLLM — manages its own Authentik OAuth SSO, no forwardAuth on this router
+https://litellm.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host litellm.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+            dial_timeout 5s
+        }
+    }
+    log
+}
+
+# Grafana — metrics/logs explorer (bundle-admin). Added 2026-07-20.
+https://grafana.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host grafana.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+            dial_timeout 5s
+        }
+    }
+    log
+}
+
+# Prometheus — metrics store (bundle-admin). Added 2026-07-20.
+https://prometheus.photondatum.space {
+    reverse_proxy 100.64.0.4:443 {
+        header_up Host prometheus.photondatum.space
+        transport http {
+            tls_insecure_skip_verify
+            dial_timeout 5s
+        }
+    }
+    log
+}
+```
 
 ---
 
@@ -161,12 +292,19 @@ pattern as `chat.photondatum.space` — proxy to `100.64.0.4:443` with
 | 80 | TCP | inbound | Caddy HTTP→HTTPS redirect |
 | 443 | TCP | inbound | Caddy HTTPS |
 | 3478 | UDP | inbound | Headscale STUN (Caddy cannot proxy UDP) |
+| 21115 | TCP | inbound | RustDesk hbbs — NAT type test |
+| 21116 | TCP+UDP | inbound | RustDesk hbbs — rendezvous + hole-punch |
+| 21117 | TCP | inbound | RustDesk hbbr — relay |
+| 21118 | TCP | inbound | RustDesk hbbs — WebSocket |
+| 21119 | TCP | inbound | RustDesk hbbr — relay WebSocket |
 
 Check: `sudo firewall-cmd --list-ports` or `sudo nft list ruleset`
 
 ---
 
-## Services NOT Managed by This Instance
+## Services NOT Managed by the ai-stack Group System
+
+### Native systemd (non-containerized)
 
 | Service | Managed by | Location |
 |---|---|---|
@@ -175,7 +313,31 @@ Check: `sudo firewall-cmd --list-ports` or `sudo nft list ruleset`
 | Tailscale | systemd (native) | `/etc/systemd/system/tailscaled.service` |
 | Caddy | systemd (native) | `/etc/systemd/system/caddy.service` |
 
-These are not containerized on this host. Manage them via `systemctl` directly.
+Manage these via `systemctl` directly.
+
+### RustDesk (podman-compose, 3pdx7a user)
+
+RustDesk self-hosted server runs as two containers (`hbbs` + `hbbr`) managed by
+`podman-compose`, not by ai-stack quadlets. It uses `network_mode: host` because
+RustDesk uses non-HTTP ports that cannot route through Podman container networking.
+
+| Property | Value |
+|---|---|
+| Version | `1.1.15` |
+| Image | `docker.io/rustdesk/rustdesk-server:1.1.15` |
+| Compose file | `configs/compose/rustdesk/docker-compose.yml` (repo) |
+| Working dir | `/home/3pdx7a/rustdesk-server/` (VPS) |
+| Managed by | `podman-compose@rustdesk-server.service` (user unit) |
+| Web UI | None — standard image has no web UI |
+| Auth | Keypair (`-k _`); public key stored in `./data/`, share with clients |
+
+**Key-pair setup:** On first start, `hbbs` generates a keypair stored in
+`./data/`. To display the public key: `podman exec rustdesk-hbbs cat /root/id_ed25519.pub`
+Share this key with RustDesk clients under Settings → Network → Key.
+
+**No Authentik protection possible** for relay endpoints (non-HTTP protocol).
+Any future RustDesk web UI (third-party) should be placed behind Authentik
+using `bundle-admin` or higher.
 
 ---
 

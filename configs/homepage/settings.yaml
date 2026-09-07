@@ -1,0 +1,31 @@
+---
+title: AI Stack — Operator Dashboard
+favicon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/svg/home-assistant.svg
+theme: dark
+color: slate
+headerStyle: clean
+layout:
+  Application:
+    style: row
+    columns: 2
+    icon: mdi-application
+  Edge:
+    style: row
+    columns: 2
+    icon: mdi-shield-lock
+  Inference:
+    style: row
+    columns: 2
+    icon: mdi-brain
+  Knowledge:
+    style: row
+    columns: 1
+    icon: mdi-book-open-variant
+  Storage:
+    style: row
+    columns: 3
+    icon: mdi-database
+  Observability:
+    style: row
+    columns: 4
+    icon: mdi-chart-line

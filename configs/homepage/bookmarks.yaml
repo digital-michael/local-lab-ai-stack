@@ -1,0 +1,8 @@
+---
+- Documentation:
+    - Getting Started:
+        - icon: mdi-book-open-page-variant
+          href: https://github.com
+    - Operator FAQ:
+        - icon: mdi-help-circle
+          href: https://github.com

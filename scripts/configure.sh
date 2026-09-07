@@ -6,7 +6,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CONFIG_FILE="${CONFIG_FILE:-$PROJECT_ROOT/configs/config.json}"
+AI_STACK_DIR="${AI_STACK_DIR:-$HOME/ai-stack}"
+# Runtime config lives with the deployed instance ($AI_STACK_DIR), not the repo checkout —
+# this is git-ignored and never touched by `git pull`/`checkout`/`stash` on the repo.
+# See configs/config.json.example for the tracked bootstrap template (used by `init`).
+CONFIG_FILE="${CONFIG_FILE:-$AI_STACK_DIR/configs/config.json}"
 QUADLET_DIR="${QUADLET_DIR:-$HOME/.config/containers/systemd}"
 NODE_PROFILE_FILE="${NODE_PROFILE_FILE:-$PROJECT_ROOT/configs/node_profile}"
 
@@ -48,7 +52,8 @@ Commands:
   help                      Show this message
 
 Environment:
-  CONFIG_FILE   Path to config.json  (default: ./configs/config.json)
+  AI_STACK_DIR  Deployed instance root (default: ~/ai-stack)
+  CONFIG_FILE   Path to config.json  (default: $AI_STACK_DIR/configs/config.json)
   QUADLET_DIR   Output dir for quadlets (default: ~/.config/containers/systemd)
 EOF
 }
@@ -79,11 +84,12 @@ cmd_init() {
         return 0
     fi
     mkdir -p "$(dirname "$CONFIG_FILE")"
-    cp "$PROJECT_ROOT/configs/config.json" "$CONFIG_FILE" 2>/dev/null || {
-        echo "ERROR: Default config template not found at $PROJECT_ROOT/configs/config.json" >&2
+    cp "$PROJECT_ROOT/configs/config.json.example" "$CONFIG_FILE" 2>/dev/null || {
+        echo "ERROR: Default config template not found at $PROJECT_ROOT/configs/config.json.example" >&2
         exit 1
     }
     echo "Config initialized at $CONFIG_FILE"
+    echo "Review it before deploying — it was copied from the repo's tracked example, not generated fresh for this node."
 }
 
 cmd_get() {
@@ -296,6 +302,11 @@ EOF
             services=$'ollama\npromtail\nknowledge-index\nqdrant'
             echo "Note: node_profile=$node_profile — generating ollama + promtail + knowledge-index + qdrant quadlets"
             ;;
+        edge)
+            # Edge VPS: IAM group only (Authentik + its dependencies)
+            services=$'redis\npostgres\nauthentik\nauthentik-worker'
+            echo "Note: node_profile=$node_profile — generating IAM group quadlets only"
+            ;;
         *)
             # controller, peer: generate all services (skip minio if not defined)
             services=$(jq -r '.services | keys[]' "$CONFIG_FILE")
@@ -372,7 +383,11 @@ EOF
                     echo "EnvironmentFile=${ai_stack_dir//\$HOME/%h}/configs/run/${svc}.env"
                 fi
             fi
-            jq -r --arg s "$svc" '.services[$s].environment // {} | to_entries[] | select(.key != "DATABASE_URL") | "Environment=" + .key + "=" + .value' "$CONFIG_FILE"
+            # Value is quoted via @json (JSON's \" / \\ escaping matches systemd's
+            # own quoted-string escaping) — unquoted values silently truncate at
+            # the first space when systemd parses Environment=, since it splits
+            # on whitespace outside quotes.
+            jq -r --arg s "$svc" '.services[$s].environment // {} | to_entries[] | select(.key != "DATABASE_URL") | "Environment=" + .key + "=" + (.value | @json)' "$CONFIG_FILE"
 
             # Ports
             jq -r --arg s "$svc" '.services[$s].ports[]? | "PublishPort=" + (if .bind then .bind + ":" else "" end) + (.host|tostring) + ":" + (.container|tostring)' "$CONFIG_FILE"

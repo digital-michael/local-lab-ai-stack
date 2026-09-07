@@ -12,10 +12,10 @@ Run any script with `--help` or `-h` for full usage details, options, and exampl
 
 - [Environment Setup](#environment-setup) — `validate-system.sh` · `install.sh` · `generate-tls.sh`
 - [First Deployment](#first-deployment) — `configure.sh` · `deploy.sh` · `pull-models.sh`
-- [Running Operations](#running-operations) — `start.sh` · `status.sh` · `backup.sh` · `inhibit.sh`
+- [Running Operations](#running-operations) — `start.sh` · `status.sh` · `backup.sh` · `cleanup.sh` · `inhibit.sh`
 - [Reconfiguration](#reconfiguration)
 - [M2M Auth Wiring](#m2m-auth-wiring) — `m2m-authentik-bootstrap.sh`
-- [Troubleshooting](#troubleshooting) — `diagnose.sh`
+- [Troubleshooting](#troubleshooting) — `diagnose.sh` · `model-inventory.sh`
 - [Shutdown and Teardown](#shutdown-and-teardown) — `stop.sh` · `undeploy.sh`
 - [Worker Node Scripts](#worker-node-scripts) — `node.sh` · `bootstrap.sh` · `heartbeat.sh` · `register-node.sh`
 - [Subdirectory Scripts](#subdirectory-scripts) — `bare_metal/setup-macos.sh` · `podman/setup-worker.sh`
@@ -59,6 +59,9 @@ Shows per-service health. Reads quadlet state from systemd and container health 
 ### `backup.sh`
 Backs up all persistent stack data to `$AI_STACK_DIR/backups/<timestamp>/`: PostgreSQL (`pg_dump`), Qdrant (REST snapshot), libraries directory, and configs (excluding TLS private keys). Retains the 7 most recent sets. Designed to run as a systemd timer or cron job.
 
+### `cleanup.sh`
+Placeholder for future maintenance needs — currently just `images` (`podman image prune`, dangling ai-stack images only), `images-all` (`podman image prune -a`, all unused ai-stack images incl. tagged), and `postgres` (`VACUUM ANALYZE` every database in the cluster). Image pruning is filtered to this stack's own images via its `com.docker.compose.project=ai-stack` label, so it won't touch unrelated podman workloads on the same host. `report` shows disk usage and postgres dead-tuple counts without changing anything. `--dry-run` available on every command.
+
 ### `inhibit.sh`
 Sleep/hibernation inhibitor for worker nodes. Acquires a sleep lock (`caffeinate` on macOS, `systemd-inhibit` on Linux) while the stack is running. Opt-in via `"sleep_inhibit": true` in `config.json`. Controller nodes are always skipped.
 
@@ -83,6 +86,9 @@ Validates Authentik OIDC issuer/JWKS endpoints for M2M, optionally writes issuer
 
 ### `diagnose.sh`
 Per-service diagnostic walkthrough. `quick` mode (default): systemd state, container health, network existence, dependency reachability, model availability. `full` mode: adds integration probes, config validation, secret inventory, volume paths, resource pressure, and API readiness probes. Exit codes: `0` all pass, `1` warnings/failures, `2` stack not deployed.
+
+### `model-inventory.sh`
+Per-node model inventory. For the controller and every node in `configs/nodes/*.json`: live-probes reachability (Ollama `/api/tags`; vLLM `/v1/models` on the controller) and cross-references against LiteLLM's actually-registered routes (via its authenticated `/model/info` API — `litellm_params` is encrypted at rest, so raw SQL can't read `api_base`). Flags models available-but-unregistered and registered-but-not-available (stale routes). Cloud/API-hosted models (openai/groq/anthropic/mistral) are reported separately — registration + secret-provisioned status only, no live provider calls. `--json` emits structured output for a future web UI; `--color` dims unregistered/unavailable/stale entries in red.
 
 ---
 

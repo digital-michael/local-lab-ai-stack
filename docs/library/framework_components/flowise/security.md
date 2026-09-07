@@ -1,5 +1,5 @@
 # Flowise — Security
-**Last Updated:** 2026-03-08 UTC
+**Last Updated:** 2026-07-10
 
 ## Purpose
 Security standards and hardening guidelines for Flowise in a production AI stack.
@@ -23,10 +23,10 @@ Security standards and hardening guidelines for Flowise in a production AI stack
 
 # 1 Authentication and Authorization
 
-- Enable basic authentication (`FLOWISE_USERNAME` / `FLOWISE_PASSWORD`) at minimum
-- Integrate with Authentik OIDC when available for centralized identity management
-- Restrict admin UI access to authorized operators only; regular users interact through OpenWebUI, not Flowise directly
-- Audit who creates, modifies, and executes workflows
+- Authentik forwardAuth via Traefik is the sole auth gate — `FLOWISE_USERNAME` and `FLOWISE_PASSWORD` are intentionally not set. Do not re-enable internal auth while forwardAuth is active (double-auth breaks the flow).
+- Flowise's built-in auth can only be disabled by omitting `FLOWISE_USERNAME` from the quadlet environment; if the env var is present, Flowise always enforces its own login regardless of proxy headers.
+- Restrict admin UI access to `bundle-admin` users via the `access-flowise` Authentik ExpressionPolicy; regular users interact through OpenWebUI or API keys, not the Flowise UI directly.
+- Audit who creates, modifies, and executes workflows via Authentik event logs (forwardAuth records each access).
 
 # 2 Network Security
 

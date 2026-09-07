@@ -62,9 +62,15 @@ metrics:
   prometheus:
     entryPoint: traefik
 
-# Access logs
+# Access logs — only 4xx/5xx are kept; 2xx/3xx routine traffic (mostly the
+# 30s knowledge-index heartbeat) succeeds every time and adds nothing but
+# volume. Filters are OR-connected, so this is the only filter set here —
+# adding another would widen what's kept, not narrow it further.
 accessLog:
   format: json
+  filters:
+    statusCodes:
+      - "400-599"
 
 # Traefik API and dashboard (uses "traefik" entrypoint by default with api.insecure)
 api:
