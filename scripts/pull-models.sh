@@ -195,8 +195,11 @@ for i in $(seq 0 $((model_count - 1))); do
         modes_json="$(_modes_for_model "$probe_host" "$probe_port" "$model_id")"
     fi
 
+    # Modes are sorted alphabetically so the merged tags list (and OpenWebUI's
+    # synced copy of it) is in a consistent order every run, regardless of
+    # whatever order Ollama's own /api/show happens to report capabilities in.
     tags_json="$(jq -nc --arg tier "$tier_label" --argjson modes "$modes_json" \
-        '([$tier] | map(select(. != ""))) + $modes')"
+        '([$tier] | map(select(. != ""))) + ($modes | sort)')"
 
     if [[ "$(echo "$tags_json" | jq 'length')" -gt 0 ]]; then
         model_info="$(echo "$model_info" | jq --argjson tags "$tags_json" '. + {tags: $tags}')"
