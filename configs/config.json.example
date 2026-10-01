@@ -579,7 +579,9 @@
         "OPENAI_API_BASE": "http://litellm.ai-stack:4000",
         "OLLAMA_BASE_URL": "http://ollama.ai-stack:11434",
         "WEBUI_AUTH_TRUSTED_EMAIL_HEADER": "X-authentik-email",
-        "WEBUI_AUTH_TRUSTED_NAME_HEADER": "X-authentik-name"
+        "WEBUI_AUTH_TRUSTED_NAME_HEADER": "X-authentik-name",
+        "DEFAULT_USER_ROLE": "user",
+        "WEBUI_AUTH_SIGNOUT_REDIRECT_URL": "https://auth.photondatum.space/flows/-/default/invalidation/"
       },
       "secrets": [
         {
