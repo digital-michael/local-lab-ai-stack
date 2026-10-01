@@ -1,5 +1,7 @@
 # Technical Proposal: Headscale Mesh Network Migration
 
+> **Note (2026-09-30):** Steps that modify `heartbeat.sh`, `bootstrap.sh`, `generate-join-token` or the KI registry are void: those were removed on 2026-09-30 with the Python Knowledge Index (D-045). The headscale mesh itself is unaffected.
+
 **Status:** Draft
 **Author:** Operator (with agent assistance)
 **Date:** 2026-04-09

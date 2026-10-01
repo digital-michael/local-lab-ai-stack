@@ -113,7 +113,6 @@ WantedBy=default.target
 - `flowise.container`
 - `openwebui.container`
 - `authentik.container`
-- `knowledge-index.container`
 - `prometheus.container`
 - `grafana.container`
 - `loki.container`
@@ -547,6 +546,8 @@ done
 
 > **Status:** Deferrable — define before building the Knowledge Index Service.
 
+> **Retired 2026-09-30 (D-045):** the Python service (D-012) was removed; this API is design reference for the Go Knowledge Index.
+
 The Knowledge Index Service (D-012) is a standalone Python/FastAPI microservice providing query→volume routing and library metadata access.
 
 ### Base URL
@@ -764,8 +765,7 @@ A `foo.container` file generates `foo.service`. The `depends_on` array values ma
 | `litellm.container` | `ai-stack-network.service postgres.service` | `ai-stack-network.service postgres.service` |
 | `vllm.container` | `ai-stack-network.service litellm.service` | `ai-stack-network.service litellm.service` |
 | `ollama.container` | `ai-stack-network.service litellm.service` | `ai-stack-network.service litellm.service` |
-| `knowledge-index.container` | `ai-stack-network.service postgres.service qdrant.service` | `ai-stack-network.service postgres.service qdrant.service` |
-| `flowise.container` | `ai-stack-network.service litellm.service qdrant.service knowledge-index.service` | `ai-stack-network.service litellm.service qdrant.service knowledge-index.service` |
+| `flowise.container` | `ai-stack-network.service litellm.service qdrant.service` | `ai-stack-network.service litellm.service qdrant.service` |
 | `openwebui.container` | `ai-stack-network.service litellm.service` | `ai-stack-network.service litellm.service` |
 | `prometheus.container` | `ai-stack-network.service` | `ai-stack-network.service` |
 | `grafana.container` | `ai-stack-network.service prometheus.service` | `ai-stack-network.service prometheus.service` |

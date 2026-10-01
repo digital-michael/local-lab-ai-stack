@@ -154,6 +154,10 @@ query-able by another service yet. Not yet implemented. See
 
 ### Group: `ai-stack-know`
 
+> **Implementation retired 2026-09-30 (D-045):** the Python `knowledge-index` that filled
+> this group (and hosted the worker heartbeat registry) was removed. The group is the slot
+> the Go Knowledge Index (ledger epic 2b9b1647) fills; the description below is design.
+
 Knowledge pipeline and vector storage. The knowledge-index ingests documents,
 chunks and embeds them, and serves RAG queries. Qdrant owns the vector index
 and is exclusive to this group — no other group reads or writes it directly.
@@ -335,7 +339,6 @@ All scripts below run on the controller host from the project root.
 | `scripts/configure.sh generate-quadlets` | Setup | Generate systemd quadlet `.container` and `.network` files for all groups |
 | `scripts/configure.sh generate-litellm-config` | Models | Regenerate `configs/litellm/proxy_config.yaml` from `configs/config.json` |
 | `scripts/configure.sh security-audit` | Security | Check port exposure, auth enforcement, TLS validity, secret hygiene |
-| `scripts/configure.sh generate-join-token` | Workers | Generate a one-time join token for a new worker node |
 | `scripts/deploy.sh` | Deployment | Validate config, generate quadlets, create Podman networks — run before first start |
 | `scripts/start.sh` | Operations | Start all services in dependency order via systemd |
 | `scripts/stop.sh` | Operations | Stop all services in reverse dependency order |
@@ -344,10 +347,9 @@ All scripts below run on the controller host from the project root.
 | `scripts/pull-models.sh` | Models | Register model routes into LiteLLM from `configs/models.json`; re-run after adding workers |
 | `scripts/backup.sh` | Operations | Back up PostgreSQL, Qdrant snapshot, libraries, and configs to `$AI_STACK_DIR/backups/` |
 | `scripts/capture-credentials.sh` | Security | Write all Podman secret values to `configs/credentials.local` (gitignored) |
-| `scripts/node.sh list` | Workers | List all registered worker nodes and their status |
+| `scripts/node.sh list` | Workers | List worker nodes from headscale |
 | `scripts/node.sh harden-worker` | Security | Print firewall commands restricting Ollama port 11434 on a worker to controller IP only |
 | `scripts/undeploy.sh` | Teardown | Stop services and remove quadlet files; optionally wipe `$AI_STACK_DIR` data |
-| `scripts/m2m-authentik-bootstrap.sh` | IAM | Wire M2M gateway OIDC/JWKS configuration in Authentik for service-to-service auth |
 | `scripts/inhibit.sh` | Operations | Enable/disable OS sleep inhibition (useful if Ollama should not be interrupted) |
 
 **Deployment sequence (first install):**

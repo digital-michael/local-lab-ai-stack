@@ -42,6 +42,10 @@ interface — they have no access to other services.
 
 ## Registered Applications
 
+> **2026-09-30 (D-045):** the `knowledge-index` and `knowledge-index-lan` applications point at the
+> removed Python Knowledge Index. They still exist in Authentik until an operator deletes them
+> (or repoints them at the Go Knowledge Index); `bundle-developer`'s knowledge-index grant goes with them.
+
 | Application slug | Name | External URL | Allowed bundles |
 |---|---|---|---|
 | `agent` | Agent (OpenWebUI) | `https://agent.photondatum.space` | agent, agent-mcp, developer, admin, **agent-only** |

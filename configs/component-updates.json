@@ -36,7 +36,7 @@
       "registry": "ghcr",
       "registry_repo": "berriai/litellm",
       "release_repo": "BerriAI/litellm",
-      "workflow_deps": ["openwebui", "knowledge-index"],
+      "workflow_deps": ["openwebui"],
       "known_issues": [
         {
           "severity": "critical",
@@ -56,7 +56,7 @@
       "registry": "dockerhub",
       "registry_repo": "ollama/ollama",
       "release_repo": "ollama/ollama",
-      "workflow_deps": ["knowledge-index"],
+      "workflow_deps": [],
       "known_issues": [
         {
           "severity": "medium",
@@ -96,7 +96,7 @@
       "registry": "dockerhub",
       "registry_repo": "qdrant/qdrant",
       "release_repo": "qdrant/qdrant",
-      "workflow_deps": ["knowledge-index"],
+      "workflow_deps": [],
       "known_issues": [],
       "deploy": "quadlet"
     },
@@ -130,7 +130,7 @@
       "registry": "ghcr",
       "registry_repo": "open-webui/open-webui",
       "release_repo": "open-webui/open-webui",
-      "workflow_deps": ["litellm", "authentik", "knowledge-index"],
+      "workflow_deps": ["litellm", "authentik"],
       "known_issues": [
         {
           "severity": "high",
@@ -141,26 +141,6 @@
           "severity": "medium",
           "summary": "Native MCP tool-server support (Streamable HTTP, auth_type=bearer/oauth_2.1) is present in the currently-deployed v0.8.10 build; confirm this remains true after any version bump before assuming MCP integration still works — verify via GET /api/v1/configs/tool_servers or the admin UI, not just changelog claims.",
           "source": "verified empirically 2026-07-21 against the running container (see docs/decisions.md D-042 discussion)"
-        }
-      ],
-      "deploy": "quadlet"
-    },
-    {
-      "id": "knowledge-index",
-      "name": "Knowledge Index Service",
-      "roles": ["backplane", "node"],
-      "custom_built": true,
-      "image": "localhost/knowledge-index",
-      "config_path": "services.knowledge-index.tag",
-      "registry": "custom",
-      "registry_repo": null,
-      "release_repo": null,
-      "workflow_deps": ["litellm", "qdrant", "postgres", "ollama"],
-      "known_issues": [
-        {
-          "severity": "info",
-          "summary": "Custom-built from services/knowledge-index/ in this repo — there is no upstream registry to check. 'Update' means rebuilding after a source change, not pulling a new tag. Bump the tag in config.json when the built image changes meaningfully.",
-          "source": "n/a — structural note"
         }
       ],
       "deploy": "quadlet"
@@ -257,7 +237,7 @@
       "registry": "dockerhub",
       "registry_repo": "minio/minio",
       "release_repo": "minio/minio",
-      "workflow_deps": ["knowledge-index"],
+      "workflow_deps": [],
       "known_issues": [
         {
           "severity": "medium",
@@ -279,26 +259,6 @@
       "release_repo": "gethomepage/homepage",
       "workflow_deps": [],
       "known_issues": [],
-      "deploy": "quadlet"
-    },
-    {
-      "id": "m2m-gateway",
-      "name": "M2M Gateway",
-      "roles": ["backplane"],
-      "custom_built": true,
-      "image": "localhost/m2m-gateway",
-      "config_path": "services.m2m-gateway.tag",
-      "registry": "custom",
-      "registry_repo": null,
-      "release_repo": null,
-      "workflow_deps": ["knowledge-index"],
-      "known_issues": [
-        {
-          "severity": "info",
-          "summary": "Custom-built from services/m2m-gateway/ — no upstream registry to check; 'update' means rebuilding after a source change.",
-          "source": "n/a — structural note"
-        }
-      ],
       "deploy": "quadlet"
     },
     {

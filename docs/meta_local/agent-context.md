@@ -3,6 +3,8 @@
 > Retained here for historical reference only — do not treat as current state.
 
 # Agent Working Context
+
+> **Note (2026-09-30):** Historical session context (Phase 7 era). Knowledge Index/MCP items refer to the Python service removed on 2026-09-30 (D-045).
 **Date:** 2026-03-19
 **HEAD:** `c70f1f0` (main, origin/main)
 **Repo:** `git@github.com:digital-michael/local-lab-ai-stack.git`
@@ -94,8 +96,8 @@ Full spec in [docs/ai_stack_blueprint/ai_stack_checklist.md](../ai_stack_bluepri
 |---|---|
 | [docs/decisions.md](../decisions.md) | ADRs D-001–D-015 (new path — was `docs/meta_local/decisions.md`) |
 | [docs/ai_stack_blueprint/ai_stack_checklist.md](../ai_stack_blueprint/ai_stack_checklist.md) | Master task tracker |
-| [services/knowledge-index/app.py](../../services/knowledge-index/app.py) | Knowledge Index Service (REST + MCP) |
+| services/knowledge-index/app.py (removed, D-045) | Knowledge Index Service (REST + MCP) |
 | [docs/library/framework_components/knowledge-index/guidance.md](../library/framework_components/knowledge-index/guidance.md) | MCP endpoint reference + HOW-TO for new tools |
 | [configs/config.json](../../configs/config.json) | Machine-readable SSOT |
 | [configs/traefik/dynamic/services.yaml](../../configs/traefik/dynamic/services.yaml) | Traefik routers (now includes knowledge-index /mcp route) |
-| [testing/layer3_model/test_mcp_tools.py](../../testing/layer3_model/test_mcp_tools.py) | MCP test suite (T-MCP-001..004) |
+| testing/layer3_model/test_mcp_tools.py (removed, D-045) | MCP test suite (T-MCP-001..004) |

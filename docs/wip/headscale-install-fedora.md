@@ -1,5 +1,7 @@
 # Headscale Installation Guide — Fedora 42+
 
+> **Note (2026-09-30):** Steps that modify or run `heartbeat.sh`, `bootstrap.sh` or `generate-join-token` are void: those were removed on 2026-09-30 with the Python Knowledge Index (D-045). The headscale install itself is unaffected.
+
 **Summary:** Step-by-step installation and configuration guide for running Headscale as a self-hosted WireGuard mesh coordination server on a Fedora 42+ Linode Nanode. Covers the full lifecycle: binary install, DERP relay, Caddy reverse proxy, node enrollment (controller + workers), script integration, Authentik OIDC, and ACL enforcement. Written for the local-lab-ai-stack AI stack.
 
 **Last Updated:** 2026-04-16

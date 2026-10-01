@@ -3,9 +3,9 @@
 ## Purpose
 
 The worker role extends inference capacity. A worker node runs Ollama (and
-optionally vLLM) and registers itself with the controller's knowledge-index
-heartbeat system. LiteLLM on the controller routes model requests to registered
-workers automatically. Workers can be added or removed without changing any
+optionally vLLM) and is registered statically in the controller's
+`configs/nodes/` (the knowledge-index heartbeat registry was removed 2026-09-30,
+D-045). LiteLLM on the controller routes model requests to registered workers. Workers can be added or removed without changing any
 controller configuration beyond the LiteLLM model route list.
 
 Workers are not always-on. They can be idle machines that come online when
@@ -40,7 +40,7 @@ inference demand is high, or dedicated GPU machines that stay on continuously.
 | Role | Required by | What fails without it |
 | --- | --- | --- |
 | Edge role — mesh group | Tailscale agent | Cannot enroll in Headscale; tailnet connectivity unavailable |
-| Controller role | All worker function | No LiteLLM endpoint to register with; no knowledge-index heartbeat target; no model routing |
+| Controller role | All worker function | No LiteLLM endpoint to register with; no model routing |
 
 The worker has no independent value without the controller. Its only job is to
 extend the controller's inference capacity. Both the edge role (for Headscale)
@@ -62,7 +62,6 @@ worker can register.
 | Service | Where it runs | Required by |
 | --- | --- | --- |
 | Headscale | Edge node (`ai-stack-mesh`) | Tailscale enrollment; tailnet IP assignment |
-| knowledge-index | Controller (`ai-stack-know-index`) | Heartbeat registration endpoint |
 | LiteLLM | Controller (`ai-stack-infer-litellm`) | Model route target; config updated after worker joins |
 
 ---
@@ -101,7 +100,6 @@ its API on port 11434; LiteLLM on the controller routes to it by tailnet/LAN IP.
 | --- | --- | --- |
 | `tailscale` | systemd | Mesh connectivity to controller |
 | `ai-stack-obs-promtail` | quadlet or systemd | Log shipping to controller Loki |
-| `ai-stack-heartbeat` | systemd timer | Reports node status to knowledge-index |
 
 **Planned extension — task-execution endpoint (`mcp-local`):**
 `mcp-local`, developed in the same `cortex` project as `cortex-stack`, is currently an
@@ -117,27 +115,13 @@ tool-execution surface. See
 
 ## Worker Registration
 
-Workers register with the controller's `ai-stack-know-index` via heartbeat.
-The controller then makes the worker visible to LiteLLM for model routing.
+> **Changed 2026-09-30 (D-045):** the dynamic join/heartbeat registry lived in the Python
+> Knowledge Index and was removed with it (`generate-join-token`, `bootstrap.sh`,
+> `heartbeat.sh`, `node.sh join`). Workers are registered statically for now.
 
-**Generate join token (on controller):**
-
-```bash
-bash scripts/configure.sh generate-join-token \
-  --node-id <worker-id> \
-  --profile inference-worker \
-  --display-name "<display name>"
-# Token displayed once — copy before closing terminal
-```
-
-**Bootstrap worker (on worker node):**
-
-```bash
-bash scripts/bootstrap.sh \
-  --controller "http://<controller-tailnet-ip>:8100" \
-  --token "<token>" \
-  --node-id "<worker-id>"
-```
+**Describe the worker (on the worker node):** `bash scripts/register-node.sh` prints a
+config block; review it and add it to the controller's `configs/nodes/<alias>.json`
+(static config model, D-020/D-026). Presence comes from the tailnet (headscale).
 
 **Add worker to LiteLLM (on controller, `configs/litellm/proxy_config.yaml`):**
 
@@ -173,6 +157,9 @@ Ollama should not be reachable from the public internet or untrusted LAN segment
 
 ## Node State Machine
 
+> Retired with the registry on 2026-09-30 (D-045). Kept as a reference for a future
+> registry; `node.sh list` now reports headscale online/offline only.
+
 | State | Condition | Recovery |
 | --- | --- | --- |
 | `online` | Heartbeat received within last 90s | Normal |
@@ -190,7 +177,7 @@ delegated execution). Not yet implemented; not part of the current heartbeat pay
 Check node status from controller:
 
 ```bash
-bash scripts/node.sh list --controller http://localhost:8100
+bash scripts/node.sh list --headscale-url <url> --headscale-key <key>
 ```
 
 ---
@@ -201,13 +188,8 @@ bash scripts/node.sh list --controller http://localhost:8100
 | --- | --- | --- |
 | `scripts/install.sh` | Setup | Install Podman and create storage layout on the worker host |
 | `scripts/validate-system.sh` | Setup | Validate Podman version, GPU availability, storage prerequisites |
-| `scripts/bootstrap.sh` | Registration | Zero-touch worker bootstrap — joins the controller with a token |
 | `scripts/register-node.sh` | Registration | Introspects local environment and prints a config block for the controller's `config.json` |
-| `scripts/node.sh join` | Registration | Join the controller with a previously generated token |
-| `scripts/node.sh status` | Operations | Check this node's registration status against the controller |
-| `scripts/node.sh unjoin` | Operations | Remove this node from the controller registry |
 | `scripts/node.sh harden-worker` | Security | Print firewall rules that restrict Ollama port 11434 to controller IP only |
-| `scripts/heartbeat.sh` | Operations | Send a single heartbeat to the controller (invoked by systemd timer) |
 | `scripts/inhibit.sh` | Operations | Enable/disable OS sleep inhibition while inference is running |
 | `scripts/pull-models.sh` | Models | Pull Ollama models and register routes in controller LiteLLM (run on controller after worker joins) |
 | `scripts/status.sh` | Operations | Health status of deployed Ollama/vLLM containers |
@@ -217,17 +199,11 @@ bash scripts/node.sh list --controller http://localhost:8100
 **Worker bootstrap flow (typical):**
 
 ```bash
-# 1. On controller — generate a join token
-bash scripts/configure.sh generate-join-token \
-  --node-id <id> --profile inference-worker --display-name "<name>"
+# 1. On worker — describe the node; add the printed block to configs/nodes/<alias>.json on the controller
+bash scripts/register-node.sh
 
-# 2. On worker — bootstrap (installs, joins, starts heartbeat timer)
-bash scripts/bootstrap.sh \
-  --controller "http://<controller-tailnet-ip>:8100" \
-  --token "<token>" --node-id "<id>"
-
-# 3. On controller — verify registration and update LiteLLM config
-bash scripts/node.sh list --controller http://localhost:8100
+# 2. On controller — confirm the worker is on the tailnet and update LiteLLM config
+bash scripts/node.sh list --headscale-url <url> --headscale-key <key>
 # Then add worker Ollama endpoint to configs/litellm/proxy_config.yaml
 bash scripts/pull-models.sh
 ```

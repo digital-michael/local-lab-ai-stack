@@ -58,10 +58,6 @@ capture() {
     _header "Qdrant"
     echo "QDRANT_API_KEY=$(_read_secret qdrant_api_key)"
 
-    _header "Knowledge Index"
-    echo "KNOWLEDGE_INDEX_API_KEY=$(_read_secret knowledge_index_api_key)"
-    echo "CNC_BEARER_TOKEN=$(_read_secret knowledge_index_cnc_token)"
-
     _header "Flowise"
     echo "FLOWISE_PASSWORD=$(_read_secret flowise_password)"
     echo "FLOWISE_SECRET_KEY=$(_read_secret flowise_secret_key)"
@@ -72,8 +68,6 @@ capture() {
     _header "MinIO"
     echo "MINIO_ROOT_USER=$(_read_secret minio_root_user)"
     echo "MINIO_ROOT_PASSWORD=$(_read_secret minio_root_password)"
-    echo "MINIO_KI_ACCESS_KEY=$(_read_secret minio_ki_access_key)"
-    echo "MINIO_KI_SECRET_KEY=$(_read_secret minio_ki_secret_key)"
 
     _header "Grafana"
     echo "# Default credentials — rotate before non-localhost exposure"

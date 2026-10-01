@@ -14,6 +14,8 @@ argument-hint: 'Optional: --category A|B|C|D  to scope work to one category'
 
 # Knowledge Index — Content Review
 
+> **Partly retired (2026-09-30, D-045).** Point 1 (inference-time review, `ContentReviewHook` in `configs/litellm/hooks.py`) is **current**. Point 2 (ingestion-time review), the review queue, Step 2 and the KI checks in Phases 1–2 targeted the Python Knowledge Index (`services/knowledge-index/app.py`), which was removed; treat them as **design reference** for the Go Knowledge Index (ledger epic 2b9b1647). `AsyncRAGHook` no longer exists (its thinking default is now `ModelDefaultsHook`).
+
 Adds a multi-category content review layer to the AI stack inference and
 document ingestion paths.  The review layer operates at two enforcement
 points and applies four ordered categories of checks.  The goal is to
@@ -26,7 +28,7 @@ leaking review specifics to the caller.
 ## Enforcement Points
 
 ```
-User query ──► LiteLLM Proxy ──► AsyncRAGHook (Point 1: inference-time review)
+User query ──► LiteLLM Proxy ──► ContentReviewHook (Point 1: inference-time review)
                                       │ rejected? → log + raise
                                       ▼
                                Ollama inference ──► caller

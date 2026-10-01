@@ -1,5 +1,7 @@
 # BL-015 Spec — Tailnet-Accessible KI Endpoint + CNC Foundation
 
+> **Note (2026-09-30):** The CNC channel this spec builds on (`/v1/cnc/*`, `heartbeat.sh`) lived in the Python Knowledge Index, removed 2026-09-30 (D-045). Kept as design input for a future controller registry.
+
 **Status:** Approved — implementation pending  
 **Decision:** D-009  
 **Unblocks:** BL-011 steps 3+4 (controller_url LAN→tailnet migration)  

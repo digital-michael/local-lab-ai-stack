@@ -44,9 +44,7 @@ Commands:
   generate-litellm-config   Regenerate configs/models.json from models[] in config.json
   detect-hardware           Detect GPU/VRAM/RAM and suggest node profile
   recommend                 Interactive node profile recommender (writes to config.json)
-  sync-libraries            Push local .ai-library packages to the controller KI service
   build-library             Package a directory of raw documents into a .ai-library bundle
-  generate-join-token       Register a worker node and emit its one-time join token
   provision-minio           Create MinIO buckets and service accounts (requires MinIO running)
   security-audit            Scan ports, API key enforcement, TLS, and secret hygiene
   help                      Show this message
@@ -151,7 +149,7 @@ cmd_validate() {
     node_profile_v=$(_get_node_profile)
     case "$node_profile_v" in
         inference-worker)                  deployed_svcs='["ollama","promtail"]' ;;
-        enhanced-worker|knowledge-worker)  deployed_svcs='["ollama","promtail","knowledge-index","qdrant"]' ;;
+        enhanced-worker|knowledge-worker)  deployed_svcs='["ollama","promtail","qdrant"]' ;;
         *)                                 deployed_svcs='null' ;;  # null = all services
     esac
     if [[ "$deployed_svcs" == "null" ]]; then
@@ -297,10 +295,10 @@ EOF
             echo "Note: node_profile=$node_profile — generating ollama + promtail quadlets only"
             ;;
         enhanced-worker|knowledge-worker)
-            # enhanced-worker: Ollama + Promtail + Knowledge Index (SQLite) + local Qdrant
+            # enhanced-worker: Ollama + Promtail + local Qdrant
             # knowledge-worker: legacy alias — identical service set
-            services=$'ollama\npromtail\nknowledge-index\nqdrant'
-            echo "Note: node_profile=$node_profile — generating ollama + promtail + knowledge-index + qdrant quadlets"
+            services=$'ollama\npromtail\nqdrant'
+            echo "Note: node_profile=$node_profile — generating ollama + promtail + qdrant quadlets"
             ;;
         edge)
             # Edge VPS: IAM group only (Authentik + its dependencies)
@@ -373,15 +371,10 @@ EOF
             done < <(jq -r --arg s "$svc" '.services[$s].secrets[]? | .name + " " + .target' "$CONFIG_FILE")
 
             # Environment — DATABASE_URL uses EnvironmentFile for credential injection at deploy time
-            # Exception: knowledge-worker knowledge-index uses SQLite (inline path, no password needed)
             local has_db_url
             has_db_url=$(jq -r --arg s "$svc" '.services[$s].environment // {} | has("DATABASE_URL")' "$CONFIG_FILE")
             if [[ "$has_db_url" == "true" ]]; then
-                if [[ ("$node_profile" == "knowledge-worker" || "$node_profile" == "enhanced-worker") && "$svc" == "knowledge-index" ]]; then
-                    echo "Environment=DATABASE_URL=sqlite:///${ai_stack_dir//\$HOME/$HOME}/knowledge-index/ki.db"
-                else
-                    echo "EnvironmentFile=${ai_stack_dir//\$HOME/%h}/configs/run/${svc}.env"
-                fi
+                echo "EnvironmentFile=${ai_stack_dir//\$HOME/%h}/configs/run/${svc}.env"
             fi
             # Value is quoted via @json (JSON's \" / \\ escaping matches systemd's
             # own quoted-string escaping) — unquoted values silently truncate at
@@ -1041,19 +1034,14 @@ cmd_recommend() {
                 prereqs+=("Run: systemctl --user daemon-reload && bash scripts/start.sh")
                 ;;
             enhanced-worker)
-                prereqs+=("Run: bash scripts/configure.sh generate-quadlets  (ollama + promtail + knowledge-index + qdrant)")
-                prereqs+=("Run: systemctl --user daemon-reload && systemctl --user start ollama.service qdrant.service knowledge-index.service promtail.service")
-                prereqs+=("Optional: add TAVILY_API_KEY Podman secret to enable web_search capability")
-                prereqs+=("         printf '<key>' | podman secret create tavily_api_key -")
-                prereqs+=("         printf '<controller-ki-url>' | podman secret create controller_ki_url -")
-                prereqs+=("Run: bash scripts/configure.sh sync-libraries  (push local libraries to controller)")
+                prereqs+=("Run: bash scripts/configure.sh generate-quadlets  (ollama + promtail + qdrant)")
+                prereqs+=("Run: systemctl --user daemon-reload && systemctl --user start ollama.service qdrant.service promtail.service")
                 ;;
             knowledge-worker)
                 # legacy profile — treated identically to enhanced-worker at runtime
                 prereqs+=("Note: knowledge-worker is a legacy alias for enhanced-worker (D-029)")
-                prereqs+=("Run: bash scripts/configure.sh generate-quadlets  (ollama + promtail + knowledge-index + qdrant)")
-                prereqs+=("Run: systemctl --user daemon-reload && systemctl --user start ollama.service qdrant.service knowledge-index.service")
-                prereqs+=("Run: bash scripts/configure.sh sync-libraries  (push local libraries to controller)")
+                prereqs+=("Run: bash scripts/configure.sh generate-quadlets  (ollama + promtail + qdrant)")
+                prereqs+=("Run: systemctl --user daemon-reload && systemctl --user start ollama.service qdrant.service")
                 ;;
             inference-worker)
                 prereqs+=("Run: bash scripts/configure.sh generate-quadlets  (ollama + promtail only)")
@@ -1135,122 +1123,6 @@ cmd_recommend() {
         echo "Profile not written."
     fi
     echo ""
-}
-
-cmd_sync_libraries() {
-    require_config
-
-    local ai_stack_dir
-    ai_stack_dir=$(jq -r '.ai_stack_dir' "$CONFIG_FILE")
-    ai_stack_dir="${ai_stack_dir//\$HOME/$HOME}"
-
-    # Resolve controller address from configs/nodes/
-    local controller_address controller_fallback _nodes_dir
-    _nodes_dir="$(dirname "$CONFIG_FILE")/nodes"
-    controller_address=$(for _f in "$_nodes_dir"/*.json; do [[ -f "$_f" ]] && jq -r 'select(.profile == "controller") | .address // empty' "$_f"; done 2>/dev/null | head -1 || true)
-    controller_fallback=$(for _f in "$_nodes_dir"/*.json; do [[ -f "$_f" ]] && jq -r 'select(.profile == "controller") | .address_fallback // empty' "$_f"; done 2>/dev/null | head -1 || true)
-    local controller_host="${controller_address:-$controller_fallback}"
-
-    if [[ -z "$controller_host" || "$controller_host" == "null" ]]; then
-        echo "ERROR: No controller node found in configs/nodes/ — set .address or .address_fallback" >&2
-        exit 1
-    fi
-
-    local ki_port="${KI_PORT:-8100}"
-    local ki_url="http://${controller_host}:${ki_port}"
-    echo "Controller KI endpoint: $ki_url"
-    echo "  (override with KI_PORT env var or set .address on the controller node)"
-    echo ""
-
-    # Resolve API key: KI_API_KEY env var > Podman secret 'ki_api_key'
-    local api_key="${KI_API_KEY:-}"
-    if [[ -z "$api_key" ]] && podman secret inspect ki_api_key &>/dev/null 2>&1; then
-        api_key=$(podman secret inspect ki_api_key --showsecret 2>/dev/null | jq -r '.[].SecretData' || true)
-    fi
-
-    local origin_node
-    origin_node=$(for _f in "$_nodes_dir"/*.json; do [[ -f "$_f" ]] && jq -r 'select(.profile != "controller") | .name // empty' "$_f"; done 2>/dev/null | head -1 || true)
-    origin_node="${origin_node:-$(hostname)}"
-
-    local lib_dir="${ai_stack_dir}/libraries"
-    if [[ ! -d "$lib_dir" ]]; then
-        echo "No libraries directory found at $lib_dir — nothing to sync."
-        return 0
-    fi
-
-    local total=0 synced=0 failed=0
-
-    for lib_path in "$lib_dir"/*/; do
-        [[ -d "$lib_path" ]] || continue
-        local lib_name
-        lib_name=$(basename "$lib_path")
-        (( total++ )) || true
-
-        local manifest="$lib_path/manifest.yaml"
-        if [[ ! -f "$manifest" ]]; then
-            echo "  [$lib_name] WARN: no manifest.yaml — skipping"
-            continue
-        fi
-
-        local version author visibility
-        version=$(grep '^version:' "$manifest" | awk '{print $2}' | tr -d '"' || echo "0.1.0")
-        author=$(grep '^author:' "$manifest" | awk '{print $2}' | tr -d '"' || echo "")
-        visibility=$(grep '^visibility:' "$manifest" | awk '{print $2}' | tr -d '"' || echo "private")
-        version="${version:-0.1.0}"
-        visibility="${visibility:-private}"
-
-        # Accumulate content from all .md and .txt files in the library
-        local content=""
-        while IFS= read -r -d '' f; do
-            content+=$(cat "$f")
-            content+=$'\n'
-        done < <(find "$lib_path" -maxdepth 2 -type f \( -name "*.md" -o -name "*.txt" \) -not -name "manifest.yaml" -print0 2>/dev/null)
-
-        if [[ -z "$content" ]]; then
-            echo "  [$lib_name] WARN: no readable content (.md/.txt) — skipping"
-            continue
-        fi
-
-        local checksum
-        checksum=$(printf '%s' "$content" | sha256sum | awk '{print $1}')
-
-        local signature=""
-        [[ -f "$lib_path/signature.asc" ]] && signature=$(cat "$lib_path/signature.asc")
-
-        local payload
-        payload=$(jq -n \
-            --arg name "$lib_name" \
-            --arg version "$version" \
-            --arg author "$author" \
-            --arg origin_node "$origin_node" \
-            --arg visibility "$visibility" \
-            --arg content "$content" \
-            --arg checksum "$checksum" \
-            --arg signature "$signature" \
-            '{name:$name,version:$version,author:$author,origin_node:$origin_node,visibility:$visibility,content:$content,checksum:$checksum,signature:$signature}')
-
-        local curl_args=(-s -o /tmp/ki_sync_resp.json -w "%{http_code}" \
-            -X POST "${ki_url}/v1/libraries" \
-            -H "Content-Type: application/json")
-        [[ -n "$api_key" ]] && curl_args+=(-H "Authorization: Bearer ${api_key}")
-        curl_args+=(-d "$payload")
-
-        local http_code
-        http_code=$(curl "${curl_args[@]}" 2>/dev/null || echo "000")
-
-        case "$http_code" in
-            201) echo "  [$lib_name] synced (v${version})";     (( synced++ )) || true ;;
-            200) echo "  [$lib_name] updated (v${version})";    (( synced++ )) || true ;;
-            *)   echo "  [$lib_name] FAILED (HTTP $http_code)";
-                 cat /tmp/ki_sync_resp.json 2>/dev/null; echo ""
-                 (( failed++ )) || true ;;
-        esac
-    done
-
-    echo ""
-    echo "Sync complete: ${synced} synced, ${failed} failed (${total} total)"
-    [[ "$failed" -gt 0 ]] && return 1
-    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -1401,9 +1273,8 @@ cmd_build_library() {
     echo "  ${output_dir}/metadata.json"
     echo "  ${output_dir}/checksums.txt"
     echo ""
-    echo "Next steps:"
-    echo "  Ingest locally:     POST /v1/scan with path=${output_dir%/*}"
-    echo "  Push to controller: bash scripts/configure.sh sync-libraries"
+    echo "(No ingest path today: the Python Knowledge Index that consumed .ai-library"
+    echo " bundles was removed on 2026-09-30, D-045; the Go Knowledge Index is pending.)"
 }
 
 # ---------------------------------------------------------------------------
@@ -1496,7 +1367,7 @@ cmd_security_audit() {
     services_json=$(jq -r '.services // {}' "$CONFIG_FILE")
 
     # Services that SHOULD NOT be 0.0.0.0 bound (sensitive internal services)
-    local -a sensitive_services=("postgres" "qdrant" "knowledge-index" "litellm"
+    local -a sensitive_services=("postgres" "qdrant" "litellm"
                                   "flowise" "prometheus" "grafana" "loki"
                                   "openwebui" "minio")
 
@@ -1542,10 +1413,9 @@ cmd_security_audit() {
     else
         $json_mode || echo "[B] Probing auth enforcement..."
 
-        local litellm_port qdrant_port ki_port
+        local litellm_port qdrant_port
         litellm_port=$(jq -r '.services.litellm.ports[0].host // "9000"' "$CONFIG_FILE")
         qdrant_port=$(jq  -r '.services.qdrant.ports[0].host  // "6333"' "$CONFIG_FILE")
-        ki_port=$(jq      -r '.services["knowledge-index"].ports[0].host // "8100"' "$CONFIG_FILE")
 
         # LiteLLM /models — must require auth
         local code
@@ -1572,19 +1442,6 @@ cmd_security_audit() {
             _finding INFO "AUTH-QDRANT" "Qdrant not reachable at localhost:${qdrant_port} (offline?)"
         else
             _finding WARNING "AUTH-QDRANT" "Qdrant returned unexpected HTTP $code"
-        fi
-
-        # Knowledge-Index /v1/catalog — must require auth
-        code=$(_http_check "http://localhost:${ki_port}/v1/catalog")
-        if [[ "$code" == "200" ]]; then
-            _finding CRITICAL "AUTH-KI" \
-                "Knowledge-Index /v1/catalog returns 200 without auth (port ${ki_port})"
-        elif [[ "$code" =~ ^(401|403)$ ]]; then
-            _finding OK "AUTH-KI" "Knowledge-Index requires auth (HTTP $code)"
-        elif [[ "$code" == "ERR" ]]; then
-            _finding INFO "AUTH-KI" "Knowledge-Index not reachable at localhost:${ki_port} (offline?)"
-        else
-            _finding WARNING "AUTH-KI" "Knowledge-Index returned unexpected HTTP $code"
         fi
 
         # Ollama /api/tags — should NOT be reachable from LAN without a wrapper
@@ -1758,7 +1615,7 @@ cmd_security_audit() {
             _sval=$(podman secret inspect "$sname" --showsecret 2>/dev/null \
                 | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['SecretData'])" 2>/dev/null) || {
                 _finding WARNING "SECRET-MISSING-${sname^^}" \
-                    "Podman secret '$sname' listed in config.json but not found in secret store — run: bash scripts/bootstrap.sh"
+                    "Podman secret '$sname' listed in config.json but not found in secret store — run: bash scripts/configure.sh generate-secrets"
                 continue
             }
 
@@ -1837,168 +1694,6 @@ cmd_security_audit() {
     fi
 
     return $exit_code
-}
-
-cmd_generate_join_token() {
-    # Usage: configure.sh generate-join-token [options]
-    #   --node-id        <id>      Node identifier (default: uuid)
-    #   --display-name   <name>    Human-readable name (default: node-id)
-    #   --profile        <profile> Node profile (default: knowledge-worker)
-    #   --address        <url>     Worker KI address (e.g. http://192.168.1.50:8100)
-    #   --ki-url         <url>     Controller KI API base URL for local call (default: localhost from config.json)
-    #   --controller-url <url>     Controller URL embedded in the emitted join command (default: from configs/nodes/)
-    require_config
-
-    local node_id="" display_name="" profile="knowledge-worker"
-    local address="" ki_url="" ki_admin_key="" controller_url=""
-
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --node-id)        node_id="$2";        shift 2 ;;
-            --display-name)   display_name="$2";   shift 2 ;;
-            --profile)        profile="$2";        shift 2 ;;
-            --address)        address="$2";        shift 2 ;;
-            --ki-url)         ki_url="$2";         shift 2 ;;
-            --controller-url) controller_url="$2"; shift 2 ;;
-            *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
-        esac
-    done
-
-    if [[ -z "$node_id" ]]; then
-        node_id=$(python3 -c "import uuid; print(uuid.uuid4())" 2>/dev/null \
-                  || uuidgen 2>/dev/null \
-                  || { echo "ERROR: cannot generate uuid (need python3 or uuidgen)" >&2; exit 1; })
-    fi
-    [[ -z "$display_name" ]] && display_name="$node_id"
-
-    if [[ -z "$ki_url" ]]; then
-        # config.json: services["knowledge-index"].ports[0].host (default 8100)
-        local ki_port
-        ki_port=$(python3 -c "
-import json, sys
-d = json.load(open('$CONFIG_FILE'))
-ports = d.get('services', {}).get('knowledge-index', {}).get('ports', [])
-print(ports[0]['host'] if ports else 8100)
-" 2>/dev/null || echo "8100")
-        ki_url="http://localhost:${ki_port}"
-    fi
-
-    # Resolve the external controller URL for the emitted join command.
-    # workers connect from outside, so they need the real hostname/IP — not localhost.
-    if [[ -z "$controller_url" ]]; then
-        local _nodes_dir _ctrl_addr _ctrl_port
-        _nodes_dir="$(dirname "$CONFIG_FILE")/nodes"
-        # Prefer explicit controller_url field (handles Traefik/HTTPS setups)
-        local _ctrl_url_from_file
-        _ctrl_url_from_file=$(for _f in "$_nodes_dir"/*.json; do
-            [[ -f "$_f" ]] && jq -r 'select(.profile == "controller") | .controller_url // empty' "$_f"
-        done 2>/dev/null | grep -v '^$' | head -1 || true)
-        if [[ -n "$_ctrl_url_from_file" ]]; then
-            controller_url="$_ctrl_url_from_file"
-        else
-            local _ctrl_addr _ctrl_port
-            _ctrl_addr=$(for _f in "$_nodes_dir"/*.json; do
-                [[ -f "$_f" ]] && jq -r 'select(.profile == "controller") | .address // empty' "$_f"
-            done 2>/dev/null | grep -v '^$' | head -1 || true)
-            _ctrl_port=$(for _f in "$_nodes_dir"/*.json; do
-                [[ -f "$_f" ]] && jq -r 'select(.profile == "controller") | (.ki_port // empty | tostring)' "$_f"
-            done 2>/dev/null | grep -v '^null$\|^$' | head -1 || true)
-            _ctrl_port="${_ctrl_port:-${ki_port:-8100}}"
-            if [[ -n "$_ctrl_addr" && "$_ctrl_addr" != "null" ]]; then
-                controller_url="http://${_ctrl_addr}:${_ctrl_port}"
-            else
-                controller_url="$ki_url"
-                echo "WARN: No controller address in configs/nodes/ — join command will use localhost; use --controller-url to override" >&2
-            fi
-        fi
-    fi
-
-    # Try to resolve the admin key: prefer KI_ADMIN_KEY env var, then
-    # read it from the Podman secret if available, otherwise empty.
-    if [[ -z "${ki_admin_key:-}" ]]; then
-        ki_admin_key="${KI_ADMIN_KEY:-}"
-    fi
-    if [[ -z "${ki_admin_key:-}" ]]; then
-        local secret_name
-        secret_name=$(python3 -c "
-import json
-d = json.load(open('$CONFIG_FILE'))
-secs = d.get('services', {}).get('knowledge-index', {}).get('secrets', [])
-for s in secs:
-    if s.get('target') in ('KI_ADMIN_KEY', 'API_KEY'):
-        print(s.get('name', ''))
-        break
-" 2>/dev/null || echo "")
-        if [[ -n "$secret_name" ]]; then
-            ki_admin_key=$(podman secret inspect "$secret_name" --showsecret \
-                           --format '{{.SecretData}}' 2>/dev/null || echo "")
-        fi
-    fi
-
-    # Look up capabilities from configs/nodes/ by node_id field; default to []
-    local _nf_dir caps_json
-    _nf_dir="$(dirname "$CONFIG_FILE")/nodes"
-    caps_json=$(python3 - "$_nf_dir" "$node_id" <<'PYEOF' 2>/dev/null
-import glob, json, sys
-nodes_dir, nid = sys.argv[1], sys.argv[2]
-for path in sorted(glob.glob(nodes_dir + "/*.json")):
-    try:
-        n = json.load(open(path))
-        if n.get("node_id") == nid:
-            caps = n.get("capabilities", [])
-            print(json.dumps(caps if isinstance(caps, list) else list(caps.keys())))
-            sys.exit(0)
-    except Exception:
-        pass
-print("[]")
-PYEOF
-    )
-    caps_json="${caps_json:-[]}"
-
-    local payload
-    payload=$(jq -n \
-        --arg nid   "$node_id" \
-        --arg dname "$display_name" \
-        --arg prof  "$profile" \
-        --arg addr  "$address" \
-        --argjson caps "$caps_json" \
-        '{node_id: $nid, display_name: $dname, profile: $prof, address: $addr, capabilities: $caps}')
-
-    local response http_code
-    response=$(curl -s -w "\n%{http_code}" \
-        -X POST "$ki_url/admin/v1/nodes" \
-        -H "Authorization: Bearer $ki_admin_key" \
-        -H "Content-Type: application/json" \
-        -d "$payload") || {
-        echo "ERROR: Failed to reach knowledge-index at $ki_url" >&2
-        exit 1
-    }
-
-    http_code=$(echo "$response" | tail -1)
-    body=$(echo "$response" | sed '$d')
-
-    if [[ "$http_code" != "201" ]]; then
-        echo "ERROR: Registration failed (HTTP $http_code):" >&2
-        echo "$body" >&2
-        exit 1
-    fi
-
-    local token
-    token=$(echo "$body" | jq -r '.token // empty' 2>/dev/null)
-    if [[ -z "$token" ]]; then
-        echo "ERROR: No token in response: $body" >&2
-        exit 1
-    fi
-
-    echo "Node registered: $node_id  (status: unregistered)"
-    echo ""
-    echo "Join token (save this — shown only once):"
-    echo "  $token"
-    echo ""
-    echo "Run on the worker node:"
-    local addr_flag=""
-    [[ -n "$address" ]] && addr_flag=" --address '$address'"
-    echo "  bash scripts/node.sh join --controller '$controller_url' --token '$token' --node-id '$node_id'${addr_flag}"
 }
 
 cmd_provision_minio() {
@@ -2165,8 +1860,6 @@ cmd_provision_minio() {
 
     echo ""
     echo "MinIO provisioning complete."
-    echo "Restart knowledge-index to pick up new credentials:"
-    echo "  systemctl --user restart knowledge-index.service"
 }
 
 # ---------------------------------------------------------------------------
@@ -2186,9 +1879,7 @@ case "${1:-help}" in
     generate-litellm-config) cmd_generate_litellm_config ;;
     detect-hardware)         cmd_detect_hardware ;;
     recommend)               cmd_recommend ;;
-    sync-libraries)          cmd_sync_libraries ;;
     build-library)           cmd_build_library "${@:2}" ;;
-    generate-join-token)     cmd_generate_join_token "${@:2}" ;;
     provision-minio)         cmd_provision_minio ;;
     security-audit)          cmd_security_audit "${@:2}" ;;
     help|--help|-h)          usage ;;

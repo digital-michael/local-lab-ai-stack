@@ -4,7 +4,7 @@
 **Date:** 2026-04-19
 **Audience:** Operators and implementation agents
 
-Cross-reference: `m2m-localhost-mvp-checklist.md`
+> **Python implementation retired (2026-09-30, D-045).** `services/m2m-gateway/` was removed and will not be integrated. This document is kept as **design reference** for the Go M2M gateway (ledger epic e66a0ecd) and the M2M lifecycle workflow (ledger workflow 3c54b1b8). Ports, env var names and endpoints below describe the retired Python service, not a contract.
 
 ---
 
@@ -328,3 +328,23 @@ This overlay applies only when explicitly enabled for a trusted project pair.
 5. Default posture:
 - Trusted profile is off by default.
 - Default deployment remains localhost-only with default-deny dynamic source access.
+
+## 16 Canonical M2M Scope Set (MVP)
+
+Use least privilege. Start from this minimal baseline and only add what the workflow needs.
+
+- `m2m.jobs.start`
+- `m2m.jobs.heartbeat`
+- `m2m.jobs.extend`
+- `m2m.context.attach`
+- `m2m.infer`
+
+Add only when required:
+
+- `m2m.skill.execute`
+- `m2m.publish.transform`
+- `m2m.approval.request`
+- `m2m.approval.decision` (admin/service account only)
+- `m2m.jobs.extend.high` (break-glass extension scope)
+
+(Moved here from the retired m2m-iam-crud skill on 2026-09-30.)

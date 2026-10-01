@@ -37,7 +37,7 @@ Observability         Prometheus · Grafana · Loki · Promtail
 | LiteLLM | 1.81.14 | MIT | https://github.com/BerriAI/litellm |
 | vLLM | v0.17.1 | Apache-2.0 | https://github.com/vllm-project/vllm |
 | Ollama | 0.17.7 | MIT | https://ollama.com |
-| Knowledge Index Service | 0.1.0 | Project | `services/knowledge-index/` |
+| Knowledge Index Service | — | Project | removed 2026-09-30 (D-045); Go version pending |
 | Qdrant | v1.17.0 | Apache-2.0 | https://qdrant.tech |
 | PostgreSQL | 17.9 | PostgreSQL License | https://www.postgresql.org |
 | Traefik Proxy | v3.6.10 | MIT | https://traefik.io/traefik |
@@ -162,6 +162,7 @@ Observability         Prometheus · Grafana · Loki · Promtail
 ---
 
 ### Knowledge Index Service *(custom)*
+> **Retired 2026-09-30 (D-045):** the Python service described here (`services/knowledge-index/`) was removed. Kept as design reference for the Go Knowledge Index (ledger epic 2b9b1647).
 **Role:** RAG backend providing document ingestion, vector search, and MCP tool interface.
 **Source:** `services/knowledge-index/`
 **Container image:** `localhost/knowledge-index:0.1.0` (built locally)

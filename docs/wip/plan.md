@@ -1,5 +1,7 @@
 # Work-in-Progress — Implementation Plan
 
+> **Note (2026-09-30):** Python Knowledge Index and M2M gateway items below were overtaken by D-045 (2026-09-30): both services were removed; Go replacements are tracked in the ledger (epics 2b9b1647, e66a0ecd).
+
 **Tracking:** Backlog lives in `docs/meta_local/review_log.md` (Pending Tasks table).
 **Sequence:** Items are worked in backlog listing order unless priority escalation is noted.
 **Architecture decisions governing this plan:** D-004 through D-008 (`docs/meta_local/decisions.md`)
@@ -14,6 +16,35 @@ _Nothing in flight._
 ---
 
 ## Next (selected)
+
+### BL-018 — Conversions Service: Document Format Conversion
+**Priority:** P2
+**Status:** Phase 1 implemented 2026-08-12 (not yet deployed/verified in a running stack) — Phases 2–4 queued
+**Decisions:** D-043
+
+**Steps:**
+
+1. ✅ **Phase 1 — MD⇄PDF, full access-surface scaffold** — `services/conversions/` (FastAPI
+   app, `converters/` registry, `client.py`, `cli.py`, Jinja2 web UI), registered in
+   `configs/config.json.example` (port 8300), Traefik routes added (`conversions`,
+   `conversions-api`, `conversions-mcp`), pytest suite under `testing/conversions/`,
+   component docs under `docs/library/framework_components/conversions/`. REST API, CLI,
+   browser UI, and MCP tool (`convert_document`) all implemented together per D-043.
+
+2. ⬜ **Deploy and verify** — `podman build` the image, `scripts/configure.sh
+   generate-quadlets`, provision the `conversions_api_key` secret, start the service, run
+   the verification steps from the conversions ADR / implementation plan (health check, CLI
+   round-trip, browser upload through Authentik, MCP tool call, `pytest testing/conversions/`).
+
+3. ⬜ **Phase 2 — HTML⇄{md,pdf}** — new `converters/` modules, likely via pandoc's native
+   HTML support; no router/CLI/MCP changes expected (registry-driven).
+
+4. ⬜ **Phase 3 — DOCX⇄{md,pdf,html}** — pandoc native first; evaluate LibreOffice-headless
+   fallback only if fidelity proves insufficient (see conversions `guidance.md`).
+
+5. ⬜ **Phase 4 — XLSX→{csv,md,json}** — output shape not yet decided; resolve at phase start.
+
+---
 
 ### BL-011 — Headscale Architecture Migration: Phase 1 (ACL hardening + LAN break-glass)
 **Priority:** P1  

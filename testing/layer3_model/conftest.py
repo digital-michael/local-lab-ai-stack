@@ -25,9 +25,6 @@ AI_STACK_DIR = os.environ.get("AI_STACK_DIR", os.path.expanduser("~/ai-stack"))
 
 LITELLM_BASE_URL = "http://localhost:9000"
 QDRANT_BASE_URL = "http://localhost:6333"
-KNOWLEDGE_INDEX_URL = os.environ.get(
-    "KNOWLEDGE_INDEX_URL", "http://localhost:8100"
-)
 
 
 # ---------------------------------------------------------------------------
@@ -105,28 +102,6 @@ def qdrant_headers(qdrant_api_key: str) -> dict:
     if qdrant_api_key:
         headers["api-key"] = qdrant_api_key
     return headers
-
-
-@pytest.fixture(scope="session")
-def ki_api_key() -> str:
-    """Resolve knowledge-index API key from env (KI_API_KEY) or Podman secret."""
-    return _read_secret("knowledge_index_api_key")
-
-
-@pytest.fixture(scope="session")
-def ki_headers(ki_api_key: str) -> dict:
-    """Auth + content-type headers for knowledge-index requests."""
-    h = {"Content-Type": "application/json"}
-    if ki_api_key:
-        h["Authorization"] = f"Bearer {ki_api_key}"
-    return h
-
-
-@pytest.fixture(scope="session")
-def ki_client() -> httpx.Client:
-    """HTTP client pointed at knowledge-index."""
-    with httpx.Client(base_url=KNOWLEDGE_INDEX_URL, timeout=60.0) as client:
-        yield client
 
 
 @pytest.fixture(scope="session")

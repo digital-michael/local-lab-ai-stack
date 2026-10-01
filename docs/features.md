@@ -127,12 +127,13 @@ The stack runs multiple AI models simultaneously and routes requests to the righ
 - Transparent routing; callers are unaware of which machine or provider handles the request
 - _Powered by: [LiteLLM](library/framework_components/litellm/best_practices.md)_ · _Defined in: [configs/config.json](../configs/config.json) `models[]`_
 
-### `[X]` Retrieval-Augmented Generation (RAG)
+### `[ ]` Retrieval-Augmented Generation (RAG)
+> **Retired 2026-09-30 (D-045):** ran on the Python Knowledge Index and the LiteLLM RAG hook, both removed. The Go replacement is pending; the text below records what the Python version did.
 AI responses can be grounded in a private knowledge base rather than relying solely on the model's training data.
 - Ingest documents into the knowledge library
 - Questions automatically retrieve relevant context before answering
 - Vector similarity search across all indexed content
-- _Powered by: [Knowledge Index Service](../services/knowledge-index/app.py) + [Qdrant](library/framework_components/qdrant/best_practices.md)_
+- _Powered by: Knowledge Index Service (removed, D-045) + [Qdrant](library/framework_components/qdrant/best_practices.md)_
 
 ### `[X]` AI Workflow Builder
 Non-developers can build multi-step AI pipelines visually — chain models, tools, and knowledge sources together without writing code.
@@ -186,30 +187,32 @@ The full stack state — databases, vector store, model files, configs — can b
 - Restore procedure documented
 - _Script: [scripts/backup.sh](../scripts/backup.sh)_
 
-### `[X]` MCP Tool Integration
+### `[ ]` MCP Tool Integration
+> **Retired 2026-09-30 (D-045):** the Knowledge Index MCP surface lived in the removed Python service. (The conversions service still serves MCP the same way.) The Go replacement is pending; the text below records what the Python version did.
 AI agents can call external tools during a conversation by following the Model Context Protocol standard.
 - REST API for knowledge search and document ingestion: **available**
 - MCP Streamable HTTP transport (current spec) over `/mcp`: **available** — use this for new clients
 - MCP legacy HTTP+SSE transport over `/mcp/sse` + `/mcp/messages`: **available** — kept for clients not yet migrated off the spec-deprecated transport (D-042)
 - `search_knowledge` and `ingest_document` MCP tools; auth guard on `API_KEY`; DNS-rebinding protection via Host/Origin allowlist
 - Cross-node routing in `search_knowledge` mirrors REST `/query` behaviour
-- _Powered by: [Knowledge Index Service](../services/knowledge-index/app.py)_ · _Delivered: [Phase 7](ai_stack_blueprint/ai_stack_checklist.md#phase-7--knowledge-index-mcp-integration)_, Streamable HTTP added [D-042](decisions.md#d-042--add-streamable-http-transport-for-mcp-keep-legacy-sse-alongside)
+- _Powered by: Knowledge Index Service (removed, D-045)_ · _Delivered: [Phase 7](ai_stack_blueprint/ai_stack_checklist.md#phase-7--knowledge-index-mcp-integration)_, Streamable HTTP added [D-042](decisions.md#d-042--add-streamable-http-transport-for-mcp-keep-legacy-sse-alongside)
 
-### `[X]` Localhost Library Discovery
+### `[ ]` Localhost Library Discovery
+> **Retired 2026-09-30 (D-045):** scanning and cataloging ran in the removed Python Knowledge Index. The Go replacement is pending; the text below records what the Python version did.
 The knowledge base can be populated by scanning a local filesystem directory for pre-packaged `.ai-library` bundles — no manual upload required.
 - Scans `LIBRARIES_DIR` for subdirectories containing a `manifest.yaml` (name + version required)
 - Verifies `checksums.txt` if present; missing checksum file is a warning, not a failure
 - Ingests all document files from the package's `documents/` folder into Qdrant
 - Already-cataloged packages are skipped unless `force=true` is passed
 - Packages appear in `/v1/catalog` with `origin_node=localhost` and their filesystem path recorded
-- _Powered by: [Knowledge Index Service](../services/knowledge-index/app.py)_ · _Schema: [configs/library-manifest-schema.json](../configs/library-manifest-schema.json)_ · _Delivered: [Phase 15](ai_stack_blueprint/ai_stack_checklist.md#phase-15)_
+- _Powered by: Knowledge Index Service (removed, D-045)_ · _Schema: [configs/library-manifest-schema.json](../configs/library-manifest-schema.json)_ · _Delivered: [Phase 15](ai_stack_blueprint/ai_stack_checklist.md#phase-15)_
 
 ### `[X]` Volume Ingestion Pipeline
-Raw document directories can be packaged into `.ai-library` bundles with a single command, ready for local scanning or pushing to the controller.
+Raw document directories can be packaged into `.ai-library` bundles with a single command.
 - `configure.sh build-library --source <dir> --name <slug> --version <semver>` — no running services required
 - Copies all supported file types (`.md`, `.txt`, `.rst`, `.yaml`, `.json`, `.html`) into `documents/`
 - Generates `manifest.yaml`, `metadata.json`, and `checksums.txt` automatically
-- Produced packages are immediately consumable by `POST /v1/scan` and `configure.sh sync-libraries`
+- No consumer today: `POST /v1/scan` and `sync-libraries` went with the Python Knowledge Index (D-045); the format (D-013) carries forward to the Go Knowledge Index
 - _Powered by: [scripts/configure.sh](../scripts/configure.sh)_ · _Format: D-013_ · _Delivered: [Phase 16](ai_stack_blueprint/ai_stack_checklist.md#phase-16)
 
 ### `[X]` Operator Dashboard
@@ -233,7 +236,8 @@ All services are reachable exclusively through Traefik, which enforces Authentik
 
 ## Partially Available Features
 
-### `[-]` M2M IAM Gateway (Localhost)
+### `[ ]` M2M IAM Gateway (Localhost)
+> **Retired 2026-09-30 (D-045):** `services/m2m-gateway/` was removed; the design is kept in `docs/wip/m2m-localhost-mvp.md` for the Go gateway. The Go replacement is pending; the text below records what the Python version did.
 The stack now includes a localhost-only machine-to-machine gateway for service identities, scoped workflow access, controlled long-running leases, and audited break-glass approvals.
 - JWT validation supports secret and JWKS paths, with strict audience/workflow/scope enforcement
 - Workflow policy gates model/tool/context source access with default-deny dynamic source behavior
@@ -244,7 +248,7 @@ The stack now includes a localhost-only machine-to-machine gateway for service i
 - Authentik provisioning helper supports issuer/JWKS wiring, per-service client template generation, and endpoint-driven API provisioning requests
 - Automated security/acceptance coverage currently passes 21 tests across `testing/security/test_m2m_gateway.py` and `testing/security/test_m2m_gateway_client.py`
 - Remaining work: deployed-runtime closure evidence
-- _Implementation: [services/m2m-gateway/app.py](../services/m2m-gateway/app.py)_ · _Checklist: [docs/wip/m2m-localhost-mvp-checklist.md](wip/m2m-localhost-mvp-checklist.md)_ · _Operator how-to: [docs/library/actions/m2m-iam-crud/m2m-iam-crud-SKILL.md](library/actions/m2m-iam-crud/m2m-iam-crud-SKILL.md)_
+- _Implementation: services/m2m-gateway/app.py (removed, D-045)_ · _Checklist: docs/wip/m2m-localhost-mvp-checklist.md (removed, D-045)_ · _Operator how-to: docs/library/actions/m2m-iam-crud/m2m-iam-crud-SKILL.md (removed, D-045)_
 
 ### `[-]` Local GPU Acceleration (Controller)
 The controller node's GPU can be used for high-speed inference, enabling larger or faster models to run locally.
@@ -261,7 +265,8 @@ Registered inference nodes are functional but not independently hardened — the
 - Firewall enforcement: **available** — `bash scripts/node.sh harden-worker --alias <alias>`
 - _Delivered: [Security Audit Tool](#x-security-audit-tool)_ · _Delivered: [Inference Node Hardening](#x-inference-node-hardening)_
 
-### `[-]` Local/WAN Discovery Profiles
+### `[ ]` Local/WAN Discovery Profiles
+> **Retired 2026-09-30 (D-045):** the catalog stub endpoints lived in the removed Python Knowledge Index; the D-014 specs remain. The Go replacement is pending; the text below records what the Python version did.
 Protocol specifications and stub endpoints for discovering knowledge libraries on peer nodes (local mDNS/DNS-SD) and federated registries (WAN).
 - D-014a local profile specification (mDNS/DNS-SD `_ai-library._tcp`): **done**
 - D-014b WAN profile specification (registry federation): **done**
@@ -279,7 +284,8 @@ Protocol specifications and stub endpoints for discovering knowledge libraries o
 - T-113–T-116 bats coverage
 - _Delivered: [Phase 19](ai_stack_blueprint/ai_stack_checklist.md#phase-19) · Checks: port exposure, auth probing, TLS, secret hygiene, worker hardening_
 
-### `[X]` Dynamic Node Registration
+### `[ ]` Dynamic Node Registration
+> **Retired 2026-09-30 (D-045):** the node registry lived in the removed Python Knowledge Index; `bootstrap.sh`, `heartbeat.sh` and join tokens went with it. `node.sh` keeps `list`/`remote`/`harden-worker`. The Go replacement is pending; the text below records what the Python version did.
 Worker nodes self-register with the controller using a one-time join token, then maintain a live presence via a periodic heartbeat. The controller tracks node health, routes LiteLLM traffic based on node status, and queues resource suggestions for node operators.
 - One-time join token flow: `configure.sh generate-join-token` → `bootstrap.sh` on worker → status `online`
 - 5-state health machine: `online` → `caution` → `failed` → `offline` → `unregistered`
@@ -287,7 +293,7 @@ Worker nodes self-register with the controller using a one-time join token, then
 - Heartbeat timer: `OnCalendar=*:*:0/30` (Linux systemd) or launchd `StartInterval=30` (macOS)
 - Per-node API key issued at join time; all subsequent calls (heartbeats, status) use it
 - LiteLLM routing updated automatically on status transitions
-- _Powered by: [Node Registry](../services/knowledge-index/node_registry.py)_ · _Scripts: `node.sh`, `bootstrap.sh`, `heartbeat.sh`_ · _Delivered: [Phase 22](ai_stack_blueprint/ai_stack_checklist.md#phase-22)_
+- _Powered by: Node Registry (removed, D-045)_ · _Scripts: `node.sh`, `bootstrap.sh`, `heartbeat.sh`_ · _Delivered: [Phase 22](ai_stack_blueprint/ai_stack_checklist.md#phase-22)_
 
 ### `[X]` Worker Sleep Inhibitor
 Prevents worker nodes from sleeping or hibernating while the AI stack is running, ensuring continuous inference availability.

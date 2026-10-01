@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Conversions</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 32rem; margin: 3rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.25rem; }
+    form { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1.5rem; }
+    label { font-size: 0.875rem; color: #444; }
+    select, input[type=file] { padding: 0.4rem; }
+    button { padding: 0.5rem 1rem; cursor: pointer; }
+    .row { display: flex; gap: 1rem; align-items: center; }
+  </style>
+</head>
+<body>
+  <h1>Document Conversion</h1>
+  <p>Upload a file, pick the source and target format, and download the result.
+     Only pairs listed under <code>GET /formats</code> are currently implemented —
+     an unimplemented pair returns a 501 with the current capability list.</p>
+
+  <form action="/ui/convert" method="post" enctype="multipart/form-data">
+    <div>
+      <label for="file">File</label><br>
+      <input type="file" id="file" name="file" required>
+    </div>
+    <div class="row">
+      <div>
+        <label for="from_format">From</label><br>
+        <select id="from_format" name="from_format" required>
+          {% for fmt in formats %}
+          <option value="{{ fmt }}">{{ fmt }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="to_format">To</label><br>
+        <select id="to_format" name="to_format" required>
+          {% for fmt in formats %}
+          <option value="{{ fmt }}">{{ fmt }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <button type="submit">Convert &amp; download</button>
+  </form>
+</body>
+</html>

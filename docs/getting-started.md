@@ -12,7 +12,7 @@ A step-by-step guide to installing, configuring, deploying, and verifying the AI
 |---|---|
 | Linux (Fedora/RHEL/CentOS) | Tested on Fedora 40+; other systemd-based distros should work |
 | Podman 4.x+ | Rootless mode; systemd user units (quadlets) |
-| Python 3.9+ | Used by `configure.sh` and the knowledge-index service |
+| Python 3.9+ | Used by `configure.sh` |
 | `git`, `jq` | Required by all scripts |
 | NVIDIA GPU (optional) | Required for vLLM; Ollama runs on CPU without it |
 
@@ -119,7 +119,6 @@ Prompts you to enter values for each required secret and stores them in the Podm
 | `qdrant_api_key` | Qdrant API authentication |
 | `openwebui_api_key` | OpenWebUI → LiteLLM auth (must match `litellm_master_key`) |
 | `flowise_password` | Flowise admin password |
-| `knowledge_index_api_key` | Knowledge Index Service API key |
 | `minio_root_user` | MinIO root username |
 | `minio_root_password` | MinIO root password |
 
@@ -537,11 +536,6 @@ systemctl --user daemon-reload && systemctl --user restart homepage.service
 Grafana password: `~/ai-stack/configs/grafana/grafana.ini` (`admin_password`).
 Qdrant key: `podman secret inspect qdrant_api_key --showsecret --format '{{.SecretData}}'`.
 Authentik token: `AKADMIN_API_TOKEN` in `configs/credentials.local`.
-
-**ENOTFOUND for knowledge-index or postgres widget** — the `knowledge-index` service is inactive:
-```bash
-systemctl --user start knowledge-index.service
-```
 
 ---
 

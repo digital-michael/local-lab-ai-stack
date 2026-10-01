@@ -1,4 +1,7 @@
 # Knowledge Index Service — Security
+
+> **Python implementation retired (2026-09-30, D-045).** `services/knowledge-index/` was removed and will not be integrated. This document is kept as **design reference** for the Go Knowledge Index (ledger epic 2b9b1647). File paths, ports (8100), endpoints and env vars below describe the retired Python service, not a contract.
+
 **Last Updated:** 2026-03-08 UTC
 
 ## Purpose

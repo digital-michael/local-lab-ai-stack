@@ -14,10 +14,9 @@ Run any script with `--help` or `-h` for full usage details, options, and exampl
 - [First Deployment](#first-deployment) — `configure.sh` · `deploy.sh` · `pull-models.sh`
 - [Running Operations](#running-operations) — `start.sh` · `status.sh` · `loads.sh` · `backup.sh` · `cleanup.sh` · `inhibit.sh`
 - [Reconfiguration](#reconfiguration)
-- [M2M Auth Wiring](#m2m-auth-wiring) — `m2m-authentik-bootstrap.sh`
 - [Troubleshooting](#troubleshooting) — `diagnose.sh` · `model-inventory.sh` · `smoketest-openwebui.py` · `check-provisioning.py`
 - [Shutdown and Teardown](#shutdown-and-teardown) — `stop.sh` · `undeploy.sh`
-- [Worker Node Scripts](#worker-node-scripts) — `node.sh` · `bootstrap.sh` · `heartbeat.sh` · `register-node.sh`
+- [Worker Node Scripts](#worker-node-scripts) — `node.sh` · `register-node.sh`
 - [Subdirectory Scripts](#subdirectory-scripts) — `bare_metal/setup-macos.sh` · `podman/setup-worker.sh`
 
 ---
@@ -38,7 +37,7 @@ Generates a local self-signed CA and server certificate for Traefik. Produces `c
 ## First Deployment
 
 ### `configure.sh`
-CRUD interface for `config.json`. Generates systemd quadlet files and Podman secrets from configuration. Primary subcommands: `generate-quadlets`, `generate-secrets`, `validate`, `build-library`, `sync-libraries`, `detect-hardware`, `security-audit`. The source of truth for any generated artifact in the stack.
+CRUD interface for `config.json`. Generates systemd quadlet files and Podman secrets from configuration. Primary subcommands: `generate-quadlets`, `generate-secrets`, `validate`, `build-library`, `detect-hardware`, `security-audit`. The source of truth for any generated artifact in the stack.
 
 ### `deploy.sh`
 Orchestrates full deployment. Calls `configure.sh` to generate quadlets and secrets, registers services with systemd, and starts them in dependency order. Detects controller vs. bare-metal (macOS) deploy mode automatically.
@@ -78,13 +77,6 @@ Also used mid-lifecycle: `configure.sh detect-hardware` probes GPU/VRAM/RAM and 
 ### `pull-models.sh` *(see above)*
 Re-run after changing `configs/models.json` to update the LiteLLM model routing table without redeploying.
 
-## M2M Auth Wiring
-
-### `m2m-authentik-bootstrap.sh`
-Validates Authentik OIDC issuer/JWKS endpoints for M2M, optionally writes issuer/JWKS/audience values into `configs/config.json`, can emit per-service Authentik client template JSON (`--emit-client-template`) for repeatable provisioning inputs, and can run an optional token introspection smoke check against the local M2M gateway using `M2M_TEST_TOKEN`.
-
----
-
 ## Troubleshooting
 
 ### `diagnose.sh`
@@ -116,13 +108,7 @@ Tears down the deployment. Modes: `--services` (stop + remove quadlet files), `-
 These run **on the worker node**, not the controller.
 
 ### `node.sh`
-Node lifecycle management. Subcommands: `deploy` (install knowledge-index container on this worker), `join` (register with controller using a one-time token), `unjoin` (deregister), `purge` (hard-delete offline nodes from the registry), `harden-worker` (firewall hardening for inference ports).
-
-### `bootstrap.sh`
-Zero-touch worker bootstrap. Designed to be piped from `curl` or `wget` on a fresh machine. Accepts `--controller <url> --token <token>` and performs the full join sequence: installs dependencies, clones config, calls `node.sh join`. SHA-256 verification supported via `--sha256`.
-
-### `heartbeat.sh`
-Sends a periodic heartbeat from a worker node to the controller's `/v1/nodes/{id}/heartbeat` endpoint. Reads connection state from `~/.config/ai-stack/`. Called by a systemd timer (every 30 s); can be run manually to verify connectivity.
+Node operations. Subcommands: `list` (nodes from headscale), `remote` (run a command on a worker over SSH), `harden-worker` (firewall hardening for inference ports). The controller node registry (`join`/`unjoin`/`purge`, `bootstrap.sh`, `heartbeat.sh`) lived in the Python Knowledge Index and was removed with it on 2026-09-30 (D-045).
 
 ### `register-node.sh`
 Run on a remote node to introspect the local environment and print a config block for pasting into `configs/config.json nodes[]` and `models[]` on the controller. Makes no automatic writes — output is for human review (static config model, per D-020).

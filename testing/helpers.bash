@@ -36,7 +36,6 @@ mappings = [
     ("TRAEFIK_API_PORT",     "traefik",          2),
     ("POSTGRES_PORT",        "postgres",         0),
     ("QDRANT_PORT",          "qdrant",           0),
-    ("KNOWLEDGE_INDEX_PORT", "knowledge-index",  0),
     ("LITELLM_PORT",         "litellm",          0),
     ("FLOWISE_PORT",         "flowise",          0),
     ("OPENWEBUI_PORT",       "openwebui",        0),
@@ -62,7 +61,6 @@ export TRAEFIK_HTTPS_PORT="${TRAEFIK_HTTPS_PORT:-443}"
 export TRAEFIK_API_PORT="${TRAEFIK_API_PORT:-8080}"
 export POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 export QDRANT_PORT="${QDRANT_PORT:-6333}"
-export KNOWLEDGE_INDEX_PORT="${KNOWLEDGE_INDEX_PORT:-8100}"
 export LITELLM_PORT="${LITELLM_PORT:-9000}"
 export FLOWISE_PORT="${FLOWISE_PORT:-3001}"
 export OPENWEBUI_PORT="${OPENWEBUI_PORT:-9090}"
@@ -76,16 +74,16 @@ export MINIO_CONSOLE_PORT="${MINIO_CONSOLE_PORT:-9101}"
 # Service lists
 # ---------------------------------------------------------------------------
 
-# All 15 services defined in configs/config.json
+# All 14 services defined in configs/config.json
 SERVICES_ALL=(
-    authentik flowise grafana knowledge-index litellm
+    authentik flowise grafana litellm
     loki minio ollama openwebui postgres prometheus promtail qdrant traefik vllm
 )
 export SERVICES_ALL
 
 # Controller-profile services expected to be active (non-GPU, non-worker-only)
 SERVICES_DEPLOYED=(
-    authentik flowise grafana knowledge-index litellm loki
+    authentik flowise grafana litellm loki
     minio openwebui postgres prometheus promtail qdrant traefik
 )
 export SERVICES_DEPLOYED
@@ -99,7 +97,7 @@ export SERVICES_DEFERRED
 # ---------------------------------------------------------------------------
 
 SECRETS=(
-    authentik_secret_key flowise_password knowledge_index_api_key
+    authentik_secret_key flowise_password
     litellm_master_key minio_root_password minio_root_user
     openwebui_api_key postgres_password qdrant_api_key
 )

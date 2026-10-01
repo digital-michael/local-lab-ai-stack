@@ -1,4 +1,6 @@
 # CENTAURI — Integration Plan (photondatum.space IAM)
+
+> **Note (2026-09-30):** Knowledge Index, M2M gateway and node-registry steps below refer to Python services removed on 2026-09-30 (D-045).
 **Status:** Active (outstanding: tlvulcan7 invitation delivery + smoke test)
 **Last Updated:** 2026-07-11
 

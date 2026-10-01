@@ -44,7 +44,6 @@ setup_file() {
                                     {"host": 8080, "container": 8080, "bind": "127.0.0.1"}] },
     "litellm":          { "ports": [{"host": 9000, "container": 9000, "bind": "127.0.0.1"}] },
     "qdrant":           { "ports": [{"host": 6333, "container": 6333, "bind": "127.0.0.1"}] },
-    "knowledge-index":  { "ports": [{"host": 8100, "container": 8100, "bind": "127.0.0.1"}] },
     "flowise":          { "ports": [{"host": 3001, "container": 3001, "bind": "127.0.0.1"}] },
     "openwebui":        { "ports": [{"host": 9090, "container": 9090, "bind": "127.0.0.1"}] },
     "postgres":         { "ports": [{"host": 5432, "container": 5432, "bind": "127.0.0.1"}] }
