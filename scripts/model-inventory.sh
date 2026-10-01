@@ -246,6 +246,7 @@ def parse_registered_routes(raw: str):
             "model": lp.get("model", ""),
             "api_base": lp.get("api_base", "") or "",
             "tags": mi.get("tags"),
+            "num_ctx": lp.get("num_ctx"),
         })
     return routes
 
@@ -402,6 +403,17 @@ for r in routes:
     if r.get("tags"):
         tags_by_name[r["model_name"]] = r["tags"]
 
+# model_name -> configured num_ctx (context window), straight from LiteLLM's
+# litellm_params — whatever pull-models.sh actually registered (its own
+# size-scaled heuristic, or an explicit override from config.json; see L-39).
+# Not a live probe: this is the *configured* value, which may differ from
+# what's actually in use right now if the model hasn't been reloaded since
+# its num_ctx last changed (Ollama only applies num_ctx at load time).
+ctx_by_name = {}
+for r in routes:
+    if r.get("num_ctx"):
+        ctx_by_name[r["model_name"]] = r["num_ctx"]
+
 TIER_PATTERN = re.compile(r"^(strong|mid|low|micro)-\d+$")
 
 
@@ -483,6 +495,7 @@ for name in sorted(names):
         "available": name in backend_by_name,
         "registered": name in controller_registered,
         "size_gb": None, "params": None, "pulled_at": None, "cpu_pct": None,
+        "context": ctx_by_name.get(name),
         "classification": classification, "modes": modes,
     }
     if backend == "ollama" and name in controller_ollama_info:
@@ -556,6 +569,7 @@ for fname in sorted(os.listdir(NODES_DIR)):
             "available": name in available,
             "registered": name in node_registered,
             "size_gb": None, "params": None, "pulled_at": None, "cpu_pct": None,
+            "context": ctx_by_name.get(name),
             "classification": classification, "modes": modes,
         }
         if name in node_ollama_info:
@@ -619,7 +633,7 @@ def status_of(entry):
 
 
 NAME_W, BACKEND_W, STATUS_W = 42, 8, 14
-SIZE_W, PARAMS_W, PULLED_W, LOAD_W = 9, 7, 10, 7
+SIZE_W, PARAMS_W, PULLED_W, LOAD_W, CONTEXT_W = 9, 7, 10, 7, 8
 
 for i, node in enumerate(nodes_report):
     state = "online" if node["online"] else "offline"
@@ -641,7 +655,7 @@ for i, node in enumerate(nodes_report):
     if CPU_FLAG:
         header_line += f" {'LOAD':>{LOAD_W}}"
     if VERBOSE:
-        header_line += f" {'SIZE':>{SIZE_W}} {'PARAMS':>{PARAMS_W}} {'PULLED':<{PULLED_W}}  TAGS"
+        header_line += f" {'SIZE':>{SIZE_W}} {'CONTEXT':>{CONTEXT_W}} {'PARAMS':>{PARAMS_W}} {'PULLED':<{PULLED_W}}  TAGS"
     print(header_line)
     for entry in node["models"]:
         status, ok = status_of(entry)
@@ -656,6 +670,12 @@ for i, node in enumerate(nodes_report):
             line += f" {load:>{LOAD_W}}"
         if VERBOSE:
             size = f"{entry['size_gb']}GB" if entry.get("size_gb") is not None else "-"
+            # CONTEXT is the *configured* num_ctx (K-notation, e.g. 32768 ->
+            # "32K") — what pull-models.sh registered (its size-scaled
+            # default, or an explicit config.json override), not necessarily
+            # what's in use by an already-loaded model right now (Ollama only
+            # applies num_ctx at load time — see pull-models.sh's L-39 note).
+            context = f"{entry['context'] / 1024:g}K" if entry.get("context") else "-"
             params = entry.get("params") or "-"
             # PULLED is when THIS HOST downloaded the model (Ollama's own
             # modified_at) — not an upstream release/publication date, which
@@ -669,7 +689,7 @@ for i, node in enumerate(nodes_report):
             # consistent order across models — nothing to re-sort here.
             merged_tags = ([entry["classification"]] if entry.get("classification") else []) + (entry.get("modes") or [])
             tags_display = ",".join(merged_tags) if merged_tags else "-"
-            line += f" {size:>{SIZE_W}} {params:>{PARAMS_W}} {pulled:<{PULLED_W}}  {tags_display}"
+            line += f" {size:>{SIZE_W}} {context:>{CONTEXT_W}} {params:>{PARAMS_W}} {pulled:<{PULLED_W}}  {tags_display}"
         print(colorize(line, ok))
     print()
 
