@@ -11,9 +11,7 @@
   "os": "darwin",
   "deployment": "bare_metal",
   "registered_at": "2026-03-24T00:00:00Z",
-  "models": [
-    "llama3.1:8b-instruct-q4_K_M"
-  ],
+  "models": [],
   "capabilities": [
     "inference"
   ],
