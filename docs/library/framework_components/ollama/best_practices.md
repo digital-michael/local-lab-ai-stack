@@ -1,5 +1,5 @@
 # ollama — Best Practices
-**Last Updated:** 2026-03-09 UTC
+**Last Updated:** 2026-10-01 UTC
 
 ## Purpose
 Best practices for deploying and operating ollama as the local CPU inference engine.
@@ -43,7 +43,7 @@ Best practices for deploying and operating ollama as the local CPU inference eng
 - Set `OLLAMA_KEEP_ALIVE` to control how long a model stays loaded in memory between requests (default 5m)
 - Use Q4_K_M or Q5_K_M quantization GGUF files for a good balance of quality and speed on CPU
 - RAM requirements: approximately 5–6 GB for a Q4_K_M 8B parameter model loaded at context length 4096
-- Context length is controlled per-request via the `num_ctx` parameter or at the LiteLLM level via `max_tokens`
+- Context length is controlled via the `num_ctx` parameter — **not** LiteLLM's `max_tokens`, which maps to Ollama's `num_predict` (max *output* tokens) instead, a separate setting entirely. With neither set, Ollama falls back to its own built-in default (4096, confirmed directly via `/api/ps` on this stack, 2026-10-01) regardless of what the model natively supports — see `lessons_learned.md` #1.
 
 # 4 Reliability
 

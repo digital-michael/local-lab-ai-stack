@@ -1,5 +1,5 @@
 # LiteLLM — Lessons Learned
-**Last Updated:** 2026-07-11
+**Last Updated:** 2026-10-01
 
 ## Purpose
 Empirical findings from operating LiteLLM as a routing proxy in the ai-stack. Records behaviour that diverged from documentation, assumptions, or prior expectations. See `guidance.md` for prescriptive decisions and `best_practices.md` for vendor recommendations.
@@ -11,6 +11,7 @@ Empirical findings from operating LiteLLM as a routing proxy in the ai-stack. Re
 1. [LITELLM_MASTER_KEY Is a Podman Secret — Cannot Be Read with `jq` from config.json](#1-litellm_master_key-is-a-podman-secret--cannot-be-read-with-jq-from-configjson)
 2. [Unit File Changed Warning Requires `daemon-reload` Before `restart`](#2-unit-file-changed-warning-requires-daemon-reload-before-restart)
 3. [OAuth2 Credentials Do Not Survive Authentik Migration — Must Recreate](#3-oauth2-credentials-do-not-survive-authentik-migration--must-recreate)
+4. [`max_tokens` Does Not Control an Ollama Model's Context Window — `num_ctx` Does](#4-max_tokens-does-not-control-an-ollama-models-context-window--num_ctx-does)
 
 ---
 
@@ -116,3 +117,26 @@ in `litellm.env` is not sufficient — new credentials must also be generated.
 > After any Authentik migration, treat all OAuth2 client credentials as invalidated.
 > Audit every service that uses `GENERIC_CLIENT_ID` / `GENERIC_CLIENT_SECRET` or
 > equivalent and recreate the provider records in the new Authentik before testing SSO.
+
+---
+
+## 4 `max_tokens` Does Not Control an Ollama Model's Context Window — `num_ctx` Does
+
+**Version:** LiteLLM 1.x
+**Discovered:** 2026-10-01, investigating why Ollama models ran at a 4k context regardless of native capacity
+
+Every Ollama route registered through this stack's `pull-models.sh` set `max_tokens: 4096` in its
+`litellm_params` — read at a glance, easy to assume that was also governing the context window.
+It isn't. Confirmed directly in LiteLLM's installed `litellm/llms/ollama/chat/transformation.py`:
+`max_tokens` maps to Ollama's `num_predict` (max *output* tokens generated); `num_ctx` (the actual
+context window) is a completely separate, first-class `Optional[int]` parameter on the same
+provider, defaulting to `None` — i.e. unset — unless explicitly passed. With nothing setting it,
+every request fell through to Ollama's own built-in server default. Full root-cause and fix:
+`../ollama/lessons_learned.md` #1; implementation: `output/CENTAURI-playbook.md` §13 L-39.
+
+### Rule
+
+> LiteLLM's Ollama provider has separate, independent knobs for output length (`max_tokens` →
+> `num_predict`) and context window (`num_ctx`) — setting one says nothing about the other. Check a
+> provider's actual parameter mapping (its `transformation.py`, if self-hosted and readable) before
+> assuming a familiar-sounding field name does the job a different field name actually does.
