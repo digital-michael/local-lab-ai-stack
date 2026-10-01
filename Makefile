@@ -3,7 +3,7 @@
         test-authentik test-flowise test-grafana test-litellm test-loki \
         test-postgres test-prometheus test-promtail test-qdrant test-traefik \
         test-lifecycle test-localhost \
-        test-model test-baseline test-higher-order test-availability test-rag test-security \
+        test-model test-baseline test-higher-order test-availability test-security \
         license-check
 
 BATS := bats
@@ -42,7 +42,6 @@ help:
 	@echo "  test-baseline     Baseline reasoning (echo, arithmetic, classification, JSON)"
 	@echo "  test-higher-order Multi-turn context, model routing, failover, tool-calling"
 	@echo "  test-availability Model list, pull, structured error on missing model"
-	@echo "  test-rag          RAG pipeline: ingest, Qdrant storage, retrieval, Flowise chatflow"
 	@echo "  test-security     Auth enforcement: forwardAuth, port binding, secret leakage"
 	@echo ""
 	@echo "Layer coverage summary"
@@ -70,8 +69,7 @@ test-all:
 	$(MAKE) wait-services
 	$(MAKE) test-pytest
 
-# Wait for LiteLLM readiness and restart deferred services that may have been
-# cascade-stopped by lifecycle tests (knowledge-index requires ollama).
+# Wait for LiteLLM and Flowise readiness.
 wait-services:
 	@echo "Waiting for LiteLLM readiness..."
 	@for i in $$(seq 1 30); do \
@@ -89,19 +87,6 @@ wait-services:
 	    echo "  ($${i}/12) Flowise not ready yet, waiting 5s..."; \
 	    sleep 5; \
 	done
-	@echo "Starting deferred services if inactive..."
-	@systemctl --user is-active knowledge-index.service >/dev/null 2>&1 || \
-	    systemctl --user start knowledge-index.service 2>/dev/null || true
-	@for i in $$(seq 1 20); do \
-	    if curl -sf http://localhost:8100/health >/dev/null 2>&1; then \
-	        echo "knowledge-index is ready."; break; \
-	    fi; \
-	    if ! systemctl --user is-active knowledge-index.service >/dev/null 2>&1; then \
-	        echo "knowledge-index is not active (DEFERRED service) — skipping."; break; \
-	    fi; \
-	    echo "  ($${i}/20) knowledge-index starting, waiting 3s..."; \
-	    sleep 3; \
-	done
 
 # All BATS layers
 test-bats:
@@ -116,81 +101,8 @@ test-bats:
 	        testing/layer4_localhost.bats
 
 # All pytest (layer3 + security)
-# KI_API_KEY is resolved from the Podman secret if not already set in the environment.
 test-pytest:
-	@key="$${KI_API_KEY:-$$(podman secret inspect knowledge_index_api_key --showsecret --format '{{.SecretData}}' 2>/dev/null || true)}"; \
-	KI_API_KEY="$$key" $(PYTEST) -v; \
-	exit_code=$$?; \
-	echo ""; \
-	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
-	echo "  NOTE: layer2b lifecycle tests stop postgres/qdrant, which"; \
-	echo "  cascade-stops knowledge-index via systemd Requires=."; \
-	echo "  If knowledge-index was running before the test run, restore it:"; \
-	echo ""; \
-	echo "    systemctl --user start knowledge-index"; \
-	echo ""; \
-	echo "  Or run 'make wait-services' for a full readiness check."; \
-	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
-	exit $$exit_code
-
-# ── BATS targets ─────────────────────────────────────────────────────────────
-
-# Layer 0 — host pre-flight checks
-test-preflight:
-	$(BATS) testing/layer0_preflight.bats
-
-# Layer 1 — service smoke tests
-test-smoke:
-	$(BATS) testing/layer1_smoke.bats
-
-# Layer 2 — per-component integration
-test-authentik:
-	$(BATS) testing/layer2_authentik.bats
-
-test-flowise:
-	$(BATS) testing/layer2_flowise.bats
-
-test-grafana:
-	$(BATS) testing/layer2_grafana.bats
-
-test-litellm:
-	$(BATS) testing/layer2_litellm.bats
-
-test-loki:
-	$(BATS) testing/layer2_loki.bats
-
-test-postgres:
-	$(BATS) testing/layer2_postgres.bats
-
-test-prometheus:
-	$(BATS) testing/layer2_prometheus.bats
-
-test-promtail:
-	$(BATS) testing/layer2_promtail.bats
-
-test-qdrant:
-	$(BATS) testing/layer2_qdrant.bats
-
-test-traefik:
-	$(BATS) testing/layer2_traefik.bats
-
-# Layer 2b — service lifecycle
-test-lifecycle:
-	$(BATS) testing/layer2b_lifecycle.bats
-
-# Layer 4 — localhost / end-to-end
-test-localhost:
-	$(BATS) testing/layer4_localhost.bats
-
-# ── pytest targets ───────────────────────────────────────────────────────────
-
-# All layer3_model tests
-test-model:
-	$(PYTEST) -v testing/layer3_model/
-
-# Baseline reasoning
-test-baseline:
-	$(PYTEST) -v testing/layer3_model/test_baseline_reasoning.py
+	$(PYTEST) -v
 
 # Higher-order model behaviour (multi-turn, routing, failover, tool-calling)
 test-higher-order:
@@ -199,10 +111,6 @@ test-higher-order:
 # Model availability (list, pull, error handling)
 test-availability:
 	$(PYTEST) -v testing/layer3_model/test_model_availability.py
-
-# RAG pipeline (knowledge-index ingest, retrieval, Flowise end-to-end)
-test-rag:
-	$(PYTEST) -v testing/layer3_model/test_rag_pipeline.py
 
 # Security & auth enforcement
 test-security:

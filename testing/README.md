@@ -128,7 +128,7 @@ Tests in `layer3_model/` and above require at least one LLM to be loaded. The te
 2. `test_model_availability.py::test_pull_default_models` — triggers model download using the `configs/models.json` default list. Polls until models appear in `/models` or times out. All subsequent reasoning tests depend on this passing.
 
 **Deferred services (Layer 0/1)**  
-Tests for `knowledge-index`, `vllm`, and `llamacpp` are tagged `@skip` until their images are available. They are listed in `SERVICES_DEFERRED` in `helpers.bash`.
+Tests for `vllm` and `llamacpp` are tagged `@skip` until their images are available. They are listed in `SERVICES_DEFERRED` in `helpers.bash`.
 
 ---
 
