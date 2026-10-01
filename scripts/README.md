@@ -13,7 +13,7 @@ Run any script with `--help` or `-h` for full usage details, options, and exampl
 - [Environment Setup](#environment-setup) — `validate-system.sh` · `install.sh` · `generate-tls.sh`
 - [First Deployment](#first-deployment) — `configure.sh` · `deploy.sh` · `pull-models.sh`
 - [Running Operations](#running-operations) — `start.sh` · `status.sh` · `loads.sh` · `backup.sh` · `cleanup.sh` · `inhibit.sh`
-- [Reconfiguration](#reconfiguration)
+- [Reconfiguration](#reconfiguration) — `configure.sh` · `pull-models.sh` · `provision-user.sh`
 - [Troubleshooting](#troubleshooting) — `diagnose.sh` · `model-inventory.sh` · `smoketest-openwebui.py` · `check-provisioning.py`
 - [Shutdown and Teardown](#shutdown-and-teardown) — `stop.sh` · `undeploy.sh`
 - [Worker Node Scripts](#worker-node-scripts) — `node.sh` · `register-node.sh`
@@ -76,6 +76,9 @@ Also used mid-lifecycle: `configure.sh detect-hardware` probes GPU/VRAM/RAM and 
 
 ### `pull-models.sh` *(see above)*
 Re-run after changing `configs/models.json` to update the LiteLLM model routing table without redeploying.
+
+### `provision-user.sh`
+Creates a single-use Authentik invitation for a new OpenWebUI (`agent.photondatum.space`) user, pre-bound to exactly one team. A "team" here is an Authentik Group that already has its own dedicated invitation-capable enrollment flow — one whose first stage is an Invitation stage and whose User Write stage has `create_users_group` set to that team's group — discovered live on every run (`GET /api/v3/stages/user_write/`, matched against each flow's own stage order), never hardcoded, so a newly built team flow becomes selectable with zero script changes. `--team NAME` picks one directly; omit it to list the live-discovered teams and be prompted for exactly one. As of 2026-10-01 that's `agent-only`, `bundle-agent`, `Family Group`, and `Alpha Group` (see `authentik/access-control.md` § Invitation Flow Details for how the latter two were built, and `output/CENTAURI-playbook.md` §13 L-40 for the full session). Authentik has no email stage configured in this instance (verified directly — zero exist), so this prints the generated link for you to send yourself rather than emailing it, matching the existing documented workflow (`openwebui/provisioning-guide.md`). Also ensures a matching, empty OpenWebUI Group exists by the same name — independent of Authentik's group of the same name, and not populated with members yet, since OpenWebUI's own user row doesn't exist until the person's first successful signin; model-to-team access grants are a separate, later decision. `--json` for structured output. Exit codes: `0` invitation created, `1` invalid input (bad email, unknown team), `2` environment/connectivity problem.
 
 ## Troubleshooting
 

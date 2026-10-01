@@ -31,12 +31,21 @@ regardless of their group membership.
 | `bundle-admin` | all services including grafana, prometheus, homepage, litellm |
 | `forgejo-guest` | git.photondatum.space (read-only public repos, no forks) |
 | `agent-only` | agent.photondatum.space only — for external guests/testers invited via the `enrollment-agent-only` flow |
+| `Family Group` | agent.photondatum.space only — invited via `enrollment-family-group` (see `scripts/provision-user.sh`) |
+| `Alpha Group` | agent.photondatum.space only — invited via `enrollment-alpha-group` (see `scripts/provision-user.sh`) |
 
 Users may be in multiple bundles. New invited users land in `bundle-agent`
 by default; akadmin promotes as needed. `forgejo-guest` is for external
 collaborators who need read-only repo access without full developer bundle access.
 `agent-only` is for external users invited specifically to use the AI agent
-interface — they have no access to other services.
+interface — they have no access to other services. `Family Group` and
+`Alpha Group` (2026-10-01) are the same idea, generalized: self-contained
+teams with their own dedicated invitation flow, agent-only access, and
+nothing else. Unlike the bundles above, they're granted access to `agent`
+via a **direct Group PolicyBinding** on the Application, not the
+`access-agent` Expression Policy's OR-list — see the Registered Applications
+note below. Provisioning a new user into either (or a future team following
+the same pattern) is what `scripts/provision-user.sh` automates end to end.
 
 ---
 
@@ -48,7 +57,7 @@ interface — they have no access to other services.
 
 | Application slug | Name | External URL | Allowed bundles |
 |---|---|---|---|
-| `agent` | Agent (OpenWebUI) | `https://agent.photondatum.space` | agent, agent-mcp, developer, admin, **agent-only** |
+| `agent` | Agent (OpenWebUI) | `https://agent.photondatum.space` | agent, agent-mcp, developer, admin (via `access-agent` policy); **agent-only, Family Group, Alpha Group** (via direct Group bindings — see note) |
 | `agent-lan` | Agent (OpenWebUI) LAN | `https://openwebui.stack.localhost` | same as `agent` (bound to `access-agent`) |
 | `forgejo-oidc` | Forgejo (Git) | `https://git.photondatum.space` | developer, admin, forgejo-guest |
 | `homepage` | Homepage Dashboard | `https://dashboard.photondatum.space` | admin |
@@ -64,6 +73,8 @@ interface — they have no access to other services.
 | `flowise-lan` | Flowise LAN | `https://flowise.stack.localhost` | same as `flowise` (bound to `access-flowise`) |
 | `litellm` | LiteLLM | `https://litellm.photondatum.space` | admin |
 
+> **Note — `agent`'s direct Group bindings (`agent-only`, `Family Group`, `Alpha Group`):** the `agent` Application has three `PolicyBinding`s targeting a specific Group directly (not a Policy) alongside its one `access-agent` Expression Policy binding — `policy_engine_mode: any` means any bound check passing is sufficient, so these three groups get through without being listed in `access-agent`'s own expression. This is the right mechanism for a self-contained team that should only ever reach `agent` and nothing else: no policy expression to keep in sync as teams are added, just one more binding per team, which is exactly what creating a team's dedicated invitation flow needs anyway (see Invitation Flow Details below and `scripts/provision-user.sh`).
+>
 > **Note — `forgejo-oidc`:** Forgejo uses an OAuth2Provider (OIDC), not a ProxyProvider. Caddy on the VPS serves `git.photondatum.space` directly with no forwardAuth middleware — Forgejo handles auth itself via the OIDC flow. A defunct ProxyProvider (pk=2, slug=`forgejo`) was removed during cleanup; only the OAuth2Provider (pk=9) remains. Do not add a ProxyProvider for Forgejo.
 >
 > **Note — `litellm`:** LiteLLM uses an OAuth2Provider (OIDC), not a ProxyProvider — and unlike the other services here, it has **no LAN ProxyProvider either**. The Traefik `litellm` (LAN) and `litellm-public` routers both have only `secure-headers` middleware — no Authentik forwardAuth on either — because LiteLLM's own OAuth handles auth regardless of which hostname is used. Adding forwardAuth would cause two Authentik round-trips per session. The OAuth2 provider does **not** need to be assigned to the Embedded Outpost (outpost is for ProxyProviders only).
@@ -115,6 +126,11 @@ allowed bundles without touching user records.
 5. Invitee clicks link, fills in username/name/email/password
 6. Account is created as **active**, assigned to `bundle-agent` automatically
 7. akadmin promotes to additional bundles as needed
+
+For a team with its own dedicated flow (`agent-only`, `Family Group`, `Alpha Group` — see
+Invitation Flow Details below), `scripts/provision-user.sh --email <email> --team <name>` does
+steps 1–4 automatically and prints the link; step 6 then lands the account directly in that
+team's group, no step 7 needed.
 
 ### Changing a user's bundle
 
@@ -174,3 +190,23 @@ To invite an external guest:
 3. Expiry: 7–30 days, single-use: Yes
 4. Optionally set `{"email": "invitee@example.com"}` in Custom attributes
 5. Copy the generated link and send it to the invitee manually — Authentik does not email it
+
+### Flows 3 & 4: `enrollment-family-group` / `enrollment-alpha-group` — team invites (2026-10-01)
+
+Same structure as Flow 2 (both groups already existed in Authentik before these flows were
+added — these just gave them a working invitation path), one pair of flow+stages per team:
+
+| Stage | Name | Purpose |
+|---|---|---|
+| 0 | `invitation-family-group` / `invitation-alpha-group` | Reject requests without a valid invite token |
+| 10 | `identification-family-group` / `identification-alpha-group` | Social login (same 3 sources as the default identification stage) |
+| 20 | `user-write-family-group` / `user-write-alpha-group` | Create user and assign `Family Group` / `Alpha Group` automatically |
+
+No `invitation-user-login` stage (matching Flow 2, not Flow 1) — same as agent-only, not
+auto-logged-in after enrollment.
+
+Use `scripts/provision-user.sh --email <email> --team "Family Group"` (or `"Alpha Group"`)
+instead of the manual Directory → Invitations steps above — it discovers the right flow
+automatically (by finding every UserWriteStage with `create_users_group` set whose flow starts
+with an Invitation stage, so a future team built the same way needs no script changes) and
+prints the invite link. See `output/CENTAURI-playbook.md` §13 L-40 for the full build.
