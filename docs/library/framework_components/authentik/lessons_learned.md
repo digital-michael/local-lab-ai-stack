@@ -29,6 +29,7 @@ Empirical findings from deploying Authentik in this stack. Records behaviour tha
 18. [`access_token_validity` on ProxyProvider Must Be Set Explicitly — Defaults to 1 Hour](#18-access_token_validity-on-proxyprovider-must-be-set-explicitly--defaults-to-1-hour)
 19. [Malformed `access_token_validity` Causes Infinite Redirect Loop — Diagnose via Event Log](#19-malformed-access_token_validity-causes-infinite-redirect-loop--diagnose-via-event-log)
 20. [Migrating a ProxyProvider's `external_host` to Public Silently Kills LAN Access](#20-migrating-a-proxyproviders-external_host-to-public-silently-kills-lan-access)
+21. [Authentik Requires Sequential Minor-Version Upgrades — No Skipping](#21-authentik-requires-sequential-minor-version-upgrades--no-skipping)
 
 ---
 
@@ -809,3 +810,77 @@ won't be fixed by touching Authentik.
 > first: `x-powered-by: authentik` means Authentik has no matching provider
 > (an Authentik-side fix); a plain 404 with no such header means Traefik has no
 > matching router at all (a `services.yaml` fix instead).
+
+---
+
+## 21 Authentik Requires Sequential Minor-Version Upgrades — No Skipping
+
+**Version:** photondatum.space, upgrading 2025.2.4 → 2026.8.2 attempted
+**Discovered:** 2026-09-13/14, scheduled Authentik update
+
+### What Happened
+
+Upgrading Authentik on photondatum.space (edge VPS, 1.9GB RAM) from `2025.2.4`
+directly to the then-latest `2026.8.2` was planned, but Authentik's own docs
+require stepping through the latest patch release of every intervening minor
+version — no skipping, ever. The actual required path was:
+
+```
+2025.2.4 → 2025.4.4 → 2025.6.4 → 2025.8.6 → 2025.10.4 → 2025.12.6 → 2026.2.7 → 2026.5.7 → 2026.8.2
+```
+
+Each hop was: bump `Image=` in both `ai-stack-iam-authentik.container` and
+`ai-stack-iam-authentik-worker.container`, `systemctl --user daemon-reload`,
+restart server, poll `http://127.0.0.1:9000/-/health/ready/` until `200`,
+restart worker, check logs for tracebacks. Hops 1–7 (through `2026.5.7`)
+completed cleanly. Hop 8 (`2026.5.7 → 2026.8.2`) crash-looped the server
+container every ~12 seconds with:
+
+```
+django.db.migrations.exceptions.InconsistentMigrationHistory: Migration
+authentik_core.0064_user_authentik_c_usernam_2f0e4b_idx is applied before its
+dependency authentik_core.0063_actor on database 'default'.
+```
+
+This matched a confirmed, already-filed upstream bug
+([goauthentik/authentik#25996](https://github.com/goauthentik/authentik/issues/25996)):
+the 2026.8 migration graph inserted `0063_actor` as a new, lower-numbered
+dependency of a migration (`0064_...`) that databases upgraded through the
+2026.5 line had already applied — an upstream migration-graph inconsistency,
+not anything specific to this deployment. At the time of this upgrade it was
+open, labeled `bug/confirmed`, and targeted at an unreleased `2026.8.3`.
+
+### Root Cause
+
+Upstream Authentik shipped a 2026.8 migration whose dependency graph is
+inconsistent with the recorded migration history of instances that came from
+the 2026.5 line — a bug in Authentik itself, not a local misconfiguration.
+
+### Fix
+
+The crash happens during Django's migration **planning** phase, before any
+schema changes are applied — so it is safe to abort and roll back the image
+tag with no database repair needed. Reverted both quadlets from `2026.8.2`
+back to `2026.5.7` (the last verified-healthy hop), restarted, confirmed
+`/-/health/ready/` returned `200` and the embedded outpost reloaded all
+proxy applications. Deployment currently sits at `2026.5.7`, seven of eight
+required hops complete.
+
+**Do not** attempt `--fake`-applying `0063_actor` to work around the
+inconsistency — the issue thread explicitly warns this migration performs a
+real schema change (creates the `actor` table), so faking it would silently
+skip that change.
+
+### Rule
+
+> Authentik upgrades must go through the latest patch of every intervening
+> minor version, never a direct jump — check the exact hop list against
+> GitHub releases before starting, not just "current" vs. "latest." Before
+> each hop, and especially before a hop spanning a `major.minor` boundary,
+> search GitHub issues for the target version + `InconsistentMigrationHistory`
+> or the target tag name — a crash-loop with that exception on a freshly
+> bumped tag is very likely a known upstream migration-graph bug, not a local
+> problem. If it crashes during migration planning (before any "applying
+> migration" success line for the new migrations), reverting the image tag is
+> safe with no DB restore needed. Retry the final hop once the targeted patch
+> release (here, `2026.8.3`) actually ships.

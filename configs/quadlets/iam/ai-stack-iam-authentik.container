@@ -3,7 +3,7 @@ Description=AI Stack IAM — Authentik server
 After=ai-stack-iam-postgres.service ai-stack-iam-redis.service
 
 [Container]
-Image=ghcr.io/goauthentik/server:2025.2.4
+Image=ghcr.io/goauthentik/server:2026.5.7
 ContainerName=ai-stack-iam-authentik
 Exec=server
 Network=ai-stack
@@ -14,7 +14,7 @@ Environment=AUTHENTIK_POSTGRESQL__NAME=authentik
 Environment=AUTHENTIK_ERROR_REPORTING__ENABLED=false
 Secret=ai-stack-iam-postgres-password,type=env,target=AUTHENTIK_POSTGRESQL__PASSWORD
 Secret=ai-stack-iam-authentik-secret-key,type=env,target=AUTHENTIK_SECRET_KEY
-Volume=ai-stack-iam-authentik-media:/media:Z
+Volume=ai-stack-iam-authentik-media:/data/media:Z
 Volume=ai-stack-iam-authentik-certs:/certs:Z
 PublishPort=127.0.0.1:9000:9000
 PublishPort=127.0.0.1:9443:9443
