@@ -137,6 +137,21 @@
       }
     },
     {
+      "id": "granite4.2:30b",
+      "description": "granite4.2:30b \u2014 CPU inference via Ollama",
+      "litellm_params": {
+        "model": "ollama_chat/granite4.2:30b",
+        "api_base": "http://ollama.ai-stack:11434",
+        "api_key": "none",
+        "max_tokens": 4096
+      },
+      "model_info": {
+        "mode": "chat",
+        "input_cost_per_token": 0,
+        "output_cost_per_token": 0
+      }
+    },
+    {
       "id": "qwen3-coder-next:latest",
       "description": "qwen3-coder-next:latest \u2014 CPU inference via Ollama",
       "litellm_params": {
@@ -167,53 +182,11 @@
       }
     },
     {
-      "id": "gpt-4o",
-      "description": "gpt-4o \u2014 hosted via OpenAI",
-      "litellm_params": {
-        "model": "gpt-4o",
-        "api_key": "os.environ/OPENAI_API_KEY",
-        "max_tokens": 4096
-      },
-      "model_info": {
-        "mode": "chat",
-        "input_cost_per_token": 0,
-        "output_cost_per_token": 0
-      }
-    },
-    {
-      "id": "llama3-70b-8192",
-      "description": "llama3-70b-8192 \u2014 hosted via Groq",
-      "litellm_params": {
-        "model": "groq/llama3-70b-8192",
-        "api_key": "os.environ/GROQ_API_KEY",
-        "max_tokens": 4096
-      },
-      "model_info": {
-        "mode": "chat",
-        "input_cost_per_token": 0,
-        "output_cost_per_token": 0
-      }
-    },
-    {
       "id": "claude-sonnet-4-5",
       "description": "claude-sonnet-4-5 \u2014 hosted via Anthropic",
       "litellm_params": {
         "model": "anthropic/claude-sonnet-4-5",
         "api_key": "os.environ/ANTHROPIC_API_KEY",
-        "max_tokens": 4096
-      },
-      "model_info": {
-        "mode": "chat",
-        "input_cost_per_token": 0,
-        "output_cost_per_token": 0
-      }
-    },
-    {
-      "id": "mistral-large-latest",
-      "description": "mistral-large-latest \u2014 hosted via Mistral AI",
-      "litellm_params": {
-        "model": "mistral/mistral-large-latest",
-        "api_key": "os.environ/MISTRAL_API_KEY",
         "max_tokens": 4096
       },
       "model_info": {
@@ -242,7 +215,7 @@
       "description": "llama3.2:3b-instruct-q4_K_M \u2014 remote Ollama on alienware",
       "litellm_params": {
         "model": "ollama_chat/llama3.2:3b-instruct-q4_K_M",
-        "api_base": "http://SOL.mynetworksettings.com:11434",
+        "api_base": "http://10.19.208.113:11434",
         "api_key": "none",
         "max_tokens": 4096
       },

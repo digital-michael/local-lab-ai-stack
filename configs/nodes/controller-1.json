@@ -23,5 +23,7 @@
     "postgres",
     "inference"
   ],
-  "ki_port": 8100
+  "ki_port": 8100,
+  "node_tier": "strong",
+  "node_rank": 1
 }

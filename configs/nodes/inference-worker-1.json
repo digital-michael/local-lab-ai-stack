@@ -3,8 +3,8 @@
   "alias": "inference-worker-1",
   "node_id": "TC25",
   "name": "macbook-m1",
-  "address": "TC25.mynetworksettings.com",
-  "address_fallback": "10.19.208.118",
+  "address": "tc25.tailnet.photondatum.space",
+  "address_fallback": "100.64.0.3",
   "ssh_user": "michaelbiggerstaff",
   "status": "active",
   "profile": "inference-worker",
@@ -16,5 +16,7 @@
   ],
   "capabilities": [
     "inference"
-  ]
+  ],
+  "node_tier": "strong",
+  "node_rank": 2
 }

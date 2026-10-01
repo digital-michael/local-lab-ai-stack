@@ -16,5 +16,7 @@
   ],
   "capabilities": [
     "inference"
-  ]
+  ],
+  "node_tier": "strong",
+  "node_rank": 3
 }

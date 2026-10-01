@@ -20,5 +20,7 @@
     "inference",
     "knowledge-index",
     "qdrant"
-  ]
+  ],
+  "node_tier": "strong",
+  "node_rank": 1
 }
