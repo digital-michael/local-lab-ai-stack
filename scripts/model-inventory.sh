@@ -64,6 +64,22 @@ Options:
                 available for the controller itself, not remote nodes
                 (nothing in Ollama's HTTP API exposes a remote node's
                 storage path or on-disk usage).
+  -cpu, --cpu   Add a LOAD column (right after STATUS) showing each loaded
+                model's live CPU%, attributed the same way loads.sh does:
+                the runner subprocess invoked with `--model <weights-blob>`
+                is matched to Ollama's own manifest file on disk for that
+                model (not /api/ps's own "digest" field — that's the
+                *manifest's* digest, a different hash that never matches the
+                blob path). A single currently-loaded model with no digest
+                match falls back to the whole `ollama` process/container's
+                CPU total, since that's unambiguous. vLLM's one served model
+                gets the `vllm` container's CPU total directly — no digest
+                matching needed, there's only ever one. "-" means not
+                currently loaded (most rows, most of the time — this is a
+                live snapshot, not a historical one) or, for a remote node,
+                that this script has no way to see its processes at all
+                (HTTP-only — see the model-repository note above for why).
+                Combines with -v to add both sets of columns at once.
   -h, --help    Show this message
 
 Exit codes:
@@ -81,11 +97,13 @@ EOF
 OUTPUT_FORMAT="text"
 USE_COLOR=0
 VERBOSE=0
+CPU_FLAG=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --json)       OUTPUT_FORMAT="json"; shift ;;
         --color)      USE_COLOR=1;          shift ;;
         -v|--verbose) VERBOSE=1;            shift ;;
+        -cpu|--cpu)   CPU_FLAG=1;           shift ;;
         -h|--help)    usage; exit 0 ;;
         *)            echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
     esac
@@ -143,25 +161,46 @@ PROVISIONED_SECRETS="$(podman secret ls --format '{{.Name}}' 2>/dev/null || true
 # free space on that filesystem (-v only; filesystem-level, so controller-only
 # — same discovery order as loads.sh: explicit override, then this stack's
 # bind-mount convention, then the bare-metal default). Also the controller's
-# own Ollama server version, straight from /api/version.
+# own Ollama server version, straight from /api/version. -cpu needs this same
+# directory too (to resolve a loaded model's weights digest from its manifest
+# file — see resolve_weights_digest() in the Python below), so either flag
+# triggers the lookup.
 OLLAMA_MODELS_DIR=""
 OLLAMA_MODELS_DIR_SIZE=""
 OLLAMA_MODELS_DIR_FREE=""
 OLLAMA_VERSION=""
-if [[ "$VERBOSE" == "1" ]]; then
+if [[ "$VERBOSE" == "1" || "$CPU_FLAG" == "1" ]]; then
     for _candidate in "${OLLAMA_MODELS:-}" "$AI_STACK_DIR/ollama/models" "$HOME/.ollama/models"; do
         if [[ -n "$_candidate" && -d "$_candidate" ]]; then
             OLLAMA_MODELS_DIR="$_candidate"
-            OLLAMA_MODELS_DIR_SIZE="$(du -sh "$_candidate" 2>/dev/null | cut -f1)"
-            OLLAMA_MODELS_DIR_FREE="$(df -h "$_candidate" 2>/dev/null | tail -1 | awk '{print $4}')"
+            if [[ "$VERBOSE" == "1" ]]; then
+                OLLAMA_MODELS_DIR_SIZE="$(du -sh "$_candidate" 2>/dev/null | cut -f1)"
+                OLLAMA_MODELS_DIR_FREE="$(df -h "$_candidate" 2>/dev/null | tail -1 | awk '{print $4}')"
+            fi
             break
         fi
     done
-    OLLAMA_VERSION="$(curl -s -m "$PROBE_TIMEOUT" "http://localhost:$OLLAMA_PORT/api/version" 2>/dev/null | jq -r '.version // empty' 2>/dev/null || true)"
+    if [[ "$VERBOSE" == "1" ]]; then
+        OLLAMA_VERSION="$(curl -s -m "$PROBE_TIMEOUT" "http://localhost:$OLLAMA_PORT/api/version" 2>/dev/null | jq -r '.version // empty' 2>/dev/null || true)"
+    fi
+fi
+
+# -cpu only: a host-wide `ps` snapshot (to match a loaded model's runner
+# subprocess by its weights-blob digest) and each container's CPU% (for the
+# vLLM single-model case, and as the ollama fallback when digest matching
+# can't find a match but there's only one loaded model to attribute to).
+# Both are controller-only by nature — there's no way to see a remote node's
+# processes over HTTP alone.
+PS_SNAPSHOT_RAW=""
+PODMAN_STATS_RAW=""
+if [[ "$CPU_FLAG" == "1" ]]; then
+    PS_SNAPSHOT_RAW="$(ps -A -o pid,ppid,pcpu,args 2>/dev/null || true)"
+    PODMAN_STATS_RAW="$(podman stats --no-stream --no-trunc --format '{{.Name}}	{{.CPUPerc}}' 2>/dev/null || true)"
 fi
 
 export REGISTERED_ROUTES PROVISIONED_SECRETS CONFIG_FILE NODES_DIR OLLAMA_PORT VLLM_PORT PROBE_TIMEOUT OUTPUT_FORMAT USE_COLOR
 export VERBOSE OLLAMA_MODELS_DIR OLLAMA_MODELS_DIR_SIZE OLLAMA_MODELS_DIR_FREE OLLAMA_VERSION
+export CPU_FLAG PS_SNAPSHOT_RAW PODMAN_STATS_RAW
 
 python3 <<'PYEOF'
 import json
@@ -227,10 +266,106 @@ def http_get_json(url: str, timeout: float):
 
 
 VERBOSE = os.environ.get("VERBOSE") == "1"
+CPU_FLAG = os.environ.get("CPU_FLAG") == "1"
 OLLAMA_MODELS_DIR = os.environ.get("OLLAMA_MODELS_DIR", "")
 OLLAMA_MODELS_DIR_SIZE = os.environ.get("OLLAMA_MODELS_DIR_SIZE", "")
 OLLAMA_MODELS_DIR_FREE = os.environ.get("OLLAMA_MODELS_DIR_FREE", "")
 OLLAMA_VERSION = os.environ.get("OLLAMA_VERSION", "")
+
+
+def parse_ps_snapshot(raw: str):
+    rows = []
+    lines = raw.splitlines()[1:]  # drop header
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        fields = line.split(None, 3)
+        if len(fields) < 4:
+            continue
+        pid, ppid, pcpu, args = fields
+        try:
+            rows.append({"pid": int(pid), "pcpu": float(pcpu), "args": fields[3]})
+        except ValueError:
+            continue
+    return rows
+
+
+def parse_podman_stats(raw: str):
+    stats = {}
+    for line in raw.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 2:
+            continue
+        name, cpu = parts
+        try:
+            stats[name] = float(cpu.rstrip("%") or 0)
+        except ValueError:
+            continue
+    return stats
+
+
+PS_ROWS = parse_ps_snapshot(os.environ.get("PS_SNAPSHOT_RAW", "")) if CPU_FLAG else []
+PODMAN_CPU = parse_podman_stats(os.environ.get("PODMAN_STATS_RAW", "")) if CPU_FLAG else {}
+OLLAMA_PATTERN = re.compile(r"\bollama\b", re.IGNORECASE)
+RUNNER_MODEL_RE = re.compile(r"--model\s+(\S+)")
+
+
+def resolve_weights_digest(models_dir: str, name: str):
+    """The digest /api/ps reports is the model *manifest*'s own digest, not
+    the weights blob a runner subprocess is invoked with --model <path> for —
+    two different hashes (see loads.sh, where this was first worked out and
+    verified directly against this stack's own manifests). Read the real
+    weights digest out of the manifest file Ollama itself writes to disk."""
+    if not models_dir or not name:
+        return None
+    repo, _, tag = name.partition(":")
+    tag = tag or "latest"
+    namespace, _, model = repo.rpartition("/")
+    namespace = namespace or "library"
+    manifest_path = os.path.join(models_dir, "manifests", "registry.ollama.ai", namespace, model, tag)
+    try:
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+    except Exception:
+        return None
+    for layer in manifest.get("layers", []):
+        if layer.get("mediaType") == "application/vnd.ollama.image.model":
+            return layer.get("digest", "").rsplit(":", 1)[-1].lower()
+    return None
+
+
+def ollama_runners():
+    runners = []
+    for row in PS_ROWS:
+        if not OLLAMA_PATTERN.search(row["args"]):
+            continue
+        m = RUNNER_MODEL_RE.search(row["args"])
+        if not m:
+            continue
+        blob = os.path.basename(m.group(1))
+        digest = re.sub(r"^sha256[:\-]", "", blob).lower()
+        runners.append({"pcpu": row["pcpu"], "digest": digest})
+    return runners
+
+
+def cpu_pct_by_model(models_dir: str, loaded_names: list[str]):
+    """name -> live CPU% for every currently-loaded Ollama model (from
+    /api/ps), matched to its runner subprocess by weights digest. A single
+    loaded model with no digest match falls back to the whole ollama
+    container/process's CPU total, since that's unambiguous either way."""
+    if not CPU_FLAG or not loaded_names:
+        return {}
+    runners = ollama_runners()
+    result = {}
+    for name in loaded_names:
+        digest = resolve_weights_digest(models_dir, name)
+        hits = [r["pcpu"] for r in runners if digest and r["digest"] == digest]
+        if hits:
+            result[name] = round(sum(hits), 1)
+        elif len(loaded_names) == 1 and "ollama" in PODMAN_CPU:
+            result[name] = PODMAN_CPU["ollama"]
+    return result
 
 
 def ollama_model_info(base_url: str, tags_response: dict):
@@ -309,6 +444,19 @@ controller_registered = {
     r["model_name"] for r in node_routes if host_of(r["api_base"]) in CONTROLLER_HOSTS
 }
 
+# -cpu only: which Ollama models are actually resident right now (/api/ps —
+# a separate, smaller list than /api/tags above, which is every model ever
+# pulled regardless of whether it's loaded), and vLLM's one served model's
+# container CPU total (no digest matching needed, there's only ever one).
+controller_loaded_names = []
+vllm_cpu_pct = None
+if CPU_FLAG:
+    controller_ps = http_get_json(f"http://localhost:{OLLAMA_PORT}/api/ps", PROBE_TIMEOUT)
+    controller_loaded_names = [m["name"] for m in (controller_ps or {}).get("models", [])]
+    if controller_vllm and controller_vllm.get("data"):
+        vllm_cpu_pct = PODMAN_CPU.get("vllm")
+cpu_pct_by_name = cpu_pct_by_model(OLLAMA_MODELS_DIR, controller_loaded_names)
+
 nodes_report = []
 
 controller_file = os.path.join(NODES_DIR, "controller-1.json")
@@ -334,13 +482,17 @@ for name in sorted(names):
         "backend": backend,
         "available": name in backend_by_name,
         "registered": name in controller_registered,
-        "size_gb": None, "params": None, "pulled_at": None,
+        "size_gb": None, "params": None, "pulled_at": None, "cpu_pct": None,
         "classification": classification, "modes": modes,
     }
     if backend == "ollama" and name in controller_ollama_info:
         entry["size_gb"] = controller_ollama_info[name]["size_gb"]
         entry["params"] = controller_ollama_info[name]["params"]
         entry["pulled_at"] = controller_ollama_info[name]["pulled_at"]
+    if backend == "ollama" and name in cpu_pct_by_name:
+        entry["cpu_pct"] = cpu_pct_by_name[name]
+    elif backend == "vllm":
+        entry["cpu_pct"] = vllm_cpu_pct
     model_entries.append(entry)
 
 nodes_report.append({
@@ -403,7 +555,7 @@ for fname in sorted(os.listdir(NODES_DIR)):
             "backend": "ollama",
             "available": name in available,
             "registered": name in node_registered,
-            "size_gb": None, "params": None, "pulled_at": None,
+            "size_gb": None, "params": None, "pulled_at": None, "cpu_pct": None,
             "classification": classification, "modes": modes,
         }
         if name in node_ollama_info:
@@ -467,7 +619,7 @@ def status_of(entry):
 
 
 NAME_W, BACKEND_W, STATUS_W = 42, 8, 14
-SIZE_W, PARAMS_W, PULLED_W = 9, 7, 10
+SIZE_W, PARAMS_W, PULLED_W, LOAD_W = 9, 7, 10, 7
 
 for i, node in enumerate(nodes_report):
     state = "online" if node["online"] else "offline"
@@ -485,13 +637,23 @@ for i, node in enumerate(nodes_report):
         continue
 
     print()
+    header_line = f"  {'MODEL':<{NAME_W}} {'BACKEND':<{BACKEND_W}} {'STATUS':<{STATUS_W}}"
+    if CPU_FLAG:
+        header_line += f" {'LOAD':>{LOAD_W}}"
     if VERBOSE:
-        print(f"  {'MODEL':<{NAME_W}} {'BACKEND':<{BACKEND_W}} {'STATUS':<{STATUS_W}} {'SIZE':>{SIZE_W}} {'PARAMS':>{PARAMS_W}} {'PULLED':<{PULLED_W}}  TAGS")
-    else:
-        print(f"  {'MODEL':<{NAME_W}} {'BACKEND':<{BACKEND_W}} STATUS")
+        header_line += f" {'SIZE':>{SIZE_W}} {'PARAMS':>{PARAMS_W}} {'PULLED':<{PULLED_W}}  TAGS"
+    print(header_line)
     for entry in node["models"]:
         status, ok = status_of(entry)
         backend = entry["backend"] or "?"
+        line = f"  {entry['name']:<{NAME_W}} {backend:<{BACKEND_W}} {status:<{STATUS_W}}"
+        if CPU_FLAG:
+            # "-" covers two different things: a model that isn't currently
+            # loaded (most rows, most of the time — this is a live snapshot),
+            # and a remote node, where this script has no way to see
+            # processes at all (HTTP-only, no SSH/ps access).
+            load = f"{entry['cpu_pct']}%" if entry.get("cpu_pct") is not None else "-"
+            line += f" {load:>{LOAD_W}}"
         if VERBOSE:
             size = f"{entry['size_gb']}GB" if entry.get("size_gb") is not None else "-"
             params = entry.get("params") or "-"
@@ -507,10 +669,7 @@ for i, node in enumerate(nodes_report):
             # consistent order across models — nothing to re-sort here.
             merged_tags = ([entry["classification"]] if entry.get("classification") else []) + (entry.get("modes") or [])
             tags_display = ",".join(merged_tags) if merged_tags else "-"
-            line = (f"  {entry['name']:<{NAME_W}} {backend:<{BACKEND_W}} {status:<{STATUS_W}} "
-                    f"{size:>{SIZE_W}} {params:>{PARAMS_W}} {pulled:<{PULLED_W}}  {tags_display}")
-        else:
-            line = f"  {entry['name']:<{NAME_W}} {backend:<{BACKEND_W}} {status}"
+            line += f" {size:>{SIZE_W}} {params:>{PARAMS_W}} {pulled:<{PULLED_W}}  {tags_display}"
         print(colorize(line, ok))
     print()
 
