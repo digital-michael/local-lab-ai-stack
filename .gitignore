@@ -48,3 +48,7 @@ docs/meta
 docs/meta_local/dynamics.md
 docs/meta_local/review_log.md
 docs/meta_local/agent-context.md
+
+# Router config snapshots (router-settings-snapshot.sh output) — contain the
+# WiFi passphrase in plaintext (wireless-radios.json), never commit
+router-backup-*/
