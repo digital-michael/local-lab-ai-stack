@@ -40,6 +40,24 @@ Options:
                 (for a future web UI)
   --color       Colorize the human-readable report; dims unregistered/
                 unavailable/stale entries in red to draw attention
+  -v, --verbose Add per-model disk size, parameter count, and a single
+                merged TAGS column: LiteLLM's "strong-1"-style node
+                classification plus Ollama's supported-modes capabilities
+                (completion/tools/thinking/vision/etc.) — see
+                output/CENTAURI-playbook.md §13 L-31/L-34/L-35. Both are
+                applied by pull-models.sh itself at registration time, so
+                this is simply what's actually registered, read straight off
+                LiteLLM's /model/info — no live /api/show call from this
+                script anymore. "-" means genuinely untagged: a cloud model
+                or a per-node alias route, both deliberately excluded from
+                the scheme. --json keeps "classification" and "modes" as
+                separate fields, unchanged, for structured consumers.
+                Also prints the controller's local Ollama model-repository
+                directory and its total on-disk size once, under the
+                controller's own section — this is filesystem-level info,
+                so it's only ever available for the controller itself, not
+                remote nodes (nothing in Ollama's HTTP API exposes a
+                remote node's storage path or on-disk usage).
   -h, --help    Show this message
 
 Exit codes:
@@ -56,10 +74,12 @@ EOF
 
 OUTPUT_FORMAT="text"
 USE_COLOR=0
+VERBOSE=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --json)       OUTPUT_FORMAT="json"; shift ;;
         --color)      USE_COLOR=1;          shift ;;
+        -v|--verbose) VERBOSE=1;            shift ;;
         -h|--help)    usage; exit 0 ;;
         *)            echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
     esac
@@ -113,11 +133,29 @@ fi
 
 PROVISIONED_SECRETS="$(podman secret ls --format '{{.Name}}' 2>/dev/null || true)"
 
+# Controller's local Ollama model-repository directory and its on-disk size
+# (-v only; filesystem-level, so controller-only — same discovery order as
+# loads.sh: explicit override, then this stack's bind-mount convention, then
+# the bare-metal default).
+OLLAMA_MODELS_DIR=""
+OLLAMA_MODELS_DIR_SIZE=""
+if [[ "$VERBOSE" == "1" ]]; then
+    for _candidate in "${OLLAMA_MODELS:-}" "$AI_STACK_DIR/ollama/models" "$HOME/.ollama/models"; do
+        if [[ -n "$_candidate" && -d "$_candidate" ]]; then
+            OLLAMA_MODELS_DIR="$_candidate"
+            OLLAMA_MODELS_DIR_SIZE="$(du -sh "$_candidate" 2>/dev/null | cut -f1)"
+            break
+        fi
+    done
+fi
+
 export REGISTERED_ROUTES PROVISIONED_SECRETS CONFIG_FILE NODES_DIR OLLAMA_PORT VLLM_PORT PROBE_TIMEOUT OUTPUT_FORMAT USE_COLOR
+export VERBOSE OLLAMA_MODELS_DIR OLLAMA_MODELS_DIR_SIZE
 
 python3 <<'PYEOF'
 import json
 import os
+import re
 import sys
 import urllib.request
 from datetime import datetime, timezone
@@ -152,10 +190,12 @@ def parse_registered_routes(raw: str):
     routes = []
     for entry in data.get("data", []):
         lp = entry.get("litellm_params", {}) or {}
+        mi = entry.get("model_info", {}) or {}
         routes.append({
             "model_name": entry.get("model_name", ""),
             "model": lp.get("model", ""),
             "api_base": lp.get("api_base", "") or "",
+            "tags": mi.get("tags"),
         })
     return routes
 
@@ -175,10 +215,57 @@ def http_get_json(url: str, timeout: float):
         return None
 
 
+VERBOSE = os.environ.get("VERBOSE") == "1"
+OLLAMA_MODELS_DIR = os.environ.get("OLLAMA_MODELS_DIR", "")
+OLLAMA_MODELS_DIR_SIZE = os.environ.get("OLLAMA_MODELS_DIR_SIZE", "")
+
+
+def ollama_model_info(base_url: str, tags_response: dict):
+    """name -> {size_gb, params} straight from an already-fetched /api/tags
+    response — no extra call needed for these two fields."""
+    info = {}
+    for m in (tags_response or {}).get("models", []):
+        info[m["name"]] = {
+            "size_gb": round(m.get("size", 0) / 1e9, 2),
+            "params": (m.get("details") or {}).get("parameter_size"),
+        }
+    return info
+
+
 with open(CONFIG_FILE) as f:
     config = json.load(f)
 
 routes = parse_registered_routes(os.environ.get("REGISTERED_ROUTES", ""))
+
+# model_name -> merged tags list from LiteLLM's model_info.tags (L-31/L-35 —
+# see output/CENTAURI-playbook.md §13): the "strong-1" style node
+# classification plus Ollama's supported-modes capabilities
+# (completion/tools/thinking/vision/...), all tagged directly by
+# pull-models.sh at registration time — no live /api/show call needed here
+# anymore, this is simply what's actually registered. Only present on routes
+# that have actually been tagged; None otherwise, not guessed.
+tags_by_name = {}
+for r in routes:
+    if r.get("tags"):
+        tags_by_name[r["model_name"]] = r["tags"]
+
+TIER_PATTERN = re.compile(r"^(strong|mid|low|micro)-\d+$")
+
+
+def split_tags(tags):
+    """(classification, modes) from a merged tags list — kept split for JSON
+    output's existing shape, even though the human-readable table just shows
+    the merged list directly."""
+    if not tags:
+        return None, None
+    classification = None
+    modes = []
+    for t in tags:
+        if classification is None and TIER_PATTERN.match(t):
+            classification = t
+        else:
+            modes.append(t)
+    return classification, (modes or None)
 
 # Split cloud (no api_base — hosted providers) from node-attached routes
 CLOUD_BACKENDS = {"openai", "groq", "anthropic", "mistral"}
@@ -220,13 +307,22 @@ if os.path.isfile(controller_file):
 names = {name for name, _ in controller_available} | controller_registered
 model_entries = []
 backend_by_name = dict(controller_available)
+controller_ollama_info = ollama_model_info(f"http://localhost:{OLLAMA_PORT}", controller_ollama)
 for name in sorted(names):
-    model_entries.append({
+    backend = backend_by_name.get(name)
+    classification, modes = split_tags(tags_by_name.get(name))
+    entry = {
         "name": name,
-        "backend": backend_by_name.get(name),
+        "backend": backend,
         "available": name in backend_by_name,
         "registered": name in controller_registered,
-    })
+        "size_gb": None, "params": None,
+        "classification": classification, "modes": modes,
+    }
+    if backend == "ollama" and name in controller_ollama_info:
+        entry["size_gb"] = controller_ollama_info[name]["size_gb"]
+        entry["params"] = controller_ollama_info[name]["params"]
+    model_entries.append(entry)
 
 nodes_report.append({
     "alias": controller_alias,
@@ -235,6 +331,8 @@ nodes_report.append({
     "address": "localhost",
     "online": bool(controller_ollama or controller_vllm),
     "models": model_entries,
+    "models_dir": OLLAMA_MODELS_DIR or None,
+    "models_dir_size": OLLAMA_MODELS_DIR_SIZE or None,
 })
 
 # ---------------------------------------------------------------------------
@@ -276,13 +374,21 @@ for fname in sorted(os.listdir(NODES_DIR)):
 
     names = set(available) | node_registered
     model_entries = []
+    node_ollama_info = ollama_model_info(f"http://{resolved}:11434", tags) if resolved else {}
     for name in sorted(names):
-        model_entries.append({
+        classification, modes = split_tags(tags_by_name.get(name))
+        entry = {
             "name": name,
             "backend": "ollama",
             "available": name in available,
             "registered": name in node_registered,
-        })
+            "size_gb": None, "params": None,
+            "classification": classification, "modes": modes,
+        }
+        if name in node_ollama_info:
+            entry["size_gb"] = node_ollama_info[name]["size_gb"]
+            entry["params"] = node_ollama_info[name]["params"]
+        model_entries.append(entry)
 
     nodes_report.append({
         "alias": alias,
@@ -291,6 +397,8 @@ for fname in sorted(os.listdir(NODES_DIR)):
         "address": resolved or address or fallback,
         "online": resolved is not None,
         "models": model_entries,
+        "models_dir": None,  # filesystem-level info, only ever knowable for the controller
+        "models_dir_size": None,
     })
 
 # ---------------------------------------------------------------------------
@@ -335,22 +443,39 @@ def status_of(entry):
 
 
 NAME_W, BACKEND_W, STATUS_W = 42, 8, 14
+SIZE_W, PARAMS_W = 9, 7
 
 for i, node in enumerate(nodes_report):
     state = "online" if node["online"] else "offline"
     state_disp = colorize(state, node["online"])
     header = f"{node['node_id']} ({node['alias']}) — {state_disp} — {node['address']}"
     print(f"{BOLD}{header}{RESET}" if USE_COLOR else header)
+    if VERBOSE and node.get("models_dir"):
+        print(f"  model repository: {node['models_dir']}  (total size: {node['models_dir_size'] or '?'})")
 
     if not node["models"]:
         print("  (no models available or registered)\n")
         continue
 
-    print(f"  {'MODEL':<{NAME_W}} {'BACKEND':<{BACKEND_W}} STATUS")
+    if VERBOSE:
+        print(f"  {'MODEL':<{NAME_W}} {'BACKEND':<{BACKEND_W}} {'STATUS':<{STATUS_W}} {'SIZE':>{SIZE_W}} {'PARAMS':>{PARAMS_W}}  TAGS")
+    else:
+        print(f"  {'MODEL':<{NAME_W}} {'BACKEND':<{BACKEND_W}} STATUS")
     for entry in node["models"]:
         status, ok = status_of(entry)
         backend = entry["backend"] or "?"
-        line = f"  {entry['name']:<{NAME_W}} {backend:<{BACKEND_W}} {status}"
+        if VERBOSE:
+            size = f"{entry['size_gb']}GB" if entry.get("size_gb") is not None else "-"
+            params = entry.get("params") or "-"
+            # One merged TAGS column (classification + modes together) — the
+            # JSON output below keeps them as two separate keys, this is
+            # purely a human-readability simplification (L-35).
+            merged_tags = ([entry["classification"]] if entry.get("classification") else []) + (entry.get("modes") or [])
+            tags_display = ",".join(merged_tags) if merged_tags else "-"
+            line = (f"  {entry['name']:<{NAME_W}} {backend:<{BACKEND_W}} {status:<{STATUS_W}} "
+                    f"{size:>{SIZE_W}} {params:>{PARAMS_W}}  {tags_display}")
+        else:
+            line = f"  {entry['name']:<{NAME_W}} {backend:<{BACKEND_W}} {status}"
         print(colorize(line, ok))
     print()
 
