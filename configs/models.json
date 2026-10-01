@@ -17,36 +17,6 @@
       }
     },
     {
-      "id": "qwen3.5:4b",
-      "description": "qwen3.5:4b \u2014 CPU inference via Ollama",
-      "litellm_params": {
-        "model": "ollama_chat/qwen3.5:4b",
-        "api_base": "http://ollama.ai-stack:11434",
-        "api_key": "none",
-        "max_tokens": 4096
-      },
-      "model_info": {
-        "mode": "chat",
-        "input_cost_per_token": 0,
-        "output_cost_per_token": 0
-      }
-    },
-    {
-      "id": "qwen3:8b",
-      "description": "qwen3:8b \u2014 CPU inference via Ollama",
-      "litellm_params": {
-        "model": "ollama_chat/qwen3:8b",
-        "api_base": "http://ollama.ai-stack:11434",
-        "api_key": "none",
-        "max_tokens": 4096
-      },
-      "model_info": {
-        "mode": "chat",
-        "input_cost_per_token": 0,
-        "output_cost_per_token": 0
-      }
-    },
-    {
       "id": "llama3.2:latest",
       "description": "llama3.2:latest \u2014 CPU inference via Ollama",
       "litellm_params": {
@@ -81,21 +51,6 @@
       "description": "bit-sync-dev/nexus1:1b \u2014 CPU inference via Ollama",
       "litellm_params": {
         "model": "ollama_chat/bit-sync-dev/nexus1:1b",
-        "api_base": "http://ollama.ai-stack:11434",
-        "api_key": "none",
-        "max_tokens": 4096
-      },
-      "model_info": {
-        "mode": "chat",
-        "input_cost_per_token": 0,
-        "output_cost_per_token": 0
-      }
-    },
-    {
-      "id": "qwen:latest",
-      "description": "qwen:latest \u2014 CPU inference via Ollama",
-      "litellm_params": {
-        "model": "ollama_chat/qwen:latest",
         "api_base": "http://ollama.ai-stack:11434",
         "api_key": "none",
         "max_tokens": 4096

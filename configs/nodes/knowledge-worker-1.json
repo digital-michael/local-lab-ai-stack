@@ -12,8 +12,6 @@
   "registered_at": "2026-04-08T00:00:00Z",
   "models": [
     "llama3.1:8b",
-    "qwen3.5:4b",
-    "qwen3:8b",
     "llama3.2:3b"
   ],
   "capabilities": [
