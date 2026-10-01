@@ -29,69 +29,108 @@
 # row doesn't exist until the person's first successful signin, so there's
 # nothing to add as a member yet at invitation time).
 #
+# --send emails the invite link immediately after creating it, via a real
+# SMTP relay — a Podman secret (JSON: host/port/username/password/from/
+# use_tls), name given by --smtp-secret (default: photondatum_smtp). Default
+# behavior with no --send is unchanged: print the link, send nothing. Every
+# invitation this script creates gets its invitee email and a "sent" flag
+# recorded in Authentik's own Invitation.fixed_data field (otherwise empty
+# and unused) — that's what --see-queue reads back later.
+#
+# --see-queue (used instead of --email, not together with it) lists every
+# invitation this script has created that's still unexpired and not yet
+# marked sent, and prompts to send all of them now or abort — the
+# "come back and actually send these later" half of the same --send
+# mechanism, for anything created without --send in the first place.
+#
 # Usage:
-#   scripts/provision-user.sh --email new.person@example.com [--team "Family Group"]
+#   scripts/provision-user.sh --email new.person@example.com [--team "Family Group"] [--send]
 #   scripts/provision-user.sh --email new.person@example.com        # lists teams, prompts for one
+#   scripts/provision-user.sh --see-queue                           # lists pending, prompts to send all
 #
 # Options:
-#   --email EMAIL          Required. The invitee's email address.
+#   --email EMAIL          The invitee's email address. Required unless --see-queue.
 #   --team NAME            Team to provision into. If omitted, lists the
 #                          live-discovered teams and prompts for exactly one.
+#   --send                 Email the invite link immediately via SMTP
+#                          (default: leave unsent, just print the link).
+#   --see-queue            List pending (unsent, unexpired) invitations and
+#                          prompt to send all or abort. Used instead of
+#                          --email, not together with it.
 #   --expires-days N       Invitation validity in days (default: 7)
 #   --authentik-url URL    Authentik base URL (default: https://auth.photondatum.space)
 #   --token-secret NAME    Podman secret holding the Authentik API token
 #                          (default: homepage_authentik_token)
+#   --smtp-secret NAME     Podman secret holding SMTP credentials, as JSON
+#                          (default: photondatum_smtp)
 #   --json                 Emit a structured JSON result instead of text
+#                          (--see-queue --json lists only, never prompts/sends)
 #   -h, --help             Show this message
 #
 # Exit codes:
-#   0   Invitation created
-#   1   Invalid input (bad email, unknown --team)
+#   0   Invitation created (or queue listed/handled) successfully
+#   1   Invalid input (bad email, unknown --team, both/neither --email and --see-queue)
 #   2   Environment/connectivity problem (podman, Authentik unreachable, no
-#       teams discoverable)
+#       teams discoverable, or --send/queue-send requested but SMTP failed)
 #
 # This is additive only — it never deletes or modifies an existing user,
-# invitation, group, or flow. Re-running for the same email just creates
-# another invitation.
+# invitation, group, or flow (--see-queue's "send" only PATCHes an
+# invitation's own fixed_data.sent flag, never its email/team/expiry).
+# Re-running for the same email just creates another invitation.
 
 set -euo pipefail
 
 AUTHENTIK_URL="${AUTHENTIK_URL:-https://auth.photondatum.space}"
 TOKEN_SECRET="${TOKEN_SECRET:-homepage_authentik_token}"
+SMTP_SECRET="${SMTP_SECRET:-photondatum_smtp}"
 OPENWEBUI_CONTAINER="${OPENWEBUI_CONTAINER:-openwebui}"
 EXPIRES_DAYS="${EXPIRES_DAYS:-7}"
 EMAIL=""
 TEAM=""
+SEND=0
+SEE_QUEUE=0
 OUTPUT_FORMAT="text"
 
 usage() {
     cat <<'EOF'
 Usage: provision-user.sh --email EMAIL [options]
+       provision-user.sh --see-queue [--json]
 
 Purpose:
   Create a single-use Authentik invitation for a new OpenWebUI user,
   pre-bound to one team (an Authentik Group with its own dedicated
   invitation-capable enrollment flow, discovered live). Prints the
-  resulting link for you to send — Authentik has no email stage
-  configured, so nothing here sends mail itself. Also ensures a
-  matching (empty) OpenWebUI Group exists for future model-visibility
-  grants.
+  resulting link for you to send by default; --send emails it
+  immediately instead, via a real SMTP relay (Podman secret, JSON).
+  Also ensures a matching (empty) OpenWebUI Group exists for future
+  model-visibility grants.
+
+  --see-queue (instead of --email) lists invitations this tool created
+  that are still unexpired and not yet marked sent, and prompts to
+  send all of them now or abort.
 
 Options:
-  --email EMAIL          Required. The invitee's email address.
+  --email EMAIL          The invitee's email address. Required unless --see-queue.
   --team NAME            Team to provision into. If omitted, lists the
                          live-discovered teams and prompts for exactly one.
+  --send                 Email the invite link immediately via SMTP
+                         (default: leave unsent, just print the link).
+  --see-queue            List pending invitations and prompt to send all
+                         or abort. Used instead of --email.
   --expires-days N       Invitation validity in days (default: 7)
   --authentik-url URL    Authentik base URL (default: https://auth.photondatum.space)
   --token-secret NAME    Podman secret holding the Authentik API token
                          (default: homepage_authentik_token)
+  --smtp-secret NAME     Podman secret holding SMTP credentials, as JSON
+                         (default: photondatum_smtp)
   --json                 Emit a structured JSON result instead of text
+                         (--see-queue --json lists only, never prompts/sends)
   -h, --help             Show this message
 
 Exit codes:
-  0   Invitation created
-  1   Invalid input (bad email, unknown --team)
-  2   Environment/connectivity problem
+  0   Invitation created (or queue listed/handled) successfully
+  1   Invalid input (bad email, unknown --team, both/neither --email and --see-queue)
+  2   Environment/connectivity problem (including --send/queue-send SMTP failure)
 EOF
 }
 
@@ -99,9 +138,12 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --email)         EMAIL="${2:?--email requires a value}"; shift 2 ;;
         --team)          TEAM="${2:?--team requires a value}"; shift 2 ;;
+        --send)          SEND=1; shift ;;
+        --see-queue)     SEE_QUEUE=1; shift ;;
         --expires-days)  EXPIRES_DAYS="${2:?--expires-days requires a value}"; shift 2 ;;
         --authentik-url) AUTHENTIK_URL="${2:?--authentik-url requires a value}"; shift 2 ;;
         --token-secret)  TOKEN_SECRET="${2:?--token-secret requires a value}"; shift 2 ;;
+        --smtp-secret)   SMTP_SECRET="${2:?--smtp-secret requires a value}"; shift 2 ;;
         --json)          OUTPUT_FORMAT="json"; shift ;;
         -h|--help)       usage; exit 0 ;;
         *)               echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
@@ -115,12 +157,16 @@ for cmd in curl jq podman python3; do
     fi
 done
 
-if [[ -z "$EMAIL" ]]; then
-    echo "ERROR: --email is required" >&2
+if [[ "$SEE_QUEUE" == "1" && -n "$EMAIL" ]]; then
+    echo "ERROR: --see-queue and --email are mutually exclusive — use one or the other" >&2
+    exit 1
+fi
+if [[ "$SEE_QUEUE" == "0" && -z "$EMAIL" ]]; then
+    echo "ERROR: --email is required (or use --see-queue)" >&2
     usage >&2
     exit 1
 fi
-if [[ ! "$EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
+if [[ -n "$EMAIL" && ! "$EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
     echo "ERROR: '$EMAIL' doesn't look like a valid email address" >&2
     exit 1
 fi
@@ -132,6 +178,7 @@ if [[ -z "$TOKEN" ]]; then
 fi
 
 export AUTHENTIK_URL TOKEN EMAIL TEAM EXPIRES_DAYS OUTPUT_FORMAT OPENWEBUI_CONTAINER
+export SEND SEE_QUEUE SMTP_SECRET
 
 # Written to a temp file rather than piped in via <<'PYEOF' directly: a
 # heredoc replaces the invoked command's stdin with the heredoc's own text,
@@ -158,6 +205,9 @@ TEAM = os.environ.get("TEAM", "")
 EXPIRES_DAYS = float(os.environ["EXPIRES_DAYS"])
 OUTPUT_FORMAT = os.environ["OUTPUT_FORMAT"]
 OPENWEBUI_CONTAINER = os.environ["OPENWEBUI_CONTAINER"]
+SEND = os.environ.get("SEND") == "1"
+SEE_QUEUE = os.environ.get("SEE_QUEUE") == "1"
+SMTP_SECRET = os.environ["SMTP_SECRET"]
 
 
 def ak(path, method="GET", body=None):
@@ -217,10 +267,130 @@ def discover_teams():
     return teams
 
 
+# ---------------------------------------------------------------------------
+# SMTP sending. Authentik has no email stage configured in this instance
+# (checked directly — zero exist), so actually emailing anything is this
+# script's own job, not Authentik's. Credentials come from a Podman secret
+# (JSON: host, port, username, password, from, optional use_tls — default
+# true) rather than config.json, matching this stack's existing convention
+# of keeping real credentials out of tracked config entirely.
+# ---------------------------------------------------------------------------
+def resolve_smtp_credentials():
+    r = subprocess.run(
+        ["podman", "secret", "inspect", SMTP_SECRET, "--showsecret", "--format", "{{.SecretData}}"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        print(f"ERROR: could not read SMTP credentials from Podman secret '{SMTP_SECRET}' — "
+              f"create it first, e.g.:\n"
+              f"  echo '{{\"host\":\"...\",\"port\":587,\"username\":\"...\",\"password\":\"...\",\"from\":\"...\"}}' "
+              f"| podman secret create {SMTP_SECRET} -", file=sys.stderr)
+        return None
+    try:
+        return json.loads(r.stdout)
+    except json.JSONDecodeError as e:
+        print(f"ERROR: Podman secret '{SMTP_SECRET}' isn't valid JSON: {e}", file=sys.stderr)
+        return None
+
+
+def send_invite_email(to_email, team, invite_url, expires):
+    creds = resolve_smtp_credentials()
+    if creds is None:
+        return False
+    import smtplib
+    from email.message import EmailMessage
+
+    msg = EmailMessage()
+    msg["Subject"] = f"You're invited to join {team} on agent.photondatum.space"
+    msg["From"] = creds["from"]
+    msg["To"] = to_email
+    msg.set_content(
+        f"You've been invited to join '{team}' on agent.photondatum.space.\n\n"
+        f"Use this link to create your account (expires {expires}):\n{invite_url}\n\n"
+        f"This link is single-use — if it's already been used, ask whoever invited you for a new one."
+    )
+    try:
+        with smtplib.SMTP(creds["host"], int(creds.get("port", 587)), timeout=15) as s:
+            if creds.get("use_tls", True):
+                s.starttls()
+            if creds.get("username"):
+                s.login(creds["username"], creds["password"])
+            s.send_message(msg)
+        return True
+    except Exception as e:
+        print(f"ERROR: failed to send via SMTP ({creds.get('host')}): {e}", file=sys.stderr)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# --see-queue: every invitation this tool created (identified by having a
+# fixed_data.email key at all — Authentik's own invitations otherwise never
+# set fixed_data) that isn't expired and isn't already marked sent.
+# ---------------------------------------------------------------------------
+def discover_pending_invitations(teams_by_flow_pk):
+    now = datetime.now(timezone.utc)
+    pending = []
+    for inv in ak_paginated("/api/v3/stages/invitation/invitations/?"):
+        fixed = inv.get("fixed_data") or {}
+        if "email" not in fixed or fixed.get("sent"):
+            continue
+        expires = inv.get("expires")
+        if expires:
+            try:
+                if datetime.fromisoformat(expires.replace("Z", "+00:00")) < now:
+                    continue
+            except ValueError:
+                pass
+        flow_pk = inv.get("flow")
+        team_name = teams_by_flow_pk.get(flow_pk, "(unknown team)")
+        pending.append({
+            "pk": inv["pk"],
+            "email": fixed["email"],
+            "team": team_name,
+            "expires": expires,
+            "flow_slug": (inv.get("flow_obj") or {}).get("slug", ""),
+        })
+    return pending
+
+
 teams = discover_teams()
 if not teams:
     print("ERROR: no team-capable invitation flows found in Authentik — nothing to provision into.", file=sys.stderr)
     sys.exit(2)
+
+if SEE_QUEUE:
+    teams_by_flow_pk = {v["flow_pk"]: k for k, v in teams.items()}
+    pending = discover_pending_invitations(teams_by_flow_pk)
+
+    if OUTPUT_FORMAT == "json":
+        print(json.dumps(pending, indent=2))
+        sys.exit(0)
+
+    if not pending:
+        print("No pending (unsent, unexpired) invitations.")
+        sys.exit(0)
+
+    print(f"Pending invitations ({len(pending)}):")
+    for i, p in enumerate(pending, 1):
+        print(f"  {i}) {p['email']:<35} team={p['team']:<15} expires={p['expires']}")
+    choice = input(f"\nSend all {len(pending)} now? [y/N]: ").strip().lower()
+    if choice != "y":
+        print("Aborted — no changes made.")
+        sys.exit(0)
+
+    sent, failed = 0, 0
+    for p in pending:
+        invite_url = f"{AUTHENTIK_URL}/if/flow/{p['flow_slug']}/?itoken={p['pk']}"
+        if send_invite_email(p["email"], p["team"], invite_url, p["expires"]):
+            ak(f"/api/v3/stages/invitation/invitations/{p['pk']}/", method="PATCH",
+               body={"fixed_data": {"email": p["email"], "sent": True}})
+            print(f"  sent: {p['email']}")
+            sent += 1
+        else:
+            print(f"  FAILED: {p['email']}")
+            failed += 1
+    print(f"\n{sent} sent, {failed} failed.")
+    sys.exit(2 if failed else 0)
 
 if TEAM:
     match = next((name for name in teams if name.lower() == TEAM.lower()), None)
@@ -266,9 +436,23 @@ invitation = ak(
         "flow": flow_pk,
         "single_use": True,
         "expires": expires,
+        # Only place this invitation's email/sent-state lives — Authentik's
+        # own Invitation model has no such fields, and this is the one it
+        # leaves free for exactly this kind of caller-defined data. --see-queue
+        # finds anything here with "sent" still false and not expired.
+        "fixed_data": {"email": EMAIL, "sent": False},
     },
 )
 invite_url = f"{AUTHENTIK_URL}/if/flow/{flow_slug}/?itoken={invitation['pk']}"
+
+sent_status = "not sent (default — use --send or --see-queue later)"
+if SEND:
+    if send_invite_email(EMAIL, TEAM, invite_url, expires):
+        ak(f"/api/v3/stages/invitation/invitations/{invitation['pk']}/", method="PATCH",
+           body={"fixed_data": {"email": EMAIL, "sent": True}})
+        sent_status = "sent"
+    else:
+        sent_status = "FAILED to send — invitation was still created; link is valid, send it yourself or retry via --see-queue"
 
 # ---------------------------------------------------------------------------
 # Ensure a matching (empty) OpenWebUI Group exists — independent of
@@ -316,6 +500,7 @@ result = {
     "invite_url": invite_url,
     "expires": expires,
     "openwebui_group": openwebui_group_status,
+    "sent": sent_status,
 }
 
 if OUTPUT_FORMAT == "json":
@@ -326,9 +511,16 @@ else:
     print(f"Email:      {EMAIL}")
     print(f"Expires:    {expires}")
     print(f"OpenWebUI Group: {openwebui_group_status}")
+    print(f"Sent:       {sent_status}")
     print()
-    print(f"Invite link (send this to {EMAIL} yourself — no email is sent automatically):")
+    if SEND and sent_status == "sent":
+        print(f"Invite link (already emailed to {EMAIL}):")
+    else:
+        print(f"Invite link (send this to {EMAIL} yourself — no email is sent automatically):")
     print(f"  {invite_url}")
+
+if SEND and sent_status.startswith("FAILED"):
+    sys.exit(2)
 PYEOF
 
 python3 "$PY_SCRIPT"
