@@ -27,7 +27,16 @@
 # list afterward — without this, any model this run added/removed/renamed
 # stays invisible until someone clicks Refresh in Admin Panel > Settings >
 # Models or the container restarts (OpenWebUI's models.base_models_cache has
-# no TTL). See output/CENTAURI-playbook.md §13 L-31/L-32/L-34/L-35/L-37.
+# no TTL).
+#
+# Also sets each Ollama model's num_ctx (context window) automatically from
+# the same /api/show call, since Ollama's own server default (4096) applies
+# regardless of what a model actually supports — a simple size-scaled
+# heuristic from the model's own parameter count, capped at its native max
+# (see the big comment on _num_ctx_for_model below). An explicit "num_ctx" in
+# config.json's per-model entry (passed through by configure.sh) always wins
+# over the heuristic. See output/CENTAURI-playbook.md §13 L-31/L-32/L-34/
+# L-35/L-37/L-39.
 #
 # Usage:
 #   bash scripts/pull-models.sh
@@ -145,14 +154,55 @@ _host_of() {
     echo "${rest%%:*}"
 }
 
-# Live /api/show "capabilities" for one model on one host:port — empty JSON
-# array on any failure (unreachable host, unknown model, bad response), never
-# a guess.
-_modes_for_model() {
+# Live /api/show response for one model on one host:port — empty JSON object
+# on any failure (unreachable host, unknown model, bad response), never a
+# guess. Single source for both supported-modes tagging and context-window
+# sizing below, so each model only costs one extra HTTP round trip, not two.
+_show_for_model() {
     local host="$1" port="$2" model="$3"
     curl -s --max-time 5 "http://${host}:${port}/api/show" \
-        -d "$(jq -nc --arg m "$model" '{model: $m}')" 2>/dev/null \
-        | jq -c '.capabilities // []' 2>/dev/null || echo '[]'
+        -d "$(jq -nc --arg m "$model" '{model: $m}')" 2>/dev/null || echo '{}'
+}
+
+# Context-window sizing (L-39): Ollama's own server default (4096, confirmed
+# directly via /api/ps on a freshly loaded model — verified independent of
+# LiteLLM, which was not involved in that request) applies to every model
+# regardless of how much context it actually supports — granite4.2:30b and
+# llama3.3 both support 131072, qwen3.8:27b and qwen3-coder-next support
+# 262144, all silently capped to 4096 with nothing anywhere overriding it.
+# "Max out to native" isn't the right default either though: context window
+# costs real RAM (KV cache) and CPU prompt-processing time, both of which
+# scale with it directly — on these CPU-backed models that's a real latency
+# cost on every single request, not just a one-time memory allocation.
+# Simple size-scaled heuristic instead, from the model's own parameter count
+# (its own /api/show, not a guess), capped at whatever it actually supports
+# natively:
+#   <5B params   -> 32768 (cheap per-token cost, can afford a generous window)
+#   5B-50B       -> 16384 (comfortable middle ground)
+#   >50B         -> 8192  (protect CPU latency on the largest, slowest models)
+# Falls back to Ollama's own 4096 default if parameter count or native context
+# couldn't be determined at all (never a guess beyond that). An explicit
+# "num_ctx" already present in models.json's litellm_params — set via
+# config.json's optional per-model num_ctx field — always wins over this; the
+# heuristic only fills in what nothing else specified.
+_num_ctx_for_model() {
+    local show_json="$1"
+    echo "$show_json" | jq -r '
+      (.details.parameter_size // "" |
+        if test("[0-9.]+B"; "i") then (capture("(?<n>[0-9.]+)B"; "i").n | tonumber)
+        elif test("[0-9.]+M"; "i") then (capture("(?<n>[0-9.]+)M"; "i").n | tonumber / 1000)
+        else null end
+      ) as $params_b |
+      ((.model_info // {}) | to_entries | map(select(.key | endswith(".context_length"))) | .[0].value) as $native |
+      if ($params_b == null or $native == null) then 4096
+      else
+        ($native | tonumber) as $native_n |
+        (if $params_b < 5 then 32768
+         elif $params_b < 50 then 16384
+         else 8192 end) as $target |
+        (if $target > $native_n then $native_n else $target end)
+      end
+    '
 }
 
 # This script runs on the bare host, not inside the ai-stack podman network —
@@ -196,7 +246,16 @@ for i in $(seq 0 $((model_count - 1))); do
     modes_json="[]"
     if [[ "$model_backend_string" == ollama_chat/* && -n "$model_host" ]]; then
         read -r probe_host probe_port <<< "$(_modes_host_port "$model_host")"
-        modes_json="$(_modes_for_model "$probe_host" "$probe_port" "$model_id")"
+        show_json="$(_show_for_model "$probe_host" "$probe_port" "$model_id")"
+        modes_json="$(echo "$show_json" | jq -c '.capabilities // []' 2>/dev/null || echo '[]')"
+
+        # num_ctx: only fill in the auto-sized default if config.json didn't
+        # already pin an explicit one through configure.sh (see the big
+        # comment on _num_ctx_for_model above for the sizing rationale).
+        if ! echo "$litellm_params" | jq -e 'has("num_ctx")' >/dev/null 2>&1; then
+            num_ctx="$(_num_ctx_for_model "$show_json")"
+            litellm_params="$(echo "$litellm_params" | jq --argjson n "$num_ctx" '. + {num_ctx: $n}')"
+        fi
     fi
 
     # Modes are sorted alphabetically so the merged tags list (and OpenWebUI's

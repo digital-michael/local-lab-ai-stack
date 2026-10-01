@@ -543,12 +543,12 @@ cmd_generate_litellm_config() {
       if .backend == "ollama" then {
         id: .name,
         description: (.name + " — CPU inference via Ollama"),
-        litellm_params: {
+        litellm_params: ({
           model: ("ollama_chat/" + .name),
           api_base: "OLLAMA_URL",
           api_key: "none",
           max_tokens: 4096
-        },
+        } + (if .num_ctx then {num_ctx: .num_ctx} else {} end)),
         model_info: { mode: "chat", input_cost_per_token: 0, output_cost_per_token: 0 }
       }
       elif .backend == "vllm" then {
