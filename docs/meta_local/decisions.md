@@ -1,5 +1,7 @@
 # Design Decisions
 
+> **Note (2026-09-30):** Historical copy. The current log is docs/decisions.md, where D-045 (2026-09-30) retires the Python Knowledge Index and M2M gateway.
+
 Project-scoped conventions and deliberate choices that should be applied consistently across all future work.
 
 ---

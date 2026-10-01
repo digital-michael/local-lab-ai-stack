@@ -1,5 +1,7 @@
 # Work-in-Progress — Implementation Plan
 
+> **Note (2026-09-30):** Python Knowledge Index and M2M gateway items below were overtaken by D-045 (2026-09-30): both services were removed; Go replacements are tracked in the ledger (epics 2b9b1647, e66a0ecd).
+
 **Tracking:** Backlog lives in `docs/meta_local/review_log.md` (Pending Tasks table).
 **Sequence:** Items are worked in backlog listing order unless priority escalation is noted.
 **Architecture decisions governing this plan:** D-004 through D-008 (`docs/meta_local/decisions.md`)

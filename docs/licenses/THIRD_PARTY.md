@@ -32,24 +32,12 @@ Run `make license-check` to refresh the Python-package section.
 | loki | `docker.io/grafana/loki` | 3.6.7 | AGPLv3 | https://github.com/grafana/loki |
 | promtail | `docker.io/grafana/promtail` | 3.6.7 | AGPLv3 | https://github.com/grafana/loki |
 | minio | `docker.io/minio/minio` | RELEASE.2025-04-22T22-12-26Z | AGPLv3 | https://github.com/minio/minio |
-| knowledge-index | `localhost/knowledge-index` | 0.1.0 | Project-owned | — |
 
 ---
 
-## 2. Python Packages — knowledge-index service
+## 2. Python Packages — knowledge-index service (removed)
 
-These packages are declared in `services/knowledge-index/requirements.txt` and installed inside the container image. Packages marked *(container-only)* are not present in the local dev/test venv.
-
-| Package | License | Notes |
-|---|---|---|
-| fastapi | MIT | |
-| uvicorn[standard] | BSD-3-Clause | |
-| httpx | BSD-3-Clause | |
-| pydantic | MIT | |
-| mcp[server] | MIT | Anthropic MCP Python SDK |
-| sqlalchemy | MIT | |
-| psycopg2-binary | LGPL-2.1 | *(container-only)* |
-| tavily-python | MIT | *(container-only)* web search provider |
+The Python Knowledge Index and its `requirements.txt` were removed on 2026-09-30 (D-045); none of its packages ship any more.
 
 ---
 

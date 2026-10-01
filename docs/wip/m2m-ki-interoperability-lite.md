@@ -6,6 +6,9 @@ Audience: Operators and implementation agents
 
 Primary reference: m2m-localhost-mvp.md
 
+> **Python implementation retired (2026-09-30, D-045).** `services/m2m-gateway/` and `services/knowledge-index/` were removed and will not be integrated. This document is kept as **design reference** for the Go M2M gateway (e66a0ecd) and Go Knowledge Index (2b9b1647) and the M2M lifecycle workflow (ledger workflow 3c54b1b8). Ports, env var names and endpoints below describe the retired Python service, not a contract.
+
+
 ---
 
 ## 1) Purpose

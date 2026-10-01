@@ -303,7 +303,9 @@ All Layer 3b+ tests use the `TEST_MODEL` environment variable (defaulting to the
 
 ## 11 Layer 3c — RAG Pipeline
 
-**File:** `testing/layer3_model/test_rag_pipeline.py`  
+> **Retired 2026-09-30 (D-045):** this layer tested the Python Knowledge Index; `test_rag_pipeline.py` was removed with it. Kept as the test plan for the Go Knowledge Index.
+
+**File:** `testing/layer3_model/test_rag_pipeline.py` (removed)  
 **Run time:** 3–10 minutes  
 **Requires:** T-055–T-057 passing; knowledge-index image built and knowledge-index service active.
 

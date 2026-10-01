@@ -96,7 +96,6 @@ Ollama data: `$AI_STACK_DIR/ollama/`
 
 | Container | Port bind | Resource limits |
 |---|---|---|
-| `ai-stack-know-index` | `0.0.0.0:8100:8100` | `--cpus=1 --memory=512m` |
 | `ai-stack-know-qdrant` | `127.0.0.1:6333:6333` | `--cpus=1 --memory=1g` |
 
 Qdrant data: `$AI_STACK_DIR/qdrant/`

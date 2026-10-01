@@ -9,7 +9,7 @@ import httpx
 class ConversionsClient:
     """Minimal HTTP client for the conversions service.
 
-    Pure transport wrapper, modeled on services/m2m-gateway/client.py's
+    Pure transport wrapper, modeled on the (since removed, D-045) services/m2m-gateway/client.py's
     M2MGatewayClient. CLI ergonomics (argument parsing, --out resolution,
     stdin/stdout handling) live in cli.py, not here — keeping "how to talk to
     the service" separate from "how a human invokes it".

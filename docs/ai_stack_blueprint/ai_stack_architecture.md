@@ -230,8 +230,8 @@ Five distinct concerns govern how the controller and workers interact. Each is h
 | **Presence** | Is the node online? What is its stable IP? | Headscale — WireGuard keep-alive + `tailscale status` | Live (D-004) |
 | **Node Configuration** | What profile, capabilities, and models does the node have? | `node.sh configure` (local write) + `node.sh list --refresh` (controller SSH-pull) | BL-012 |
 | **Command/Control (CNC)** | Send directives from controller to worker (pull models, restart, config reload) | BL-015 (design pending); heartbeat response today handles rename only | BL-015 |
-| **Registry Read** | Query node state, capabilities, and status | `node.sh list`, `GET /admin/v1/nodes` | Live |
-| **Registry Write** | Register, join, rename, purge, deregister nodes | `configure.sh generate-join-token` + `node.sh join/unjoin/purge` + `POST /admin/v1/nodes` | Live |
+| **Registry Read** | Query node state, capabilities, and status | `node.sh list` (headscale) | Live |
+| **Registry Write** | Register, join, rename, purge, deregister nodes | Removed 2026-09-30 with the Python Knowledge Index, which hosted the registry (D-045) | Retired |
 
 These layers are intentionally decoupled. Presence is owned entirely by Headscale — the application layer never manages WireGuard keys or DERP routing. CNC is isolated from the heartbeat path so that heartbeat failures remain non-blocking and low-stakes.
 
@@ -477,15 +477,13 @@ Planned improvements:
 | `configs/reverse-proxy/headscale/`, `configs/reverse-proxy/derp/` | Headscale control plane + embedded DERP relay (mesh networking) | |
 | `configs/traefik/` | Internal/original reverse proxy config (routers, TLS, middlewares) | ⚠ Confirm against `docs/decisions.md` before assuming this is still the active ingress for internal services — Caddy has taken over the public edge role |
 | `configs/nodes/` | Per-node identity (`controller-1`, `inference-worker-1/2`, `knowledge-worker-1`) | Distributed node architecture, §7 |
-| `configs/m2m/templates/` | M2M gateway policy and entitlement templates | Backs `services/m2m-gateway/` |
 | `configs/litellm/`, `configs/prometheus/`, `configs/grafana/`, `configs/loki/`, `configs/promtail/` | Per-component runtime config | Pair with `docs/library/framework_components/<component>/` for practices/security/guidance |
 
 **Services map:**
 
 | Directory | Concern |
 |---|---|
-| `services/knowledge-index/` | FastAPI microservice — REST + MCP (SSE) endpoints for RAG query routing and ingestion |
-| `services/m2m-gateway/` | Machine-to-machine auth/gateway service |
+| `services/knowledge-index/`, `services/m2m-gateway/` | Removed 2026-09-30 (D-045) — Python Knowledge Index and M2M gateway; Go replacements pending |
 
 **External Reusable Components:** none — this repo does not currently depend on sibling repos in the `photon-datum` domain (`space_sim` is unrelated).
 

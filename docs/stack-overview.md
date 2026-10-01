@@ -48,7 +48,7 @@ workers to have anywhere to register. Workers are optional and additive.
 | --- | --- | --- | --- |
 | `ai-stack-route` | `host` + all groups | `ai-stack-route.target` | traefik |
 | `ai-stack-infer` | `ai-stack-infer` | `ai-stack-infer.target` | litellm, ollama, vllm (opt), turbo (one-shot) |
-| `ai-stack-know` | `ai-stack-know` | `ai-stack-know.target` | knowledge-index, qdrant |
+| `ai-stack-know` | `ai-stack-know` | `ai-stack-know.target` | knowledge-index (Python retired, D-045; Go pending), qdrant |
 | `ai-stack-app` | `ai-stack-app` | `ai-stack-app.target` | openwebui, flowise, homepage |
 | `ai-stack-store` | `ai-stack-store` | `ai-stack-store.target` | postgres (app) |
 | `ai-stack-obs` | `ai-stack-obs` | `ai-stack-obs.target` | prometheus, grafana, loki, promtail |

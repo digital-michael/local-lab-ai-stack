@@ -266,7 +266,6 @@ group containers deployed via Podman quadlets.
 | `scripts/diagnose.sh` | `ai-stack-iam-*` | Per-container diagnostic walkthrough |
 | `scripts/backup.sh` | `ai-stack-iam-postgres` | Back up the Authentik PostgreSQL database |
 | `scripts/capture-credentials.sh` | all secrets | Capture all provisioned Podman secret values to `configs/credentials.local` |
-| `scripts/m2m-authentik-bootstrap.sh` | `ai-stack-iam-authentik` | Wire M2M gateway OIDC/JWKS configuration in Authentik |
 
 **Native service management (outside script scope):**
 

@@ -1,4 +1,6 @@
 # Conversions Service — Guidance
+
+> **Note (2026-09-30):** the knowledge-index and m2m-gateway services cited below as precedent were removed (D-045); the patterns they set (FastAPI, dual REST+MCP, API-key auth) still apply here.
 **Last Updated:** 2026-08-12 UTC
 
 ## Purpose

@@ -1,4 +1,6 @@
 # AI Stack — Implementation Checklist
+
+> **Note (2026-09-30):** Historical task tracker. Items for the Python Knowledge Index, its node registry (Phase 22), RAG/research pipelines and the M2M gateway describe work that was removed on 2026-09-30 (D-045); they are kept as the record, not as current state.
 **Last Updated:** 2026-03-24 UTC
 
 ## Purpose

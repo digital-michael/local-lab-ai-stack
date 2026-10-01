@@ -186,7 +186,6 @@ Tune after initial deployment. Set in quadlet files via `PodmanArgs=--cpus=N --m
 | `prometheus.ai-stack` | Prometheus |
 | `authentik.ai-stack` | Authentik |
 | `traefik.ai-stack` | Traefik |
-| `knowledge-index.ai-stack` | Knowledge Index Service |
 
 ---
 

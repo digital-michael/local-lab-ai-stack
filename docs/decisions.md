@@ -1,5 +1,5 @@
 # Project Decisions — local-lab-ai-stack
-**Last Updated:** 2026-03-24 UTC (D-034 added)
+**Last Updated:** 2026-09-30 UTC (D-045 added)
 **Target Audience:** LLM Agents
 
 ---
@@ -166,6 +166,7 @@ This file records architecture decisions made during work on this project. Each 
 
 | Field | Value |
 |---|---|
+| **Superseded** | 2026-09-30 by D-045 — the Python Knowledge Index service it describes was removed; the Go Knowledge Index (ledger epic 2b9b1647) is a fresh design. The schema/API here is reference material only. |
 | **Decision** | The Knowledge Index Service is a standalone Python/FastAPI microservice with a REST API (versioned at `/v1/`), backed by PostgreSQL for metadata and Qdrant for vector search. It provides query→volume routing with a short-lived cache. |
 | **Context** | Consideration #24 — the architecture described a "Knowledge Index Service" for library indexing and retrieval but gave no implementation spec. The service needed a clear identity: is routing logic embedded in another component or standalone? |
 | **Options Considered** | (1) **Qdrant metadata layer** — use Qdrant's payload filtering for routing. Tight coupling to Qdrant; breaks if vector DB swaps. (2) **Flowise workflow** — implement routing as a Flowise flow. Mixes orchestration with routing; not independently testable. (3) **LiteLLM plugin** — extend LiteLLM with routing middleware. Couples routing to the model gateway; wrong separation of concerns. (4) **Standalone FastAPI microservice** — independent service with its own API, caching, and dependencies. |
@@ -445,6 +446,7 @@ Concrete protocol specification for the **WAN** discovery profile.
 
 | Field | Value |
 |---|---|
+| **Superseded** | 2026-09-30 by D-045 — dynamic node registration lived in the Python Knowledge Index and was removed with it (node.sh join/heartbeat, bootstrap.sh, join tokens). |
 | **Decision** | Defer dynamic node registration to a future phase. The Phase A file layout is designed as the on-disk representation Phase B will write to. When Phase B is implemented, a registration service hosted on the controller will accept node self-registration, write `configs/nodes/<alias>.json`, manage heartbeat-driven status transitions, and enforce admission control. |
 | **Context** | Phase A establishes the schema contract and file layout. Phase B adds the network layer: nodes POST to the controller on startup/shutdown, the controller manages status transitions automatically, and scripts continue to read node files without modification (the registry service maintains the files). |
 | **Registry Host** | The controller node (SERVICES) hosts the registration service, either as a new microservice or as an extension to the Knowledge Index Service. The controller is the authority for the node registry — workers and peers push to it, not to each other. Non-peer nodes (inference-workers without a full controller stack) interact with it via HTTPS only; they do not need the registry service installed locally. |
@@ -502,6 +504,7 @@ Concrete protocol specification for the **WAN** discovery profile.
 
 | Field | Value |
 |---|---|
+| **Superseded** | 2026-09-30 by D-045 — the LiteLLM RAG hook queried the Python Knowledge Index; its context injection was removed. Its thinking-mode default survives as ModelDefaultsHook. |
 | **Decision** | Implement RAG as a LiteLLM `async_pre_call_hook` on the controller. The hook queries the controller's Knowledge Index Service (`POST /query`) to retrieve relevant context for the incoming prompt, optionally fetches referenced file content from MinIO via pre-signed URL, and injects the assembled context into the system message before the request is routed to any inference node. Worker nodes remain pure inference endpoints — they receive a pre-stuffed prompt and have no knowledge that a RAG step occurred. |
 | **Context** | RAG in the existing architecture runs via Flowise workflows, which requires explicit workflow authoring per use case. A hook-based approach makes RAG ambient — every inference request passing through LiteLLM gets context injection automatically (or opt-in by tag), with no per-workflow configuration. |
 | **Hook behaviour** | `async_pre_call_hook(user_api_key_dict, cache, data, call_type)` — fires before routing. Hook extracts the user's last message as the search query, calls controller KI `/query`, takes the top-k results, and prepends them as a `system` message addition. The hook is a no-op if KI returns empty results. |
@@ -519,6 +522,7 @@ Concrete protocol specification for the **WAN** discovery profile.
 
 | Field | Value |
 |---|---|
+| **Superseded** | 2026-09-30 by D-045 — the Flowise research pipeline called the Python Knowledge Index; the chatflow was removed. |
 | **Decision** | Web research is orchestrated by the controller's Flowise (deciding what to research and which node should execute) but executed at the worker node level (worker's own internet connection, worker's local KI). A new `POST /v1/search` endpoint in `app.py` accepts a `{ "query": "...", "collection": "..." }` request, performs a Tavily API search locally, ingests the results into the worker's local Qdrant, and triggers a custody push to the controller KI. The controller's Flowise Supervisor flow targets a specific enhanced-worker node by calling its KI `/v1/search` endpoint. |
 | **Context** | All-controller-side web research (Flowise calling Tavily on SERVICES) centralizes all internet bandwidth through the controller, which is a bottleneck as the cluster scales. Distributing search execution to enhanced-worker nodes lets each node use its own internet connection for tasks delegated to it. |
 | **Web search provider** | **Tavily** as the production provider for all deployments. LLM-optimized structured output minimizes downstream processing before ingestion. Free tier: 1,000 req/month. Paid: $20/month → 10,000 req. **DuckDuckGo** permitted for local development only — unofficial, no SLA, fragile. |
@@ -682,6 +686,7 @@ Concrete protocol specification for the **WAN** discovery profile.
 
 | Field | Value |
 |---|---|
+| **Superseded** | 2026-09-30 by D-045 — the Python localhost M2M gateway was removed. Its policy, lease, approval and audit design remains reference for the Go gateway (ledger epic e66a0ecd) and the M2M workflow (ledger workflow 3c54b1b8). |
 | **Decision** | For localhost machine-to-machine workflows, the M2M gateway is the authoritative authn/authz boundary and KI policy is authoritative for source/content privileges. A separate trusted interoperability profile is introduced for approved project pairs and is included in MVP scope: cross-platform sharing is allowed only when this profile is explicitly enabled and governed by versioned policy/entitlement templates. |
 | **Context** | M2M localhost design established identity, short-lived tokens, per-workflow policy, lease/heartbeat control, and web approval for break-glass. A follow-on interoperability discussion clarified how this should interact with KI library standards and project-bound private context. The risk is policy drift and boundary ambiguity if trusted sharing becomes an implicit default. |
 | **Internal vs external planes** | Internal knowledge plane: KI custody, provenance, retrieval policy, and reusable governed assets. External publication plane: adapters only; transforms for external standards/protocols are decoupled from KI core schema/policy model. |
@@ -717,6 +722,7 @@ Concrete protocol specification for the **WAN** discovery profile.
 
 | Field | Value |
 |---|---|
+| **Superseded** | 2026-09-30 by D-045 — the Knowledge Index MCP transports it added lived in the Python service and were removed with it. The conversions service keeps the same pattern. |
 | **Decision** | Add MCP's current-spec **Streamable HTTP** transport (single `POST/GET/DELETE /mcp` endpoint) alongside the existing legacy HTTP+SSE transport (`/mcp/sse` + `/mcp/messages`, D-015). Both are live; new client configs should use `/mcp`. |
 | **Context** | The MCP spec deprecated HTTP+SSE (protocol `2024-11-05`) in favor of Streamable HTTP as of `2025-03-26`. As of this review (2026-07-21), clients have been actively dropping the old transport (e.g. Microsoft Copilot Studio dropped SSE support in August 2025). D-015's implementation was correct when written but is now running a transport many current/future MCP clients (VS Code Copilot Chat, Claude.ai remote connectors, current Claude Desktop/Code) may not support at all. The `mcp` Python SDK already installed here (`>=1.6.0` per requirements.txt; `1.28.1` in practice) ships `StreamableHTTPSessionManager`, so this was an additive implementation, not a new dependency. |
 | **Implementation** | `services/knowledge-index/app.py`: `StreamableHTTPSessionManager(app=_mcp_server, stateless=True, security_settings=...)` mounted at `/mcp`, wired into the FastAPI app lifespan via `startup`/`shutdown` events. `stateless=True` — fresh transport per request, no `Mcp-Session-Id` persistence — matches the single-instance deployment behind Traefik/Caddy with no need for session affinity. Auth: same `_check_api_key` Bearer check as the legacy endpoints. |
@@ -744,3 +750,19 @@ Concrete protocol specification for the **WAN** discovery profile.
 | **Driver** | User-requested; architecture proposed by agent, converged on existing Knowledge Index precedent via first-principles check, confirmed by user (v1 scope question: ship API+CLI+UI+MCP together rather than deferring UI/MCP) |
 | **Trigger** | User request for a durable document-conversion capability with an explicit question about access pattern ("python webpages or something else") |
 | **Commit** | *(pending)* |
+
+---
+
+### D-045 — Retire the Python M2M Gateway and Python Knowledge Index
+
+| Field | Value |
+|---|---|
+| **Status** | Accepted 2026-09-30. (D-044 is reserved for the cortex MCP tool exposure policy.) |
+| **Decision** | Remove the Python M2M gateway (`services/m2m-gateway/`) and the Python Knowledge Index (`services/knowledge-index/`) from this repository. They will not be used, integrated, ported or cut over from. The M2M gateway and the Knowledge Index are rebuilt in Go as fresh designs (ledger epics e66a0ecd and 2b9b1647). Removed with them: their quadlet, Traefik/Caddy routes, homepage tiles, config entries, Podman-secret wiring, tests, the gateway's Authentik bootstrap script and policy templates, the Flowise research chatflow, the LiteLLM RAG context injection, and the controller node registry that lived inside the Knowledge Index app (`/v1/cnc/*`, `/admin/v1/nodes`; `node.sh` join/unjoin/purge/rename/status/suggestions/configure/deploy, `bootstrap.sh`, `heartbeat.sh`, `configure.sh generate-join-token` and `sync-libraries`). |
+| **Context** | Neither service was ever deployed (Knowledge Index verified 2026-08-16: no containers anywhere; none found on the controller Mac 2026-09-30). The Go reimplementation decision for the Knowledge Index (2026-08-16) and the M2M gateway Go rewrite epic made the Python code a maintenance and confusion cost with no runtime to protect. |
+| **Kept** | Design content as reference for the Go work: `docs/wip/m2m-localhost-mvp.md` and `m2m-ki-interoperability-lite.md` (policy classes, leases, approvals, audit fields), the Knowledge Index component guidance/security docs, D-013 (.ai-library manifest), D-036 (surrogate keys), D-038 (federation tiers), `configure.sh build-library`. Operating material for the Python services (the M2M MVP checklist, the CRUD skill's Podman/bootstrap steps) was removed. `node.sh` keeps `list` (headscale), `remote` and `harden-worker`. LiteLLM's thinking-mode default moved from AsyncRAGHook to ModelDefaultsHook unchanged. |
+| **Superseded** | Fully: D-012, D-027, D-030, D-031, D-040, D-042 (each marked). In part: D-015 (the KI half; conversions keeps the pattern), D-023/D-025 (library custody sync), D-033/D-034/D-041 (their Knowledge Index MCP surface, until the Go Knowledge Index exists). |
+| **Not done here (operator)** | Untracked `configs/config.json` still lists `knowledge-index`/`m2m-gateway`; the `com.ai-stack.heartbeat` launchd job and `~/.config/ai-stack/` registry state remain on the controller Mac; the VPS Caddy still has the `ki.photondatum.space` site until redeployed; `configs/config.json.bak` is an untouched historical snapshot. |
+| **Driver** | Operator decision |
+| **Trigger** | Planning the M2M workflow and D-041 Stage 1 surfaced that the remaining plan kept assuming the Python services as a baseline. |
+| **Commit** | *(this change set)* |

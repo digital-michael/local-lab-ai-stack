@@ -31,7 +31,7 @@ When proposing, reviewing, or implementing changes that involve a component list
 | `flowise/` | Low-code AI workflow builder |
 | `grafana/` | Visualization and dashboarding |
 | `homepage/` | Operator dashboard (service tiles, widgets, custom.js/css) |
-| `knowledge-index/` | Query-to-library routing microservice (FastAPI) |
+| `knowledge-index/` | Query-to-library routing microservice — design reference; Python service removed (D-045) |
 | `litellm/` | LLM API gateway and proxy |
 | `loki/` | Log aggregation backend |
 | `ollama/` | Local model inference (CPU/metal, OpenAI-compatible) |

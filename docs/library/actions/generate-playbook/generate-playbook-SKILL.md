@@ -223,8 +223,7 @@ Table columns: Model Name (LiteLLM ID) | Backend | Device | Pulled to Ollama
 **§2.4 Storage Layout** — Source: `ls -1 $AI_STACK_DIR/`
 
 Annotated directory tree.  Expand `$HOME` to the real path.  List each subdirectory
-with a one-line purpose note (e.g., `libraries/` — mounted read-only into knowledge-index
-for localhost discovery profile).
+with a one-line purpose note (e.g., `qdrant/` — vector index storage).
 
 **§2.5 Active Configuration Highlights** — Source: config.json
 
@@ -251,8 +250,7 @@ Mermaid diagram showing all 15 services in their layers, with arrows derived fro
 Table columns: Service | Depends On | Cascade Impact (what stops when this service stops)
 
 Explicitly note multi-level cascades:
-- postgres stops → litellm + authentik + knowledge-index stop
-- qdrant stops → knowledge-index stops
+- postgres stops → litellm + authentik stop
 - litellm stops → openwebui + flowise + ollama + vllm stop
 
 **§3.3 Startup / Shutdown Order**
@@ -264,7 +262,7 @@ Include manual override commands for each group:
 ```bash
 systemctl --user start postgres.service qdrant.service
 # wait for health checks, then:
-systemctl --user start authentik.service litellm.service knowledge-index.service
+systemctl --user start authentik.service litellm.service
 ```
 
 **§3.4 Network Topology** — Source: config.json ports/bind + nodes/*.json
@@ -363,8 +361,6 @@ LiteLLM  | 9000 | 127.0.0.1 | HTTP | Bearer token |
 Qdrant   | 6333 | 127.0.0.1 | HTTP | api-key header |
   podman secret inspect qdrant_api_key --showsecret --format '{{.SecretData}}'
 
-knowledge-index | 8100 | 0.0.0.0 | HTTP | Bearer token |
-  podman secret inspect knowledge_index_api_key --showsecret --format '{{.SecretData}}'
 ```
 
 For services accessed via Traefik (OpenWebUI, Flowise, Grafana, Authentik):
@@ -377,7 +373,7 @@ Table: Service | Container Name | DNS Alias | Internal Base URL
 **§5.3 External Exposure Map**
 
 Two lists:
-- LAN-accessible (bind = 0.0.0.0): Traefik :80/:443, knowledge-index :8100
+- LAN-accessible (bind = 0.0.0.0): Traefik :80/:443
 - Localhost-only (bind = 127.0.0.1): all others
 
 For LAN-accessible services: note auth requirement and recommended firewall position.
@@ -422,45 +418,23 @@ Condense to sequential steps; do not cross-reference.
 
 Required sections:
 
-**§7.1 Generate a Join Token (controller)**
+**§7.1 Describe the Worker (worker)**
 ```bash
-bash scripts/configure.sh generate-join-token \
-  --node-id <id> --profile <knowledge-worker|inference-worker> \
-  --display-name "<display name>"
-# Token is shown once — copy it before closing the terminal.
+bash scripts/register-node.sh   # prints a config block for review
+```
+Save the reviewed block on the controller as `configs/nodes/<alias>.json`
+(static registration; the join-token/heartbeat registry was removed 2026-09-30, D-045).
+
+**§7.2 Register Its Models (controller)**
+```bash
+bash scripts/pull-models.sh
 ```
 
-**§7.2 Bootstrap the Worker**
+**§7.3 Verify (controller)**
 ```bash
-# On the worker machine, from the project root:
-bash scripts/bootstrap.sh \
-  --controller 'http://<controller-host>:8100' \
-  --token '<token>' \
-  --node-id '<id>'
+bash scripts/node.sh list --headscale-url '<url>' --headscale-key '<key>'
+# The worker should be listed online in the tailnet.
 ```
-
-**§7.3 Verify Registration**
-```bash
-bash scripts/node.sh status                                     # on worker
-bash scripts/node.sh list --controller 'http://localhost:8100'  # on controller
-# Node shows 'online' after two consecutive heartbeats (~70s apart)
-```
-
-**§7.4 Heartbeat Timer**
-
-Linux (systemd):
-```bash
-systemctl --user status ai-stack-heartbeat.timer
-systemctl --user enable --now ai-stack-heartbeat.timer
-```
-
-macOS (launchd):
-```bash
-launchctl list | grep ai-stack
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.ai-stack.heartbeat.plist
-```
-
-If the timer is missing entirely, see: Troubleshooting §11.8.
 
 **§7.5 Harden the Worker (Ollama port restriction)**
 ```bash
@@ -469,24 +443,10 @@ bash scripts/node.sh harden-worker --alias <worker-alias>
 # Copy the printed commands and run them on the worker node.
 ```
 
-**§7.6 Unjoin / Rejoin**
-```bash
-# Unjoin from worker:
-bash scripts/node.sh unjoin
-# Rejoin with a new token from the controller:
-bash scripts/node.sh join \
-  --controller 'http://<controller-host>:8100' \
-  --token '<new-token>' --node-id '<id>'
-```
+**§7.6 Remove a Worker**
 
-**§7.7 Node State Machine**
-
-Table: State | Meaning | Recovery Action
-
-- `online`: Heartbeating normally
-- `caution`: Last heartbeat > 90s ago — send 2 beats within 70s
-- `failed`: Last heartbeat > 150s ago — send 2 beats within 70s
-- `offline`: Absent > 24h — requires new join token
+Delete `configs/nodes/<alias>.json`, remove its LiteLLM model routes, and expire the
+node in headscale.
 
 ---
 
@@ -499,7 +459,7 @@ Table: Cadence | Task | Command
 | Cadence | Task | Command |
 |---|---|---|
 | Daily | Service health | `bash scripts/status.sh` |
-| Daily | Node heartbeat check | `bash scripts/node.sh list --controller http://localhost:8100` |
+| Daily | Worker reachability | `bash scripts/node.sh list --headscale-url <url> --headscale-key <key>` |
 | Weekly | Full test run | `make test-all` |
 | Weekly | Security audit | `bash scripts/configure.sh security-audit` |
 | Monthly | TLS expiry check | `bash scripts/configure.sh security-audit \| grep TLS` |
@@ -535,23 +495,9 @@ bash scripts/configure.sh generate-litellm-config && bash scripts/pull-models.sh
 
 **§8.4 Ingest Documents**
 
-```bash
-# 1. Build the .ai-library package:
-bash scripts/configure.sh build-library \
-  --source /path/to/docs --name my-library --version 1.0.0
-
-# 2. Scan into the knowledge index (key retrieved inline — never hardcoded):
-curl -s -X POST http://localhost:8100/v1/scan \
-  -H "Authorization: Bearer $(podman secret inspect knowledge_index_api_key \
-    --showsecret --format '{{.SecretData}}')" \
-  -H "Content-Type: application/json" \
-  -d '{"path": "/libraries/my-library"}'
-
-# 3. Verify:
-curl -s http://localhost:8100/v1/catalog \
-  -H "Authorization: Bearer $(podman secret inspect knowledge_index_api_key \
-    --showsecret --format '{{.SecretData}}')" | python3 -m json.tool
-```
+Not available: document ingestion ran in the Python Knowledge Index, removed
+2026-09-30 (D-045). Omit this subsection until the Go Knowledge Index ships.
+`configure.sh build-library` still packages `.ai-library` bundles.
 
 **§8.5 Security Audit**
 
@@ -609,20 +555,20 @@ systemctl --user restart <service>.service
 bash scripts/status.sh | grep <service>
 ```
 
-**§9.2 knowledge-index Custom Image**
+**§9.2 conversions Custom Image**
 
 Both flags are required — omitting either silently deploys stale or wrong code:
 
 ```bash
-podman build --no-cache -t localhost/knowledge-index:0.1.0 services/knowledge-index/
+podman build --no-cache -t localhost/conversions:0.1.0 services/conversions/
 systemctl --user daemon-reload
-systemctl --user restart knowledge-index.service
+systemctl --user restart conversions.service
 # Verify new code is running:
-podman inspect knowledge-index --format '{{.Image}}'
+podman inspect conversions --format '{{.Image}}'
 ```
 
-Why `--no-cache`: the `COPY app.py node_registry.py` layer is keyed on the Containerfile,
-not the source files.  Without `--no-cache`, changed Python files are silently skipped.
+Why `--no-cache`: the `COPY app.py client.py cli.py` layer can be served from cache
+after a source change.  `--no-cache` guarantees the rebuilt image carries the new files.
 
 Why `:0.1.0` not `:latest`: the quadlet is pinned to this tag.  Building `:latest` creates
 a separate image that `systemctl restart` ignores.
@@ -697,7 +643,7 @@ Label structure (all containers ship via Promtail):
 {container_name="<service-name>"}               # single service
 {job="containers"} |= "ERROR"                   # all services, errors only
 {container_name="litellm"} |= "Exception"       # LiteLLM exceptions
-{container_name="knowledge-index"} |= "401"     # auth failures
+{container_name="litellm"} |= "401"             # auth failures
 ```
 
 Retention: **168 hours (7 days)**. For longer retention, update `retention_period`
@@ -773,15 +719,9 @@ pattern below.  Do not cross-reference; inline all diagnosis and fix commands.
 3. LiteLLM returns 401 on all requests
 4. OpenWebUI shows no models / "Failed to fetch models"
 5. Authentik unreachable via Traefik (502/404)
-6. knowledge-index returns 401 on `/v1/catalog`
-7. Node shows `caution` or `failed`
-8. Node shows `offline` — cannot send heartbeats
-9. Heartbeat timer not running (Linux)
-10. Heartbeat timer not running (macOS)
-11. knowledge-index stopped after running the test suite
-12. Flowise credentials fail after restart (`flowise_secret_key` rotation)
-13. TLS certificate errors in browser
-14. Duplicate model entries in LiteLLM
+6. Flowise credentials fail after restart (`flowise_secret_key` rotation)
+7. TLS certificate errors in browser
+8. Duplicate model entries in LiteLLM
 
 For each `curl` or service call in this section, use inline Pattern A secret
 extraction.  Verify every command is executable as written before including it.
@@ -798,15 +738,15 @@ Alphabetical index of all named entities in the document.  Format:
 
 Include at minimum:
 
-- All 15 service names (traefik, postgres, qdrant, knowledge-index, authentik,
+- All 14 service names (traefik, postgres, qdrant, authentik,
   litellm, vllm, ollama, flowise, openwebui, prometheus, grafana, loki, promtail, minio)
 - All Podman secret names (from §4.2)
 - All script names (configure.sh, deploy.sh, start.sh, stop.sh, status.sh,
-  diagnose.sh, backup.sh, pull-models.sh, bootstrap.sh, node.sh, heartbeat.sh,
+  diagnose.sh, backup.sh, pull-models.sh, register-node.sh, node.sh,
   generate-tls.sh, inhibit.sh)
 - All `make` targets (make test-all, make test-bats, make test-pytest, make wait-services)
 - Key troubleshooting terms: 401, 404, 502, cascade stop, credential encryption,
-  AES key, forwardAuth, heartbeat, join token, caution, failed, offline, cold-boot
+  AES key, forwardAuth, cold-boot
 
 ---
 
