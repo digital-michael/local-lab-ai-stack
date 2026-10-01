@@ -23,7 +23,11 @@
 # admin-side in LiteLLM. Re-running this script is how you refresh a model's
 # tags (e.g. after re-pulling it with different capabilities): tags are
 # recomputed fresh from live sources on every run, never just carried over
-# from a prior run. See output/CENTAURI-playbook.md §13 L-31/L-32/L-34/L-35.
+# from a prior run. Also tells OpenWebUI to refresh its own cached base-model
+# list afterward — without this, any model this run added/removed/renamed
+# stays invisible until someone clicks Refresh in Admin Panel > Settings >
+# Models or the container restarts (OpenWebUI's models.base_models_cache has
+# no TTL). See output/CENTAURI-playbook.md §13 L-31/L-32/L-34/L-35/L-37.
 #
 # Usage:
 #   bash scripts/pull-models.sh
@@ -312,6 +316,48 @@ print(f'  OpenWebUI: synced {synced} model(s)' + (f', skipped {skipped} (no admi
 "
 else
     echo "Skipping OpenWebUI tag sync (no tagged models, or openwebui container not running)."
+fi
+
+# ---------------------------------------------------------------------------
+# Tell OpenWebUI to refresh its own cached base-model list (L-37). Its
+# models.base_models_cache is in-process with no TTL and no Redis backing it
+# here — nothing invalidates it except this exact API call or a container
+# restart, so without this, every model this run added/removed/renamed in
+# LiteLLM (and the tag sync above) stays invisible to users until someone
+# happens to click Refresh in Admin Panel > Settings > Models. Signs in via
+# the same trusted-header mechanism OpenWebUI's own SSO uses, as its one
+# admin user, purely to get a bearer token for this one authenticated call.
+# Best-effort: failure here is a warning, not a script failure, since the
+# actual registration/sync work above has already succeeded either way.
+# ---------------------------------------------------------------------------
+if podman ps --format '{{.Names}}' 2>/dev/null | grep -qx openwebui; then
+    OPENWEBUI_PORT="$(jq -r '.services.openwebui.ports[0].host // empty' "$CONFIG_FILE")"
+    TRUSTED_EMAIL_HEADER="$(jq -r '.services.openwebui.environment.WEBUI_AUTH_TRUSTED_EMAIL_HEADER // empty' "$CONFIG_FILE")"
+    ADMIN_EMAIL="$(podman exec openwebui python3 -c "
+import sqlite3
+conn = sqlite3.connect('/app/backend/data/webui.db')
+c = conn.cursor()
+c.execute(\"SELECT email FROM user WHERE role='admin' ORDER BY created_at ASC LIMIT 1\")
+row = c.fetchone()
+print(row[0] if row else '')
+" 2>/dev/null)" || true
+
+    owui_token=""
+    if [[ -n "$OPENWEBUI_PORT" && -n "$TRUSTED_EMAIL_HEADER" && -n "$ADMIN_EMAIL" ]]; then
+        owui_token="$(curl -s -X POST "http://localhost:$OPENWEBUI_PORT/api/v1/auths/signin" \
+            -H "Content-Type: application/json" \
+            -H "$TRUSTED_EMAIL_HEADER: $ADMIN_EMAIL" \
+            -d "$(jq -nc --arg e "$ADMIN_EMAIL" '{email: $e, password: "pull-models-refresh"}')" \
+            2>/dev/null | jq -r '.token // empty' 2>/dev/null)" || true
+    fi
+
+    if [[ -n "$owui_token" ]]; then
+        curl -s -o /dev/null "http://localhost:$OPENWEBUI_PORT/api/models?refresh=true" \
+            -H "Authorization: Bearer $owui_token"
+        echo "OpenWebUI: model list cache refreshed."
+    else
+        echo "WARNING: could not refresh OpenWebUI's model list cache — click Refresh in Admin Panel > Settings > Models, or it'll pick up today's changes after a restart." >&2
+    fi
 fi
 
 # ---------------------------------------------------------------------------
