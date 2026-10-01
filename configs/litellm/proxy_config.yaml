@@ -3,9 +3,9 @@
 # LiteLLM proxy configuration — mounted at /app/proxy_config.yaml in the container.
 # Settings here supplement environment variable configuration (secrets, DATABASE_URL, etc.).
 #
-# Callbacks (execution order matters — reviewed before RAG query):
+# Callbacks (execution order matters — review runs first):
 #   1. ContentReviewHook: regex gates A/B/C per D-039 Phase 1, then guard LLM D per Phase 2; rejects on violation
-#   2. AsyncRAGHook: KI context injection per D-030
+#   2. ModelDefaultsHook: per-model request defaults (thinking off)
 # Controlled by REVIEW_ENABLED env var — no-op when 'false'.
 # Category D guard enabled when REVIEW_GUARD_MODEL env var is set (empty = skip).
 #
@@ -15,7 +15,7 @@ litellm_settings:
   drop_params: true
   callbacks:
     - hooks.content_review_hook
-    - hooks.async_rag_hook
+    - hooks.model_defaults_hook
     - prometheus
 
 general_settings: {}

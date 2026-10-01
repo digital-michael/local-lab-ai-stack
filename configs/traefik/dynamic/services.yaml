@@ -45,64 +45,9 @@ http:
     # Note: auth.stack.localhost router removed — Authentik now runs on
     # photondatum.space VPS. Access via https://auth.photondatum.space.
 
-    # Exception: MCP + admin endpoints use API key auth (machine-to-machine, not browser SSO).
-    # Access control: knowledge_index_api_key Podman secret (API_KEY env var in app).
-    knowledge-index-admin:
-      rule: "Host(`ki.stack.localhost`) && PathPrefix(`/admin`)"
-      entryPoints:
-        - websecure
-      service: knowledge-index
-      middlewares:
-        - secure-headers
-      tls: {}
-
-    knowledge-index-mcp:
-      rule: "Host(`ki.stack.localhost`) && PathPrefix(`/mcp`)"
-      entryPoints:
-        - websecure
-      service: knowledge-index
-      middlewares:
-        - secure-headers
-      tls: {}
-
-    knowledge-index-api:
-      rule: "Host(`ki.stack.localhost`) && PathPrefix(`/v1`)"
-      entryPoints:
-        - websecure
-      service: knowledge-index
-      middlewares:
-        - authentik
-        - ki-api-key
-        - secure-headers
-      tls: {}
-
-    # Tailnet: /v1/* — worker queries, ingest, and /v1/cnc/* CNC namespace.
-    # /v1/cnc/* is covered by this PathPrefix; no separate router needed (auth is
-    # handled in app.py via CNC_BEARER_TOKEN, not a Traefik middleware).
-    # Accessible only on the tailnet entrypoint (100.64.0.4:8443).
-    knowledge-index-tailnet-api:
-      rule: "Host(`100.64.0.4`) && PathPrefix(`/v1`)"
-      entryPoints:
-        - tailnet
-      service: knowledge-index
-      middlewares:
-        - secure-headers
-      tls: {}
-
-    # Tailnet: /mcp/* — MCP tool server for future agentic worker access.
-    knowledge-index-tailnet-mcp:
-      rule: "Host(`100.64.0.4`) && PathPrefix(`/mcp`)"
-      entryPoints:
-        - tailnet
-      service: knowledge-index
-      middlewares:
-        - secure-headers
-      tls: {}
-
     # conversions: web UI (form + download) is browser-facing, gated by Authentik SSO
     # like any other dashboard service. /v1 (API/CLI) and /mcp (agents) cannot present
-    # a browser session, so they use API-key auth in app.py instead — same split as
-    # knowledge-index's /mcp and /admin routers above.
+    # a browser session, so they use API-key auth in app.py instead.
     conversions:
       rule: "Host(`conversions.stack.localhost`)"
       entryPoints:
@@ -280,49 +225,6 @@ http:
         - secure-headers
       tls: {}
 
-    # Public entry — ki.photondatum.space proxied via Caddy on photondatum.space.
-    # Root path: redirect to /admin for browser users navigating to the base URL.
-    ki-public-root:
-      rule: "Host(`ki.photondatum.space`) && Path(`/`)"
-      entryPoints:
-        - websecure
-      middlewares:
-        - redirect-to-admin
-        - secure-headers
-      service: knowledge-index
-      tls: {}
-
-    # /admin: browser admin panel, protected by Authentik.
-    # /v1 and /mcp: machine-to-machine API key auth at app level; no Authentik middleware.
-    ki-public-admin:
-      rule: "Host(`ki.photondatum.space`) && PathPrefix(`/admin`)"
-      entryPoints:
-        - websecure
-      service: knowledge-index
-      middlewares:
-        - authentik
-        - ki-api-key
-        - secure-headers
-      tls: {}
-
-    ki-public-api:
-      rule: "Host(`ki.photondatum.space`) && PathPrefix(`/v1`)"
-      entryPoints:
-        - websecure
-      service: knowledge-index
-      middlewares:
-        - secure-headers
-      tls: {}
-
-    ki-public-mcp:
-      rule: "Host(`ki.photondatum.space`) && PathPrefix(`/mcp`)"
-      entryPoints:
-        - websecure
-      service: knowledge-index
-      middlewares:
-        - secure-headers
-      tls: {}
-
   services:
     conversions:
       loadBalancer:
@@ -348,11 +250,6 @@ http:
       loadBalancer:
         servers:
           - url: "http://flowise.ai-stack:3000"
-
-    knowledge-index:
-      loadBalancer:
-        servers:
-          - url: "http://knowledge-index.ai-stack:8100"
 
     litellm:
       loadBalancer:

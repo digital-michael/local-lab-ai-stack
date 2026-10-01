@@ -65,30 +65,10 @@
             - field: version
               label: Version
 
-- Knowledge:
-    - Knowledge Index:
-        icon: mdi-book-search
-        href: https://ki.photondatum.space/v1/catalog
-        description: Document Ingestion & RAG
-        widget:
-          type: customapi
-          url: http://knowledge-index.ai-stack:8100/health
-          method: GET
-          mappings:
-            - field: status
-              label: Status
-
 - Storage:
     - PostgreSQL:
         icon: mdi-database
         description: Metadata Database
-        widget:
-          type: customapi
-          url: http://knowledge-index.ai-stack:8100/health
-          method: GET
-          mappings:
-            - field: database
-              label: DB Status
     - Qdrant:
         icon: mdi-vector-combine
         href: https://qdrant.stack.localhost/dashboard

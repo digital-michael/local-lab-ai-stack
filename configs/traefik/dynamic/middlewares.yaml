@@ -22,13 +22,6 @@ http:
         stsSeconds: 31536000
         stsIncludeSubdomains: true
 
-    # Redirect bare / to /admin/v1/nodes (used by ki-public-root router)
-    redirect-to-admin:
-      redirectRegex:
-        regex: "^(https?://[^/]+)/?$"
-        replacement: "${1}/admin/v1/nodes"
-        permanent: false
-
     # Authentik forward-auth middleware
     # Authentik runs on photondatum.space (always-on VPS edge node).
     # CENTAURI services degrade gracefully when the VPS is unreachable —

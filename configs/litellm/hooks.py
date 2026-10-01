@@ -1,10 +1,10 @@
 # configs/litellm/hooks.py
 #
-# LiteLLM hooks — content review (D-039) + ambient RAG injection (D-030).
+# LiteLLM hooks — content review (D-039) + model request defaults.
 #
 # Execution order (registered in proxy_config.yaml):
 #   1. ContentReviewHook.async_pre_call_hook  — regex gates A/B/C + guard LLM D; raises on violation
-#   2. AsyncRAGHook.async_pre_call_hook       — KI context injection
+#   2. ModelDefaultsHook.async_pre_call_hook  — per-model request defaults (thinking off)
 #
 # ContentReviewHook (D-039 Phase 1 + Phase 2):
 #   Phase 1 — deterministic regex gates A/B/C:
@@ -20,19 +20,17 @@
 #   structured JSON (captured by Promtail → Loki). Never logs matched values.
 #   Controlled by REVIEW_ENABLED env var (default: true).
 #
-# AsyncRAGHook (D-030):
-#   Fires before every inference request routed through the LiteLLM proxy.
-#   Queries the Knowledge Index (/query) with the last user message, and
-#   injects the top-k results as additional system message context.
-#   No-op when KI_BASE_URL is unset or empty. RAG failure is always non-fatal.
+# ModelDefaultsHook:
+#   Disables implicit thinking mode for models that enable it by default, unless
+#   the caller opts in. (Until 2026-09-30 this lived in AsyncRAGHook, which also
+#   injected Knowledge Index context per D-030; that injection was removed with
+#   the Python Knowledge Index, D-045.)
 #
 # Environment:
 #   REVIEW_ENABLED      — set to 'false' to disable content review (not for production)
 #   REVIEW_GUARD_MODEL  — Ollama model name for Category D guard (e.g. llama3.2:3b); empty = skip D
 #   REVIEW_GUARD_URL    — Ollama base URL for guard model; falls back to OLLAMA_BASE_URL then localhost
 #   REVIEW_D_FAIL_MODE  — 'open' (allow+warn on guard error) or 'closed' (reject on guard error); default: open
-#   KI_BASE_URL         — base URL of the Knowledge Index (e.g. http://knowledge-index.ai-stack:8100)
-#   KI_API_KEY          — Bearer token for Knowledge Index API access (from knowledge_index_api_key secret)
 
 import hashlib
 import json
@@ -313,8 +311,7 @@ class ContentReviewHook(CustomLogger):
     """
     LiteLLM callback that reviews user/system message content for policy
     violations (Categories A/B/C/D) before inference. Hard-rejects on match.
-    Must be registered before AsyncRAGHook in proxy_config.yaml so that
-    rejected content never triggers a KI query.
+    Registered first in proxy_config.yaml so rejected content goes no further.
 
     Phase 1: synchronous regex gates A/B/C.
     Phase 2: async guard LLM for Category D (enabled when REVIEW_GUARD_MODEL is set).
@@ -347,12 +344,8 @@ class ContentReviewHook(CustomLogger):
 
 
 # ---------------------------------------------------------------------------
-# AsyncRAGHook state
+# ModelDefaultsHook state
 # ---------------------------------------------------------------------------
-
-_KI_API_KEY: str = os.environ.get("KI_API_KEY", "")
-
-_RAG_TOP_K: int = int(os.environ.get("KI_RAG_TOP_K", "3"))
 
 # Models that default to chain-of-thought / thinking mode and should have it
 # disabled at the proxy level unless the caller explicitly opts in.
@@ -385,10 +378,10 @@ def _maybe_disable_thinking(data: dict) -> None:
     data["reasoning_effort"] = "none"
 
 
-class AsyncRAGHook(CustomLogger):
+class ModelDefaultsHook(CustomLogger):
     """
-    LiteLLM callback that injects Knowledge Index context into the system
-    message before each chat completion request (D-030).
+    LiteLLM callback that applies per-model request defaults before each chat
+    completion -- today, disabling implicit thinking mode (_THINKING_MODELS).
     """
 
     async def async_pre_call_hook(
@@ -398,81 +391,14 @@ class AsyncRAGHook(CustomLogger):
         data: dict,
         call_type: str,
     ) -> Optional[dict]:
-        # Only handle chat completions
-        if call_type not in ("completion", "acompletion"):
-            return data
-
-        # Disable thinking mode by default for models that enable it implicitly
-        _maybe_disable_thinking(data)
-
-        # Re-read env vars at call time so the hook responds to live config changes
-        ki_base = os.environ.get("KI_BASE_URL", "").rstrip("/")
-        ki_key = os.environ.get("KI_API_KEY", "")
-
-        if not ki_base:
-            return data
-
-        messages: list = data.get("messages", [])
-        if not messages:
-            return data
-
-        # Use last user message as the search query
-        user_content = next(
-            (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
-            "",
-        )
-        if not user_content or not isinstance(user_content, str):
-            return data
-
-        try:
-            headers: dict = {}
-            if ki_key:
-                headers["Authorization"] = f"Bearer {ki_key}"
-
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.post(
-                    f"{ki_base}/query",
-                    json={"query": user_content, "top_k": _RAG_TOP_K},
-                    headers=headers,
-                )
-
-            if resp.status_code != 200:
-                return data
-
-            results: list = resp.json().get("results", [])
-            context_parts = [
-                r.get("content", "").strip()
-                for r in results
-                if r.get("content", "").strip()
-            ]
-            if not context_parts:
-                return data
-
-            context = "\n\n".join(context_parts)
-            injection = (
-                "Relevant context from the knowledge index "
-                "(use if helpful, ignore if not relevant to the question):\n\n"
-                f"{context}"
-            )
-
-            # Augment existing system message or prepend a new one
-            sys_messages = [m for m in messages if m.get("role") == "system"]
-            if sys_messages:
-                sys_messages[0]["content"] = sys_messages[0]["content"] + "\n\n" + injection
-            else:
-                data["messages"] = [{"role": "system", "content": injection}] + messages
-
-        except Exception:
-            # RAG failure is always non-fatal — inference proceeds without context
-            pass
-
+        if call_type in ("completion", "acompletion"):
+            _maybe_disable_thinking(data)
         return data
 
 
 # Module-level singletons registered by LiteLLM via get_instance_fn.
 # proxy_config.yaml references these by dotted name (must be instances,
 # not classes, for isinstance(cb, CustomLogger) checks to pass).
-# Registration order in proxy_config.yaml: content_review_hook first,
-# async_rag_hook second — review before RAG query.
+# Registration order in proxy_config.yaml: content_review_hook first.
 content_review_hook = ContentReviewHook()
-async_rag_hook = AsyncRAGHook()
+model_defaults_hook = ModelDefaultsHook()
