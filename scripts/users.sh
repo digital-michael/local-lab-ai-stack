@@ -94,6 +94,23 @@ except Exception as e:
     print(f"ERROR: could not read webui.db: {e}", file=sys.stderr)
     sys.exit(2)
 
+def format_age(age_min: float) -> str:
+    if age_min < 1:
+        return "just now"
+    if age_min < 60:
+        return f"{age_min:.1f} min ago"
+    age_hr = age_min / 60
+    if age_hr < 24:
+        return f"{age_hr:.1f} hours ago"
+    age_day = age_hr / 24
+    if age_day < 30:
+        return f"{age_day:.1f} days ago"
+    age_month = age_day / 30
+    if age_month < 12:
+        return f"{age_month:.1f} months ago"
+    return f"{age_day / 365:.1f} years ago"
+
+
 now = time.time()
 users = []
 any_active = False
@@ -129,7 +146,7 @@ for u in users:
     if u["last_active_at"] is None:
         last = "never"
     else:
-        last = f"{u['last_active_at']}  ({u['minutes_ago']:.1f} min ago)"
+        last = f"{u['last_active_at']}  ({format_age(u['minutes_ago'])})"
     line = f"{u['name']:<{NAME_W}} {u['email']:<{EMAIL_W}} {u['role']:<{ROLE_W}} {last}"
     if u["active"]:
         line += "  <- ACTIVE"
