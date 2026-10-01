@@ -39,9 +39,11 @@
 #
 # --see-queue (used instead of --email, not together with it) lists every
 # invitation this script has created that's still unexpired and not yet
-# marked sent, and prompts to send all of them now or abort — the
-# "come back and actually send these later" half of the same --send
-# mechanism, for anything created without --send in the first place.
+# marked sent, then loops on three options: delete one item (by number,
+# immediate — deletes the real Authentik Invitation, not staged), send
+# everything still left, or abort with no changes. The "come back and
+# actually send these later" half of the same --send mechanism, for
+# anything created without --send in the first place.
 #
 # Usage:
 #   scripts/provision-user.sh --email new.person@example.com [--team "Family Group"] [--send]
@@ -55,8 +57,9 @@
 #   --send                 Email the invite link immediately via SMTP
 #                          (default: leave unsent, just print the link).
 #   --see-queue            List pending (unsent, unexpired) invitations and
-#                          prompt to send all or abort. Used instead of
-#                          --email, not together with it.
+#                          loop: delete an item by number, send all, or
+#                          abort. Used instead of --email, not together
+#                          with it.
 #   --expires-days N       Invitation validity in days (default: 7)
 #   --authentik-url URL    Authentik base URL (default: https://auth.photondatum.space)
 #   --token-secret NAME    Podman secret holding the Authentik API token
@@ -106,8 +109,8 @@ Purpose:
   model-visibility grants.
 
   --see-queue (instead of --email) lists invitations this tool created
-  that are still unexpired and not yet marked sent, and prompts to
-  send all of them now or abort.
+  that are still unexpired and not yet marked sent, then loops: delete
+  an item by number, send everything still left, or abort.
 
 Options:
   --email EMAIL          The invitee's email address. Required unless --see-queue.
@@ -115,8 +118,9 @@ Options:
                          live-discovered teams and prompts for exactly one.
   --send                 Email the invite link immediately via SMTP
                          (default: leave unsent, just print the link).
-  --see-queue            List pending invitations and prompt to send all
-                         or abort. Used instead of --email.
+  --see-queue            List pending invitations; loop: delete an item
+                         by number, send all, or abort. Used instead of
+                         --email.
   --expires-days N       Invitation validity in days (default: 7)
   --authentik-url URL    Authentik base URL (default: https://auth.photondatum.space)
   --token-secret NAME    Podman secret holding the Authentik API token
@@ -370,13 +374,37 @@ if SEE_QUEUE:
         print("No pending (unsent, unexpired) invitations.")
         sys.exit(0)
 
-    print(f"Pending invitations ({len(pending)}):")
-    for i, p in enumerate(pending, 1):
-        print(f"  {i}) {p['email']:<35} team={p['team']:<15} expires={p['expires']}")
-    choice = input(f"\nSend all {len(pending)} now? [y/N]: ").strip().lower()
-    if choice != "y":
-        print("Aborted — no changes made.")
-        sys.exit(0)
+    # Loop: delete zero or more items first (each one real and immediate —
+    # not staged for later), then either send everything still left or abort
+    # with no further changes. Re-shows the list after every delete so it's
+    # always clear what "send all" is actually about to act on.
+    while True:
+        print(f"\nPending invitations ({len(pending)}):")
+        for i, p in enumerate(pending, 1):
+            print(f"  {i}) {p['email']:<35} team={p['team']:<15} expires={p['expires']}")
+
+        choice = input("\n[S]end all, [D]<#> delete one (e.g. D2), [A]bort: ").strip().lower()
+
+        if choice in ("a", "abort", ""):
+            print("Aborted — no changes made.")
+            sys.exit(0)
+        if choice in ("s", "send", "send all"):
+            break
+
+        m = re.match(r"^d\s*(\d+)$", choice)
+        if not m:
+            print(f"'{choice}' not understood — use S, D<#> (e.g. D2), or A.")
+            continue
+        idx = int(m.group(1))
+        if not (1 <= idx <= len(pending)):
+            print(f"'{idx}' is not a valid item number.")
+            continue
+        target = pending.pop(idx - 1)
+        ak(f"/api/v3/stages/invitation/invitations/{target['pk']}/", method="DELETE")
+        print(f"Deleted invitation for {target['email']}.")
+        if not pending:
+            print("No pending invitations left.")
+            sys.exit(0)
 
     sent, failed = 0, 0
     for p in pending:
