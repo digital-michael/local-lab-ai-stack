@@ -700,177 +700,6 @@ _check_resource_pressure() {
     return $warn
 }
 
-# ── Full check: library custody status (controller only) ─────────────────────
-# Hits GET /v1/catalog on the local knowledge-index KI and reports which
-# libraries have been synced (synced_at non-null) and which are missing.
-# Only runs when NODE_PROFILE=controller and knowledge-index is active.
-
-_check_library_custody() {
-    echo ""
-    echo "  Library Custody"
-    local node_profile
-    node_profile=$(_get_node_profile)
-
-    if [[ "$node_profile" != "controller" ]]; then
-        printf "  [SKIP] %-20s not a controller node\n" "library-custody"
-        return 0
-    fi
-
-    local ki_state
-    ki_state=$(systemctl --user is-active knowledge-index.service 2>/dev/null || true)
-    if [[ "$ki_state" != "active" ]]; then
-        printf "  [SKIP] %-20s knowledge-index not active\n" "library-custody"
-        return 0
-    fi
-
-    local ki_port catalog_url response ki_api_key
-    ki_port=$(jq -r '.services["knowledge-index"].ports[0] // "8100"' "$CONFIG_FILE" 2>/dev/null \
-        | grep -oP '^\d+' || echo "8100")
-    catalog_url="http://localhost:${ki_port}/v1/catalog"
-    ki_api_key=$(podman secret inspect knowledge_index_api_key --showsecret \
-        2>/dev/null | jq -r '.[].SecretData' || true)
-
-    local _curl_auth=()
-    [[ -n "$ki_api_key" ]] && _curl_auth=(-H "Authorization: Bearer ${ki_api_key}")
-
-    response=$(curl -sf --max-time 5 "${_curl_auth[@]}" "$catalog_url" 2>/dev/null) || {
-        printf "  [FAIL] %-20s /v1/catalog unreachable at %s\n" "library-custody" "$catalog_url"
-        return 1
-    }
-
-    local total synced unsynced
-    total=$(echo "$response"   | jq '.libraries | length' 2>/dev/null || echo 0)
-    synced=$(echo "$response"  | jq '[.libraries[] | select(.synced_at != null)] | length' 2>/dev/null || echo 0)
-    unsynced=$(echo "$response" | jq '[.libraries[] | select(.synced_at == null)] | length' 2>/dev/null || echo 0)
-
-    if [[ "$total" -eq 0 ]]; then
-        printf "  [PASS] %-20s no libraries in custody\n" "library-custody"
-        return 0
-    fi
-
-    if [[ "$unsynced" -gt 0 ]]; then
-        printf "  [WARN] %-20s %d/%d libraries missing custody copy\n" "library-custody" "$unsynced" "$total"
-        echo "$response" | jq -r '.libraries[] | select(.synced_at == null) | "         ! \(.name):\(.version) (origin: \(.origin_node // "unknown"))"' 2>/dev/null || true
-        warn=$((warn + 1))
-    else
-        printf "  [PASS] %-20s %d/%d libraries synced\n" "library-custody" "$synced" "$total"
-    fi
-
-    # Warn if any known worker node has contributed zero libraries
-    local worker_nodes _nodes_dir
-    _nodes_dir="$(dirname "$CONFIG_FILE")/nodes"
-    worker_nodes=$(for _f in "$_nodes_dir"/*.json; do
-        [[ -f "$_f" ]] && jq -r 'select(.profile == "inference-worker" or .profile == "enhanced-worker" or .profile == "knowledge-worker") | .name // empty' "$_f"
-    done 2>/dev/null || true)
-    while IFS= read -r node; do
-        [[ -z "$node" ]] && continue
-        local node_count
-        node_count=$(echo "$response" | jq --arg n "$node" '[.libraries[] | select(.origin_node == $n)] | length' 2>/dev/null || echo 0)
-        if [[ "$node_count" -eq 0 ]]; then
-            printf "  [WARN] %-20s worker '%s' has 0 libraries in catalog\n" "library-custody" "$node"
-            warn=$((warn + 1))
-        fi
-    done <<< "$worker_nodes"
-
-    return 0
-}
-
-# ── Full check: knowledge-index node capabilities ────────────────────────────
-# Reports KI service health, web-search capability (TAVILY_API_KEY presence),
-# and CONTROLLER_KI_URL connectivity on enhanced-worker nodes.
-
-_check_ki_capabilities() {
-    echo ""
-    echo "  KI Capabilities"
-
-    local ki_state
-    ki_state=$(systemctl --user is-active knowledge-index.service 2>/dev/null || true)
-    if [[ "$ki_state" != "active" ]]; then
-        printf "  [SKIP] %-28s knowledge-index not active\n" "ki-capabilities"
-        return 0
-    fi
-
-    local ki_port ki_url
-    ki_port=$(jq -r '.services["knowledge-index"].ports[0] // "8100"' "$CONFIG_FILE" 2>/dev/null \
-        | grep -oP '^\d+' || echo "8100")
-    ki_url="http://localhost:${ki_port}"
-
-    # Health probe
-    local health_rc=0
-    curl -sf --max-time 5 "${ki_url}/health" &>/dev/null || health_rc=$?
-    if [[ $health_rc -ne 0 ]]; then
-        printf "  [FAIL] %-28s /health unreachable at %s\n" "ki/health" "$ki_url"
-        return 1
-    fi
-    printf "  [PASS] %-28s /health OK\n" "ki/health"
-
-    # Resolve API key for authenticated probes
-    local ki_api_key _auth=()
-    ki_api_key=$(podman secret inspect knowledge_index_api_key --showsecret \
-        2>/dev/null | jq -r '.[].SecretData' || true)
-    [[ -n "$ki_api_key" ]] && _auth=(-H "Authorization: Bearer ${ki_api_key}")
-
-    # Web-search capability: probe /v1/search, categorise by HTTP status
-    local http_code
-    http_code=$(curl -so /dev/null -w '%{http_code}' --max-time 5 "${_auth[@]}" \
-        -X POST -H 'Content-Type: application/json' \
-        -d '{"query":"diagnose-probe","max_results":1}' \
-        "${ki_url}/v1/search" 2>/dev/null || echo "000")
-
-    case "$http_code" in
-        200|422)
-            printf "  [PASS] %-28s web-search enabled (HTTP %s)\n" "ki/web-search" "$http_code"
-            ;;
-        501)
-            local tavily_key
-            tavily_key=$(podman exec knowledge-index env 2>/dev/null \
-                | grep '^TAVILY_API_KEY=' | cut -d= -f2- || true)
-            if [[ -n "$tavily_key" ]]; then
-                printf "  [WARN] %-28s TAVILY_API_KEY in env but /v1/search returned 501\n" "ki/web-search"
-                warn=$((warn + 1))
-            else
-                printf "  [PASS] %-28s web-search disabled (no TAVILY_API_KEY) — 501 confirmed\n" "ki/web-search"
-            fi
-            ;;
-        401|403)
-            printf "  [WARN] %-28s /v1/search returned HTTP %s — API key issue\n" "ki/web-search" "$http_code"
-            warn=$((warn + 1))
-            ;;
-        000)
-            printf "  [WARN] %-28s /v1/search probe timed out or connection refused\n" "ki/web-search"
-            warn=$((warn + 1))
-            ;;
-        *)
-            printf "  [WARN] %-28s /v1/search probe returned unexpected HTTP %s\n" "ki/web-search" "$http_code"
-            warn=$((warn + 1))
-            ;;
-    esac
-
-    # CONTROLLER_KI_URL connectivity check (enhanced-worker nodes only)
-    local node_profile
-    node_profile=$(_get_node_profile)
-    if [[ "$node_profile" == "enhanced-worker" ]]; then
-        local ctrl_url
-        ctrl_url=$(podman exec knowledge-index env 2>/dev/null \
-            | grep '^CONTROLLER_KI_URL=' | cut -d= -f2- || true)
-        if [[ -z "$ctrl_url" ]]; then
-            printf "  [WARN] %-28s CONTROLLER_KI_URL not set — custody push disabled\n" "ki/controller-url"
-            warn=$((warn + 1))
-        else
-            local ctrl_rc=0
-            curl -sf --max-time 5 "${ctrl_url}/health" &>/dev/null || ctrl_rc=$?
-            if [[ $ctrl_rc -eq 0 ]]; then
-                printf "  [PASS] %-28s CONTROLLER_KI_URL=%s reachable\n" "ki/controller-url" "$ctrl_url"
-            else
-                printf "  [WARN] %-28s CONTROLLER_KI_URL=%s unreachable\n" "ki/controller-url" "$ctrl_url"
-                warn=$((warn + 1))
-            fi
-        fi
-    fi
-
-    return 0
-}
-
 # ── Full check: per-service API readiness probe ───────────────────────────────
 # Runs the service's health_check.command inside the container to confirm
 # the application layer is responding (not just the port).
@@ -1046,12 +875,11 @@ _check_remote_node_ports() {
 
     for _f in "$_nodes_dir"/*.json; do
         [[ -f "$_f" ]] || continue
-        local node_alias node_profile_f node_address node_fallback node_ki_port
+        local node_alias node_profile_f node_address node_fallback
         node_alias=$(jq -r '.alias // empty' "$_f")
         node_profile_f=$(jq -r '.profile // empty' "$_f")
         node_address=$(jq -r '.address // empty' "$_f")
         node_fallback=$(jq -r '.address_fallback // empty' "$_f")
-        node_ki_port=$(jq -r '.ki_port // 8100' "$_f" 2>/dev/null || echo "8100")
 
         [[ "$node_profile_f" == "controller" ]] && continue
         found_any=1
@@ -1067,9 +895,7 @@ _check_remote_node_ports() {
         local ports_to_check=()
         case "$node_profile_f" in
             inference-worker)  ports_to_check=(11434 8000) ;;
-            enhanced-worker)   ports_to_check=(11434 8000 "$node_ki_port") ;;
-            knowledge-worker)  ports_to_check=("$node_ki_port") ;;
-            *)                 ports_to_check=(11434 8000 "$node_ki_port") ;;
+            *)                 ports_to_check=(11434 8000) ;;
         esac
 
         if [[ -z "$node_address" && -z "$node_fallback" ]]; then
@@ -1128,8 +954,8 @@ _check_remote_node_ports() {
 
 # ── Full check: controller DNS/interface binding ──────────────────────────────
 # Verifies that the address in the controller node file resolves to an IP that
-# is actually bound to a local interface.  If it doesn't, worker heartbeats will
-# fail even though the controller process itself is running fine.
+# is actually bound to a local interface.  If it doesn't, workers cannot reach
+# the controller even though the controller process itself is running fine.
 # Also validates that controller_url uses HTTPS (not a direct http://host:port).
 
 _check_controller_net_binding() {
@@ -1185,7 +1011,7 @@ _check_controller_net_binding() {
         else
             printf "  [WARN] %-28s %s → %s — NOT on any local interface\n" \
                 "net-binding/dns" "$ctrl_addr" "$resolved_ip"
-            printf "         ! Interface may be down — worker heartbeats will fail\n"
+            printf "         ! Interface may be down — workers cannot reach the controller\n"
             printf "         ! Local IPs: %s\n" "$(echo "$local_ips" | tr '\n' ' ' | xargs)"
             warn=$((warn + 1))
         fi
@@ -1208,200 +1034,8 @@ _check_controller_net_binding() {
         fi
     else
         printf "  [WARN] %-28s controller_url field missing from node file\n" "net-binding/ctrl-url"
-        printf "         ! generate-join-token will fall back to constructing http://addr:port\n"
         warn=$((warn + 1))
     fi
-
-    return $fail
-}
-
-# ── Full check: worker join state files ───────────────────────────────────────
-# On non-controller nodes: verifies that ~/.config/ai-stack/ contains the
-# required state files for heartbeat operation, and that controller_url is in
-# the correct HTTPS format (not http://host:port which bypasses Traefik).
-
-_check_worker_state_files() {
-    echo ""
-    echo "  Worker State Files"
-    local node_profile
-    node_profile=$(_get_node_profile)
-
-    if [[ "$node_profile" == "controller" ]]; then
-        printf "  [SKIP] %-28s controller node has no heartbeat state\n" "worker-state"
-        return 0
-    fi
-
-    local STATE_DIR="$HOME/.config/ai-stack"
-    local fail=0
-
-    # Check each critical state file
-    for _sf in controller_url node_id api_key; do
-        local fpath="$STATE_DIR/$_sf"
-        if [[ ! -f "$fpath" ]]; then
-            printf "  [FAIL] %-28s MISSING: %s\n" "worker-state/$_sf" "$fpath"
-            printf "         ! Run: bash scripts/node.sh join --controller <url> --token <token>\n"
-            fail=$((fail + 1))
-            continue
-        fi
-        local val; val=$(tr -d '[:space:]' < "$fpath" 2>/dev/null || true)
-        if [[ -z "$val" ]]; then
-            printf "  [FAIL] %-28s EMPTY: %s\n" "worker-state/$_sf" "$fpath"
-            fail=$((fail + 1))
-            continue
-        fi
-        printf "  [PASS] %-28s present\n" "worker-state/$_sf"
-    done
-
-    # Validate controller_url format
-    if [[ -f "$STATE_DIR/controller_url" ]]; then
-        local ctrl_url; ctrl_url=$(tr -d '[:space:]' < "$STATE_DIR/controller_url" 2>/dev/null || true)
-        if [[ "$ctrl_url" == http://*:* ]]; then
-            printf "  [FAIL] %-28s controller_url='%s'\n" "worker-state/url-format" "$ctrl_url"
-            printf "         ! Direct port URL — worker heartbeats bypass Traefik/TLS\n"
-            printf "         ! Fix: printf 'https://<controller-host>' > %s/controller_url\n" "$STATE_DIR"
-            printf "         !       systemctl --user restart ai-stack-heartbeat.service\n"
-            fail=$((fail + 1))
-        elif [[ "$ctrl_url" == https://* ]]; then
-            printf "  [PASS] %-28s controller_url is HTTPS (%s)\n" "worker-state/url-format" "$ctrl_url"
-        elif [[ -n "$ctrl_url" ]]; then
-            printf "  [WARN] %-28s controller_url='%s' — unexpected format\n" "worker-state/url-format" "$ctrl_url"
-            warn=$((warn + 1))
-        fi
-
-        # Probe controller reachability
-        if [[ -n "$ctrl_url" ]]; then
-            local reach_rc=0
-            curl -sf --max-time 5 --insecure "${ctrl_url}/health" &>/dev/null || reach_rc=$?
-            if [[ $reach_rc -eq 0 ]]; then
-                printf "  [PASS] %-28s controller /health reachable\n" "worker-state/reach"
-            else
-                printf "  [WARN] %-28s controller /health unreachable at %s\n" \
-                    "worker-state/reach" "$ctrl_url"
-                printf "         ! Heartbeat POSTs will fail until controller is reachable\n"
-                warn=$((warn + 1))
-            fi
-        fi
-    fi
-
-    return $fail
-}
-
-# ── Full check: node heartbeat ages from KI registry ─────────────────────────
-# Controller only.  Queries /admin/v1/nodes and reports last_seen age for each
-# registered node.  Flags nodes in caution/failed/offline state immediately —
-# rather than waiting for a human to run `node.sh list`.
-
-_check_node_heartbeat_ages() {
-    echo ""
-    echo "  Node Heartbeat Ages"
-    local node_profile
-    node_profile=$(_get_node_profile)
-
-    if [[ "$node_profile" != "controller" ]]; then
-        printf "  [SKIP] %-28s not a controller node\n" "heartbeat-ages"
-        return 0
-    fi
-
-    local ki_state
-    ki_state=$(systemctl --user is-active knowledge-index.service 2>/dev/null || true)
-    if [[ "$ki_state" != "active" ]]; then
-        printf "  [SKIP] %-28s knowledge-index not active\n" "heartbeat-ages"
-        return 0
-    fi
-
-    local ki_port ki_url ki_api_key
-    ki_port=$(jq -r '.services["knowledge-index"].ports[0] // "8100"' "$CONFIG_FILE" 2>/dev/null \
-        | grep -oP '^\d+' || echo "8100")
-    ki_url="http://localhost:${ki_port}"
-    ki_api_key=$(podman secret inspect knowledge_index_api_key --showsecret \
-        2>/dev/null | jq -r '.[].SecretData' || true)
-
-    local _auth=()
-    [[ -n "$ki_api_key" ]] && _auth=(-H "Authorization: Bearer ${ki_api_key}")
-
-    local response rc=0
-    response=$(curl -sf --max-time 5 "${_auth[@]}" "${ki_url}/admin/v1/nodes" 2>/dev/null) || rc=$?
-    if [[ $rc -ne 0 ]]; then
-        printf "  [FAIL] %-28s /admin/v1/nodes unreachable\n" "heartbeat-ages"
-        return 1
-    fi
-
-    local node_count fail=0
-    node_count=$(echo "$response" | jq '.nodes | length' 2>/dev/null || echo 0)
-    if [[ "$node_count" -eq 0 ]]; then
-        printf "  [PASS] %-28s no registered nodes\n" "heartbeat-ages"
-        return 0
-    fi
-
-    local now_epoch
-    now_epoch=$(date +%s)
-
-    while IFS= read -r node_json; do
-        [[ -z "$node_json" ]] && continue
-        local label node_status last_seen age_label
-        local nid alias
-        nid=$(echo "$node_json" | jq -r '.node_id // "unknown"')
-        alias=$(echo "$node_json" | jq -r '.alias // empty')
-        node_status=$(echo "$node_json" | jq -r '.status // "unknown"')
-        last_seen=$(echo "$node_json" | jq -r '.last_seen // empty')
-        label="${alias:-$nid}"
-
-        if [[ -z "$last_seen" || "$last_seen" == "null" ]]; then
-            printf "  [WARN] %-28s status=%-8s  last=NEVER\n" "$label" "$node_status"
-            warn=$((warn + 1))
-            continue
-        fi
-
-        # Parse ISO/space timestamp portably via python3
-        local ls_epoch=0
-        ls_epoch=$(python3 -c "
-import sys, datetime
-ts = '${last_seen}'.replace(' ','T').split('.')[0]
-try:
-    dt = datetime.datetime.fromisoformat(ts)
-    print(int(dt.replace(tzinfo=datetime.timezone.utc).timestamp()))
-except Exception:
-    print(0)
-" 2>/dev/null || echo 0)
-
-        if [[ "$ls_epoch" -gt 0 ]]; then
-            local age_s
-            age_s=$(( now_epoch - ls_epoch ))
-            [[ $age_s -lt 0 ]] && age_s=0
-            if   [[ $age_s -lt 60   ]]; then age_label="${age_s}s ago"
-            elif [[ $age_s -lt 3600 ]]; then age_label="$((age_s / 60))m ago"
-            else                             age_label="$((age_s / 3600))h $((age_s % 3600 / 60))m ago"
-            fi
-        else
-            age_label="(parse error: $last_seen)"
-        fi
-
-        case "$node_status" in
-            online)
-                printf "  [PASS] %-28s status=%-8s  last=%s\n" "$label" "$node_status" "$age_label"
-                ;;
-            caution)
-                printf "  [WARN] %-28s status=%-8s  last=%s — heartbeats intermittent\n" \
-                    "$label" "$node_status" "$age_label"
-                warn=$((warn + 1))
-                ;;
-            failed|offline)
-                printf "  [FAIL] %-28s status=%-8s  last=%s\n" "$label" "$node_status" "$age_label"
-                printf "         ! On %s: journalctl --user -u ai-stack-heartbeat.service -n 10\n" "$label"
-                printf "         ! On %s: cat ~/.config/ai-stack/controller_url\n" "$label"
-                fail=$((fail + 1))
-                ;;
-            unregistered)
-                printf "  [WARN] %-28s status=%-8s (unjoin completed or join never ran)\n" \
-                    "$label" "$node_status"
-                warn=$((warn + 1))
-                ;;
-            *)
-                printf "  [WARN] %-28s status=%-8s  last=%s\n" "$label" "$node_status" "$age_label"
-                warn=$((warn + 1))
-                ;;
-        esac
-    done < <(echo "$response" | jq -c '.nodes[]' 2>/dev/null || true)
 
     return $fail
 }
@@ -1605,16 +1239,6 @@ if [[ "$PROFILE" == "full" ]]; then
         [[ $probe_rc -ne 0 ]] && fail=$((fail + 1))
     done
 
-    # Library custody status (controller only)
-    custody_fail=0
-    _check_library_custody || custody_fail=$?
-    fail=$((fail + custody_fail))
-
-    # Knowledge-index node capabilities (all profiles)
-    ki_cap_fail=0
-    _check_ki_capabilities || ki_cap_fail=$?
-    [[ $ki_cap_fail -ne 0 ]] && fail=$((fail + 1))
-
     # Port binding audit (local containers: 0.0.0.0 vs 127.0.0.1)
     port_exp_fail=0
     _check_port_exposure || port_exp_fail=$?
@@ -1627,16 +1251,6 @@ if [[ "$PROFILE" == "full" ]]; then
     net_bind_fail=0
     _check_controller_net_binding || net_bind_fail=$?
     fail=$((fail + net_bind_fail))
-
-    # Worker join state files and controller reachability (non-controller nodes only)
-    worker_state_fail=0
-    _check_worker_state_files || worker_state_fail=$?
-    fail=$((fail + worker_state_fail))
-
-    # Node heartbeat ages from KI registry (controller only)
-    hb_age_fail=0
-    _check_node_heartbeat_ages || hb_age_fail=$?
-    fail=$((fail + hb_age_fail))
 fi
 
 echo ""

@@ -96,7 +96,6 @@ _svc_state() {
         case "$svc" in
             ollama)          port=11434; path="" ;;
             promtail)        port=9080;  path="/metrics" ;; # /ready → 500 when scrape_configs is empty
-            knowledge-index) port=$(jq -r '.services["knowledge-index"].ports[0].host // 8000' "$CONFIG_FILE" 2>/dev/null || echo 8000); path="/health" ;;
             qdrant)          port=6333;  path="/healthz" ;;
             *)               echo "unknown"; return ;;
         esac
@@ -128,7 +127,6 @@ _svc_url() {
         qdrant)          echo "https://qdrant.stack.localhost" ;;
         minio)           echo "https://minio.stack.localhost" ;;
         homepage)        echo "https://dashboard.stack.localhost" ;;
-        knowledge-index) echo "https://ki.stack.localhost" ;;
         traefik)         echo "http://localhost:8080" ;;
         postgres)        echo "localhost:5432" ;;
         ollama)          echo "http://localhost:11434" ;;
@@ -146,7 +144,6 @@ _svc_category() {
         openwebui|flowise|homepage)       echo "Applications" ;;
         traefik)                          echo "Edge & Routing" ;;
         litellm|ollama|vllm)              echo "Model Serving" ;;
-        knowledge-index)                  echo "Knowledge / RAG" ;;
         postgres|qdrant|minio)            echo "Storage & Data" ;;
         grafana|prometheus|loki|promtail) echo "Observability & Metrics" ;;
         *)                                echo "Other" ;;
@@ -167,92 +164,6 @@ _svc_health() {
     local svc="$1" state="$2"
     if [[ "$state" == "active" && -f "$QUADLET_DIR/${svc}.container" ]]; then
         podman inspect --format '{{.State.Health.Status}}' "$svc" 2>/dev/null || true
-    fi
-}
-
-# Returns heartbeat status string for worker nodes.
-# Checks timer/launchd state and recent POST failure signals.
-_heartbeat_status() {
-    local STATE_DIR="$HOME/.config/ai-stack"
-
-    if [[ ! -f "$STATE_DIR/controller_url" || ! -f "$STATE_DIR/node_id" ]]; then
-        echo "not joined"
-        return 0
-    fi
-
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        # macOS — launchd
-        local plist="$HOME/Library/LaunchAgents/com.ai-stack.heartbeat.plist"
-        if [[ ! -f "$plist" ]]; then
-            echo "FAIL  (plist missing — re-run: bash scripts/bootstrap.sh)"
-            return 0
-        fi
-        local _uid; _uid=$(id -u)
-        local _lc_state="not loaded" _dom _lc_out
-        for _dom in "gui/$_uid" "user/$_uid"; do
-            _lc_out=$(launchctl print "${_dom}/com.ai-stack.heartbeat" 2>/dev/null || true)
-            if [[ -n "$_lc_out" ]]; then
-                _lc_state=$(awk '/[[:space:]]state[[:space:]]=/{print $3; exit}' <<< "$_lc_out")
-                break
-            fi
-        done
-        # Check log for recent POST failures
-        local log_warn=""
-        local log_file="$STATE_DIR/heartbeat.log"
-        if [[ -f "$log_file" ]]; then
-            log_warn=$(tail -20 "$log_file" 2>/dev/null | grep -i "WARNING" | tail -1 || true)
-        fi
-        if [[ "$_lc_state" == "waiting" || "$_lc_state" == "running" ]]; then
-            if [[ -n "$log_warn" ]]; then
-                echo "WARN  (launchd active, POST failures in log — see $log_file)"
-            else
-                echo "OK  (launchd active, state: ${_lc_state})"
-            fi
-        else
-            echo "FAIL  (launchd state: ${_lc_state:-not loaded} — re-run: bash scripts/bootstrap.sh)"
-        fi
-    else
-        # Linux — systemd
-        local timer_state
-        timer_state=$(systemctl --user is-active ai-stack-heartbeat.timer 2>/dev/null || echo "inactive")
-        if [[ "$timer_state" != "active" ]]; then
-            local enabled
-            enabled=$(systemctl --user is-enabled ai-stack-heartbeat.timer 2>/dev/null || echo "disabled")
-            echo "FAIL  (timer ${timer_state}/${enabled} — run: systemctl --user enable --now ai-stack-heartbeat.timer)"
-            return 0
-        fi
-
-        # Last trigger time (relative)
-        local last_age="never fired"
-        local last_usec
-        last_usec=$(systemctl --user show ai-stack-heartbeat.timer \
-            --property=LastTriggerUSec --value 2>/dev/null || echo "0")
-        if [[ "$last_usec" =~ ^[1-9][0-9]{6,}$ ]]; then
-            local now_usec age_s
-            now_usec=$(date +%s%6N 2>/dev/null || echo "0")
-            if [[ "$now_usec" =~ ^[0-9]+$ && "$now_usec" -gt 0 ]]; then
-                age_s=$(( (now_usec - last_usec) / 1000000 ))
-                [[ $age_s -lt 0 ]] && age_s=0
-                if   [[ $age_s -lt 60   ]]; then last_age="${age_s}s ago"
-                elif [[ $age_s -lt 3600 ]]; then last_age="$((age_s / 60))m ago"
-                else                             last_age="$((age_s / 3600))h ago"
-                fi
-            fi
-        fi
-
-        # Check journal for recent POST failures.
-        # heartbeat.sh exits 0 even on curl fail, so failure is only visible
-        # as a WARNING line in the service output — not in systemd's Result.
-        local warn_line=""
-        warn_line=$(journalctl --user -u ai-stack-heartbeat.service -n 10 \
-            --no-pager --output=cat 2>/dev/null | grep -i "WARNING" | tail -1 || true)
-        if [[ -n "$warn_line" ]]; then
-            echo "WARN  (timer active, POST failures detected, last: ${last_age} — journalctl --user -u ai-stack-heartbeat.service)"
-        elif [[ "$last_usec" == "0" ]]; then
-            echo "WARN  (timer active, no runs recorded yet)"
-        else
-            echo "OK  (timer active, last: ${last_age})"
-        fi
     fi
 }
 
@@ -318,18 +229,12 @@ net_name=$(jq -r '.network.name' "$CONFIG_FILE")
 # Filter services to those expected for this node profile
 case "$(_get_node_profile)" in
     inference-worker)          _profile_svcs='["ollama","promtail"]' ;;
-    enhanced-worker|knowledge-worker)  _profile_svcs='["ollama","promtail","knowledge-index","qdrant"]' ;;
+    enhanced-worker|knowledge-worker)  _profile_svcs='["ollama","promtail","qdrant"]' ;;
     *)                         _profile_svcs='null' ;;  # controller/peer: all services
 esac
 
-# TODO(m2m-gateway): remove _SKIP_SVCS exclusion once m2m-gateway is complete
-# To restore: delete the two _SKIP_SVCS lines and the select() filters below,
-# then revert the jq expressions to their original forms.
-_SKIP_SVCS='["m2m-gateway"]'
-
 if [[ "$_profile_svcs" == "null" ]]; then
-    mapfile -t services < <(jq -r --argjson skip "$_SKIP_SVCS" \
-        '.services | keys[] | select(. as $k | $skip | index($k) == null)' "$CONFIG_FILE")
+    mapfile -t services < <(jq -r '.services | keys[]' "$CONFIG_FILE")
 else
     mapfile -t services < <(jq -r --argjson svcs "$_profile_svcs" \
         '.services | keys[] | select(. as $k | $svcs | index($k) != null)' "$CONFIG_FILE")
@@ -398,12 +303,6 @@ if ! $QUIET; then
     printf "  %-${col}s %s\n" "node profile" "$(_get_node_profile)"
     printf "  %-${col}s %s\n" "deploy mode" "$_deploy_mode"
 
-    # Heartbeat (worker nodes only — controller has no heartbeat timer)
-    if [[ "$(_get_node_profile)" != "controller" ]]; then
-        _hb_out=$(_heartbeat_status 2>/dev/null || echo "unavailable")
-        printf "  %-${col}s %s\n" "heartbeat" "$_hb_out"
-    fi
-
     # Network and secrets — only relevant when podman is in use
     if [[ $_quadlet_svc_count -gt 0 ]]; then
         if podman network exists "$net_name" 2>/dev/null; then
@@ -412,10 +311,10 @@ if ! $QUIET; then
             printf "  %-${col}s %s\n" "network/${net_name}" "MISSING"
         fi
 
-        # Secrets summary — scoped to profile services (excludes _SKIP_SVCS)
+        # Secrets summary — scoped to profile services
         if [[ "$_profile_svcs" == "null" ]]; then
-            mapfile -t all_secrets < <(jq -r --argjson skip "$_SKIP_SVCS" \
-                '[.services | to_entries[] | select(.key as $k | $skip | index($k) == null) | .value.secrets[]?.name] | unique[]' \
+            mapfile -t all_secrets < <(jq -r \
+                '[.services | to_entries[] | .value.secrets[]?.name] | unique[]' \
                 "$CONFIG_FILE" 2>/dev/null || true)
         else
             mapfile -t all_secrets < <(jq -r --argjson svcs "$_profile_svcs" \

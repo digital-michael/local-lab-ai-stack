@@ -217,7 +217,7 @@ do_restore() {
     run systemctl --user stop \
         flowise.service openwebui.service grafana.service prometheus.service \
         loki.service promtail.service litellm.service vllm.service llamacpp.service \
-        knowledge-index.service authentik.service qdrant.service postgres.service \
+        authentik.service qdrant.service postgres.service \
         traefik.service 2>/dev/null || true
 
     # --- PostgreSQL restore ---

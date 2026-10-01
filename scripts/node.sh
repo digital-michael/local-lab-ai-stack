@@ -1,38 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# node.sh — Node lifecycle management for AI Stack workers
+# node.sh — Node operations for AI Stack workers
 #
 # Usage: node.sh <command> [options]
 #
 # Commands:
-#   deploy                        Deploy the knowledge-index container on this worker
-#   join    --controller <url> --token <token> [--node-id <id>] [--address <url>]
-#                                 Register this worker with the controller
-#   unjoin  [--controller <url>] [--node-id <id>]
-#                                 Remove this worker from the controller
-#   purge   [--node-id <id>] [--older-than <minutes>] [--dry-run] [--force]
-#                                 Hard-delete offline nodes (or a specific node) from the registry
-#   rename  --node-id <id> [--new-id <id>] [--display-name <text>]
-#                                 Rename a node's id and/or display name (admin)
-#   pause                         (stub) Pause heartbeats without unjoining
-#   list    [--headscale-url <url>] [--headscale-key <key>]   List nodes (headscale backend, preferred)
-#           [--controller <url>] [--api-key <key>]             List nodes (KI backend, legacy)
-#           [--namespace <tag>] [--json] [-v] [-m]             Filter/format flags
-#   status  [--node-id <id>]      Show this node's status from the controller
-#   suggestions list   [--node-id <id>]
-#   suggestions show   <suggestion-id> [--node-id <id>]
-#   suggestions apply  <suggestion-id> [--node-id <id>]
-#                                 Manage controller suggestions for this node
-#   configure                      Write ~/.config/ai-stack/node-config.json from local state + Ollama
+#   list    [--headscale-url <url>] [--headscale-key <key>]   List nodes (headscale)
+#           [--namespace <tag>] [--refresh] [--json] [-v] [-m] Filter/format flags
 #   remote  <node> <cmd> [args...]
 #                                 Run a command on a worker via SSH (tailnet → LAN fallback)
 #   harden-worker --alias <alias> [--controller-ip <ip>]
 #                                 Print OS-appropriate firewall rules to restrict Ollama :11434
 #                                 on an inference-worker to controller access only
 #                                 (--node-id <id> also accepted for backward compat)
-#   undeploy                      Remove the knowledge-index container
 #   help                          Show this message
+#
+# The controller node registry (join/unjoin/purge/rename/status/suggestions,
+# configure, deploy/undeploy, heartbeats) lived in the Python Knowledge Index
+# and was removed with it on 2026-09-30 (D-045).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="${AI_STACK_NODE_DIR:-$HOME/.config/ai-stack}"
@@ -46,45 +32,21 @@ usage() {
 Usage: node.sh <command> [options]
 
 Commands:
-  deploy                         Deploy knowledge-index on this worker node
-  join    --controller <url> \
-          --token <token>        Register with the controller (token from generate-join-token)
-          [--node-id <id>]       Node ID (default: hostname -s)
-          [--alias <alias>]      Stable alias matching configs/nodes/<alias>.json (optional)
-          [--address <url>]      This node's KI base URL (default: auto-detect)
-  unjoin  [--controller <url>]   Remove this node from controller routing
-          [--node-id <id>]
-  purge   [--node-id <id>]       Hard-delete a specific node regardless of status (prompts unless --force)
-          [--older-than <min>]   Bulk: purge offline nodes last seen > N minutes ago (default: all offline)
-          [--dry-run]            Show candidates without deleting
-          [--force]              Skip confirmation prompt
-  rename  --node-id <id>          Rename a node (at least one of --new-id or --display-name required)
-          [--new-id <new>]        New node id (applied on next heartbeat via heartbeat.sh auto-update)
-          [--display-name <text>] New display name (applied immediately)
-  pause                          Stub: pause heartbeats temporarily
-  configure                      Write node-config.json from local environment (run on each worker)
-  list    [--headscale-url <url>] [--headscale-key <key>]  List nodes from headscale (preferred)
-          [--controller <url>] [--api-key <key>]           Or from KI controller (legacy)
+  list    [--headscale-url <url>] [--headscale-key <key>]  List nodes from headscale
           [--namespace <tag>]                              Filter by namespace tag
           [--refresh]                                      SSH-pull node-config.json from each online node
           [--cache-dir <dir>]                              Override cache dir (default: ~/.config/ai-stack/nodes/)
           [--json]                                         Machine-readable JSON output
           [-v] [-m]                                        -v: verbose, -m: names+messages only
-  status  [--node-id <id>]       Show node status from controller
-  suggestions list               List pending suggestions
-  suggestions show <id>          Show suggestion detail
-  suggestions apply <id>         Mark suggestion consumed
-  configure                      Write node-config.json from local environment (run on each worker)
   remote  <node> <cmd> [args...] Run a command on a remote worker via SSH
                                   Primary: tailnet IP (tailscale status); fallback: LAN IP
   harden-worker --alias <alias> \
           [--controller-ip <ip>] Print OS-appropriate firewall rules to restrict Ollama :11434
                                  on the target inference-worker to controller access only
           [--node-id <id>]       Backward compat: locate node by node_id instead of alias
-  undeploy                       Stop and remove knowledge-index container
   help                           This message
 
-State file: ~/.config/ai-stack/{controller_url,node_id,api_key}
+Headscale state: ~/.config/ai-stack/{headscale_url,headscale_key}
 EOF
 }
 
@@ -102,547 +64,6 @@ _load_state() {
     if [[ -f "$STATE_DIR/api_key" ]]; then
         API_KEY_STATE="${API_KEY_STATE:-$(cat "$STATE_DIR/api_key")}"
     fi
-}
-
-_save_state() {
-    mkdir -p "$STATE_DIR"
-    [[ -n "${CONTROLLER_URL:-}" ]] && printf '%s' "$CONTROLLER_URL" > "$STATE_DIR/controller_url"
-    [[ -n "${NODE_ID:-}"        ]] && printf '%s' "$NODE_ID"        > "$STATE_DIR/node_id"
-    [[ -n "${API_KEY_STATE:-}"  ]] && printf '%s' "$API_KEY_STATE"  > "$STATE_DIR/api_key"
-}
-
-_require_controller() {
-    if [[ -z "${CONTROLLER_URL:-}" ]]; then
-        echo "ERROR: --controller required (or set CONTROLLER_URL env var)" >&2
-        exit 1
-    fi
-}
-
-_require_node_id() {
-    if [[ -z "${NODE_ID:-}" ]]; then
-        NODE_ID="$(hostname -s)"
-    fi
-}
-
-_api_key_header() {
-    if [[ -n "${API_KEY_STATE:-}" ]]; then
-        echo "Authorization: Bearer $API_KEY_STATE"
-    else
-        echo ""
-    fi
-}
-
-_curl_admin() {
-    # _curl_admin <method> <path> [body]
-    local method="$1"
-    local path="$2"
-    local body="${3:-}"
-    local hdr
-    hdr=$(_api_key_header)
-
-    local args=(-s -w "\n%{http_code}" -X "$method" --insecure)   # self-signed CA; API key provides endpoint auth
-    [[ -n "$hdr" ]] && args+=(-H "$hdr")
-    [[ -n "$body" ]] && args+=(-H "Content-Type: application/json" -d "$body")
-
-    curl "${args[@]}" "${CONTROLLER_URL}${path}"
-}
-
-# ---------------------------------------------------------------------------
-# Commands
-# ---------------------------------------------------------------------------
-
-cmd_deploy() {
-    echo "Deploying knowledge-index on this worker..."
-    if ! command -v podman &>/dev/null; then
-        echo "ERROR: podman not found" >&2; exit 1
-    fi
-    # Source NODE_PROFILE so the container knows it's a worker
-    local image
-    image=$(podman images --format '{{.Repository}}:{{.Tag}}' \
-            | grep "knowledge-index" | head -1 || true)
-    if [[ -z "$image" ]]; then
-        echo "ERROR: No knowledge-index image found. Build it first:" >&2
-        echo "  podman build -t knowledge-index services/knowledge-index/" >&2
-        exit 1
-    fi
-    echo "  Image: $image"
-    podman run -d --name knowledge-index \
-        -p 8100:8100 \
-        -e NODE_PROFILE=knowledge-worker \
-        -e NODE_NAME="$(hostname -s)" \
-        "$image"
-    echo "knowledge-index deployed."
-}
-
-cmd_join() {
-    local token=""
-    local node_alias=""
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --controller) CONTROLLER_URL="$2"; shift 2 ;;
-            --token)      token="$2";          shift 2 ;;
-            --node-id)    NODE_ID="$2";        shift 2 ;;
-            --alias)      node_alias="$2";     shift 2 ;;
-            --address)    local address="$2";  shift 2 ;;
-            *)            echo "Unknown option: $1" >&2; exit 1 ;;
-        esac
-    done
-
-    _require_controller
-    _require_node_id
-    [[ -z "$token" ]] && { echo "ERROR: --token required" >&2; exit 1; }
-
-    # Auto-detect address if not provided
-    if [[ -z "${address:-}" ]]; then
-        local ip
-        if [[ "$(uname -s)" == "Darwin" ]]; then
-            # macOS: hostname -I not available; use ipconfig getifaddr or route
-            ip=$(ipconfig getifaddr en0 2>/dev/null \
-                 || ipconfig getifaddr en1 2>/dev/null \
-                 || route -n get default 2>/dev/null | awk '/interface:/{print $2}' \
-                 || echo "127.0.0.1")
-        else
-            ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
-        fi
-        address="http://${ip}:8100"
-    fi
-
-    local body
-    body=$(python3 -c "
-import json, sys
-obj = {'token': sys.argv[1], 'address': sys.argv[2]}
-if sys.argv[3]:
-    obj['alias'] = sys.argv[3]
-print(json.dumps(obj))
-" "$token" "$address" "${node_alias:-}")
-
-    local response http_code body_part
-    response=$(_curl_admin POST "/admin/v1/nodes/${NODE_ID}/join" "$body") || {
-        echo "ERROR: Failed to reach controller at ${CONTROLLER_URL}" >&2; exit 1
-    }
-    http_code=$(echo "$response" | tail -1)
-    body_part=$(echo "$response" | sed '$d')
-
-    if [[ "$http_code" != "200" ]]; then
-        echo "ERROR: Join failed (HTTP $http_code):" >&2
-        echo "$body_part" >&2
-        exit 1
-    fi
-
-    echo "Joined controller successfully:"
-    echo "$body_part" | python3 -m json.tool 2>/dev/null || echo "$body_part"
-    echo ""
-
-    # Extract and persist the per-node API key issued by the controller
-    local node_api_key
-    node_api_key=$(echo "$body_part" \
-        | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('node_api_key',''))" \
-        2>/dev/null || true)
-    [[ -n "$node_api_key" ]] && API_KEY_STATE="$node_api_key"
-
-    _save_state
-    [[ -n "${node_alias:-}" ]] && printf '%s' "$node_alias" > "$STATE_DIR/alias"
-    echo "State saved to $STATE_DIR"
-}
-
-cmd_unjoin() {
-    _load_state
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --controller) CONTROLLER_URL="$2"; shift 2 ;;
-            --node-id)    NODE_ID="$2";        shift 2 ;;
-            *)            echo "Unknown option: $1" >&2; exit 1 ;;
-        esac
-    done
-
-    _require_controller
-    _require_node_id
-
-    local response http_code body_part
-    response=$(_curl_admin DELETE "/admin/v1/nodes/${NODE_ID}") || {
-        echo "ERROR: Failed to reach controller at ${CONTROLLER_URL}" >&2; exit 1
-    }
-    http_code=$(echo "$response" | tail -1)
-    body_part=$(echo "$response" | sed '$d')
-
-    if [[ "$http_code" != "200" ]]; then
-        echo "ERROR: Unjoin failed (HTTP $http_code):" >&2
-        echo "$body_part" >&2
-        exit 1
-    fi
-
-    echo "Node unjoined:"
-    echo "$body_part" | python3 -m json.tool 2>/dev/null || echo "$body_part"
-}
-
-cmd_pause() {
-    echo "(stub) pause — heartbeat suspension not yet implemented" >&2
-    echo "To stop this node from routing: node.sh unjoin"
-}
-
-cmd_purge() {
-    _load_state
-    local node_id_arg="" older_than="" dry_run=0 force=0
-
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --controller)   CONTROLLER_URL="$2"; shift 2 ;;
-            --api-key)      API_KEY_STATE="$2";  shift 2 ;;
-            --node-id)      node_id_arg="$2";    shift 2 ;;
-            --older-than)   older_than="$2";     shift 2 ;;
-            --dry-run)      dry_run=1;           shift   ;;
-            --force)        force=1;             shift   ;;
-            *)              echo "Unknown option: $1" >&2; exit 1 ;;
-        esac
-    done
-
-    _require_controller
-
-    # Fetch current node list
-    local response http_code body_part
-    response=$(_curl_admin GET "/admin/v1/nodes") || {
-        echo "ERROR: Failed to reach controller at ${CONTROLLER_URL}" >&2; exit 1
-    }
-    http_code=$(echo "$response" | tail -1)
-    body_part=$(echo "$response" | sed '$d')
-    if [[ "$http_code" != "200" ]]; then
-        echo "ERROR: Could not fetch node list (HTTP $http_code)" >&2; exit 1
-    fi
-
-    local _tmp; _tmp=$(mktemp)
-    echo "$body_part" > "$_tmp"
-    local _node_id_arg="$node_id_arg"
-    local _older_than="$older_than"
-
-    # Build candidate list — tab-separated: node_id, display_name, status, last_seen
-    local candidates
-    candidates=$(python3 - "$_tmp" "$_node_id_arg" "$_older_than" <<'PYEOF' 2>&1
-import json, sys, datetime
-
-now  = datetime.datetime.now(datetime.timezone.utc)
-data = json.load(open(sys.argv[1]))
-nodes        = data.get('nodes', [])
-node_id_arg  = sys.argv[2]
-older_than   = sys.argv[3]  # minutes, or ""
-
-def parse_ts(s):
-    for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S',
-                '%Y-%m-%dT%H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S'):
-        try:
-            return datetime.datetime.strptime(s[:26], fmt).replace(
-                       tzinfo=datetime.timezone.utc)
-        except ValueError:
-            pass
-    return None
-
-results = []
-if node_id_arg:
-    match = next((n for n in nodes if n['node_id'] == node_id_arg), None)
-    if not match:
-        print('ERROR: node not found: ' + node_id_arg, file=sys.stderr)
-        sys.exit(1)
-    results.append(match)
-else:
-    for n in nodes:
-        if n.get('status') != 'offline':
-            continue
-        if older_than:
-            ls = n.get('last_seen', '')
-            if not ls:
-                continue
-            dt = parse_ts(ls)
-            if dt is None:
-                continue
-            if (now - dt).total_seconds() / 60 < float(older_than):
-                continue
-        results.append(n)
-
-for n in results:
-    ls = (n.get('last_seen') or '')[:19]
-    print(n['node_id'] + '\t' + n.get('display_name', '') + '\t' +
-          n.get('status', '') + '\t' + ls)
-PYEOF
-    )
-    local py_exit=$?
-    rm -f "$_tmp"
-    if [[ $py_exit -ne 0 ]]; then echo "$candidates" >&2; exit 1; fi
-
-    if [[ -z "$candidates" ]]; then
-        echo "No nodes match the purge criteria."
-        exit 0
-    fi
-
-    # Display candidates
-    echo "Nodes to be purged:"
-    echo ""
-    printf "  %-24s  %-20s  %-12s  %s\n" "NODE ID" "DISPLAY NAME" "STATUS" "LAST SEEN"
-    printf "  %-24s  %-20s  %-12s  %s\n" "------------------------" "--------------------" "------------" "-------------------"
-    while IFS=$'\t' read -r nid dname status ls; do
-        printf "  %-24s  %-20s  %-12s  %s\n" "$nid" "$dname" "$status" "$ls"
-    done <<< "$candidates"
-    echo ""
-
-    if [[ $dry_run -eq 1 ]]; then
-        echo "(dry-run — no changes made)"
-        exit 0
-    fi
-
-    # Confirm unless --force
-    if [[ $force -eq 0 ]]; then
-        local count ans
-        count=$(echo "$candidates" | wc -l | tr -d ' ')
-        read -r -p "Permanently delete ${count} node(s)? This cannot be undone. [y/N] " ans
-        [[ "$ans" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
-    fi
-
-    # Execute purge
-    local failed=0
-    while IFS=$'\t' read -r nid _rest; do
-        local del_resp del_http del_body
-        del_resp=$(_curl_admin DELETE "/admin/v1/nodes/${nid}/purge") || {
-            echo "  ERROR: request failed for ${nid}" >&2; failed=1; continue
-        }
-        del_http=$(echo "$del_resp" | tail -1)
-        del_body=$(echo "$del_resp" | sed '$d')
-        if [[ "$del_http" == "200" ]]; then
-            echo "  purged: ${nid}"
-        else
-            echo "  ERROR: ${nid} — HTTP ${del_http}: ${del_body}" >&2
-            failed=1
-        fi
-    done <<< "$candidates"
-
-    [[ $failed -eq 0 ]] && echo "" && echo "Done."
-    exit $failed
-}
-
-cmd_rename() {
-    _load_state
-    local target_node_id="" new_id="" display_name=""
-
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --controller)    CONTROLLER_URL="$2"; shift 2 ;;
-            --api-key)       API_KEY_STATE="$2";  shift 2 ;;
-            --node-id)       target_node_id="$2"; shift 2 ;;
-            --new-id)        new_id="$2";         shift 2 ;;
-            --display-name)  display_name="$2";   shift 2 ;;
-            *)               echo "Unknown option: $1" >&2; exit 1 ;;
-        esac
-    done
-
-    _require_controller
-
-    if [[ -z "$target_node_id" ]]; then
-        echo "ERROR: --node-id required" >&2; exit 1
-    fi
-    if [[ -z "$new_id" && -z "$display_name" ]]; then
-        echo "ERROR: at least one of --new-id or --display-name required" >&2; exit 1
-    fi
-
-    # Show summary of what will change
-    echo "Node rename summary:"
-    echo "  Current node-id:    $target_node_id"
-    [[ -n "$new_id" ]]       && echo "  New node-id:        $new_id"
-    [[ -n "$display_name" ]] && echo "  New display name:   $display_name"
-    if [[ -n "$new_id" ]]; then
-        echo ""
-        echo "  NOTE: the id change takes effect on the node's next heartbeat (≤30s)."
-        echo "        heartbeat.sh will update ~/.config/ai-stack/node_id automatically."
-    fi
-    echo ""
-
-    local ans
-    read -r -p "Apply rename? [y/N] " ans
-    [[ "$ans" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
-
-    # Build JSON payload safely
-    local payload
-    payload=$(python3 -c "
-import json, sys
-obj = {}
-new_id       = sys.argv[1]
-display_name = sys.argv[2]
-if new_id:       obj['new_id']       = new_id
-if display_name: obj['display_name'] = display_name
-print(json.dumps(obj))
-" "$new_id" "$display_name")
-
-    local response http_code body_part
-    response=$(_curl_admin PATCH "/admin/v1/nodes/${target_node_id}/rename" "$payload") || {
-        echo "ERROR: request failed" >&2; exit 1
-    }
-    http_code=$(echo "$response" | tail -1)
-    body_part=$(echo "$response" | sed '$d')
-
-    if [[ "$http_code" == "200" ]]; then
-        echo "Done."
-        [[ -n "$new_id" ]] && echo "  Waiting for node to pick up rename on next heartbeat..."
-    else
-        echo "ERROR: rename failed (HTTP $http_code):" >&2
-        echo "$body_part" >&2
-        exit 1
-    fi
-}
-
-# ---------------------------------------------------------------------------
-# cmd_configure — write node-config.json from local state
-# ---------------------------------------------------------------------------
-
-cmd_configure() {
-    _load_state
-    _require_node_id
-
-    local out_file="$STATE_DIR/node-config.json"
-    local _cli_controller_url=""
-    local _cli_bearer_token=""
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --controller-url) _cli_controller_url="$2"; shift 2 ;;
-            --bearer-token)   _cli_bearer_token="$2";   shift 2 ;;
-            *) shift ;;
-        esac
-    done
-    mkdir -p "$STATE_DIR"
-
-    # --- Determine OS ---
-    local os_type="linux"
-    [[ "$(uname -s)" == "Darwin" ]] && os_type="darwin"
-
-    # --- Load alias from state (written by node.sh join) ---
-    local alias_val=""
-    [[ -f "$STATE_DIR/alias" ]] && alias_val="$(cat "$STATE_DIR/alias" 2>/dev/null || true)"
-
-    # --- Detect profile from state, then static node file, then default ---
-    local profile_val="inference-worker"
-    if [[ -f "$STATE_DIR/profile" ]]; then
-        profile_val="$(cat "$STATE_DIR/profile" 2>/dev/null || true)"
-    else
-        # Try to match from configs/nodes/ by alias or node_id
-        local _nodes_dir="$SCRIPT_DIR/../configs/nodes"
-        local _matched_profile=""
-        if [[ -d "$_nodes_dir" ]]; then
-            _matched_profile=$(python3 - "$_nodes_dir" "${alias_val:-}" "${NODE_ID:-}" <<'PYEOF2' 2>/dev/null
-import glob, json, sys
-ndir, alias_val, nid = sys.argv[1], sys.argv[2], sys.argv[3]
-for f in glob.glob(ndir + '/*.json'):
-    try:
-        d = json.load(open(f))
-        if (alias_val and d.get('alias') == alias_val) or (nid and d.get('node_id') == nid):
-            print(d.get('profile', ''))
-            break
-    except Exception:
-        pass
-PYEOF2
-            )
-        fi
-        [[ -n "$_matched_profile" ]] && profile_val="$_matched_profile"
-    fi
-
-    # --- Detect deployment mode ---
-    local deployment="bare_metal"
-    if command -v systemctl &>/dev/null && systemctl --user list-units --type=service 2>/dev/null | grep -q 'knowledge-index'; then
-        deployment="container"
-    fi
-
-    # --- Probe Ollama models ---
-    local models_json="[]"
-    if command -v curl &>/dev/null; then
-        local ollama_resp
-        ollama_resp=$(curl -s --connect-timeout 3 http://localhost:11434/api/tags 2>/dev/null || echo '')
-        if [[ -n "$ollama_resp" ]]; then
-            models_json=$(echo "$ollama_resp" | python3 -c "
-import json,sys
-try:
-    d=json.load(sys.stdin)
-    print(json.dumps([m['name'] for m in d.get('models',[])]))
-except:
-    print('[]')
-" 2>/dev/null || echo '[]')
-        fi
-    fi
-
-    # --- Derive capabilities from profile ---
-    local caps_json
-    case "$profile_val" in
-        controller)         caps_json='["inference","knowledge","routing"]' ;;
-        knowledge-worker)   caps_json='["inference","knowledge"]' ;;
-        inference-worker)   caps_json='["inference"]' ;;
-        enhanced-worker)    caps_json='["inference","knowledge"]' ;;
-        *)                  caps_json='[]' ;;
-    esac
-
-    local ts
-    ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || python3 -c "import datetime; print(datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'))")
-
-    # --- Resolve controller_url (BL-015) ---
-    # Priority: --controller-url flag → config.json tailnet.controller_url → GET /v1/config discovery
-    local controller_url_val=""
-    if [[ -n "$_cli_controller_url" ]]; then
-        controller_url_val="$_cli_controller_url"
-    else
-        # Try config.json (controller node only)
-        local _cfg_controller_url=""
-        local _cfg_path="$SCRIPT_DIR/../configs/config.json"
-        if [[ -f "$_cfg_path" ]]; then
-            _cfg_controller_url=$(python3 -c "
-import json, sys
-try:
-    d = json.load(open(sys.argv[1]))
-    print(d.get('tailnet', {}).get('controller_url', ''))
-except Exception:
-    print('')
-" "$_cfg_path" 2>/dev/null || true)
-        fi
-        if [[ -n "$_cfg_controller_url" ]]; then
-            controller_url_val="$_cfg_controller_url"
-        else
-            # Attempt GET /v1/config discovery from hardcoded bootstrap IP
-            local _discovery_resp
-            _discovery_resp=$(curl -sk --connect-timeout 5 \
-                https://100.64.0.4:8443/v1/config 2>/dev/null || true)
-            if [[ -n "$_discovery_resp" ]]; then
-                controller_url_val=$(echo "$_discovery_resp" | python3 -c "
-import json, sys
-try: print(json.load(sys.stdin).get('controller_url', ''))
-except: print('')
-" 2>/dev/null || true)
-            fi
-        fi
-    fi
-
-    # Write bearer token to state if provided (workers provision this manually)
-    if [[ -n "$_cli_bearer_token" ]]; then
-        printf '%s' "$_cli_bearer_token" > "$STATE_DIR/network_bearer_token"
-    fi
-    # Read saved bearer token for inclusion in node-config.json
-    local network_bearer_token_val=""
-    [[ -f "$STATE_DIR/network_bearer_token" ]] && \
-        network_bearer_token_val="$(cat "$STATE_DIR/network_bearer_token" 2>/dev/null || true)"
-
-    python3 - > "$out_file" <<PYEOF
-import json
-out = {
-    "schema_version": "1.2",
-    "node_id":    "${NODE_ID}",
-    "alias":      "${alias_val}",
-    "profile":    "${profile_val}",
-    "os":         "$os_type",
-    "deployment": "$deployment",
-    "capabilities": ${caps_json},
-    "models":     ${models_json},
-    "version":    "1",
-    "updated_at": "$ts",
-    "network": {
-        "controller_url":  "${controller_url_val}",
-        "bearer_token":    "${network_bearer_token_val}",
-    },
-}
-print(json.dumps(out, indent=2))
-PYEOF
-
-    echo "[configure] wrote $out_file"
-    cat "$out_file"
 }
 
 # ---------------------------------------------------------------------------
@@ -670,8 +91,6 @@ cmd_list() {
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --controller)    CONTROLLER_URL="$2";    shift 2 ;;
-            --api-key)       API_KEY_STATE="$2";     shift 2 ;;
             --headscale-url) HS_URL="$2";            shift 2 ;;
             --headscale-key) HS_KEY="$2";            shift 2 ;;
             --namespace)     namespace_filter="$2";  shift 2 ;;
@@ -694,10 +113,8 @@ cmd_list() {
             echo "ERROR: Failed to reach headscale at ${HS_URL}" >&2; exit 1
         }
     else
-        _require_controller
-        response=$(_curl_admin GET "/admin/v1/nodes") || {
-            echo "ERROR: Failed to reach controller at ${CONTROLLER_URL}" >&2; exit 1
-        }
+        echo "ERROR: --headscale-url required (or saved headscale state in $STATE_DIR/headscale_url)" >&2
+        exit 1
     fi
 
     http_code=$(echo "$response" | tail -1)
@@ -1020,109 +437,6 @@ worker_count = len(rows) - ctrl_count
 print(f"Total: {len(rows)} node(s)  ({ctrl_count} controller, {worker_count} registered)")
 PYEOF
     rm -f "$_tmp"
-}
-
-cmd_status() {
-    _load_state
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --node-id) NODE_ID="$2"; shift 2 ;;
-            *)         echo "Unknown option: $1" >&2; exit 1 ;;
-        esac
-    done
-
-    _require_controller
-    _require_node_id
-
-    local response http_code body_part
-    response=$(_curl_admin GET "/admin/v1/nodes/${NODE_ID}") || {
-        echo "ERROR: Failed to reach controller at ${CONTROLLER_URL}" >&2; exit 1
-    }
-    http_code=$(echo "$response" | tail -1)
-    body_part=$(echo "$response" | sed '$d')
-
-    if [[ "$http_code" != "200" ]]; then
-        echo "ERROR: Status check failed (HTTP $http_code):" >&2
-        echo "$body_part" >&2
-        exit 1
-    fi
-
-    echo "$body_part" | python3 -m json.tool 2>/dev/null || echo "$body_part"
-}
-
-cmd_suggestions() {
-    _load_state
-    local subcmd="${1:-list}"
-    shift || true
-    local suggestion_id=""
-
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --node-id) NODE_ID="$2"; shift 2 ;;
-            *)         suggestion_id="$1"; shift ;;
-        esac
-    done
-
-    _require_controller
-    _require_node_id
-
-    case "$subcmd" in
-        list)
-            local response http_code body_part
-            response=$(_curl_admin GET "/admin/v1/nodes/${NODE_ID}/suggestions") || {
-                echo "ERROR: Cannot reach $CONTROLLER_URL" >&2; exit 1
-            }
-            http_code=$(echo "$response" | tail -1)
-            body_part=$(echo "$response" | sed '$d')
-            [[ "$http_code" != "200" ]] && { echo "ERROR HTTP $http_code: $body_part" >&2; exit 1; }
-            echo "$body_part" | python3 -m json.tool 2>/dev/null || echo "$body_part"
-            ;;
-        show)
-            [[ -z "$suggestion_id" ]] && { echo "Usage: node.sh suggestions show <id>" >&2; exit 1; }
-            local response http_code body_part
-            response=$(_curl_admin GET "/admin/v1/nodes/${NODE_ID}/suggestions") || {
-                echo "ERROR: Cannot reach $CONTROLLER_URL" >&2; exit 1
-            }
-            http_code=$(echo "$response" | tail -1)
-            body_part=$(echo "$response" | sed '$d')
-            [[ "$http_code" != "200" ]] && { echo "ERROR HTTP $http_code: $body_part" >&2; exit 1; }
-            echo "$body_part" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-sid = '$suggestion_id'
-for s in data.get('suggestions', []):
-    if s['id'] == sid:
-        print(json.dumps(s, indent=2))
-        sys.exit(0)
-print('Suggestion not found: ' + sid, file=sys.stderr)
-sys.exit(1)
-"
-            ;;
-        apply)
-            [[ -z "$suggestion_id" ]] && { echo "Usage: node.sh suggestions apply <id>" >&2; exit 1; }
-            local response http_code body_part
-            response=$(_curl_admin POST "/admin/v1/nodes/${NODE_ID}/suggestions/${suggestion_id}/consume") || {
-                echo "ERROR: Cannot reach $CONTROLLER_URL" >&2; exit 1
-            }
-            http_code=$(echo "$response" | tail -1)
-            body_part=$(echo "$response" | sed '$d')
-            [[ "$http_code" != "200" ]] && { echo "ERROR HTTP $http_code: $body_part" >&2; exit 1; }
-            echo "Applied:"
-            echo "$body_part" | python3 -m json.tool 2>/dev/null || echo "$body_part"
-            ;;
-        *)
-            echo "Unknown suggestions subcommand: $subcmd" >&2
-            echo "  node.sh suggestions list|show <id>|apply <id>" >&2
-            exit 1
-            ;;
-    esac
-}
-
-cmd_undeploy() {
-    echo "Stopping and removing knowledge-index container..."
-    podman stop knowledge-index 2>/dev/null || true
-    podman rm   knowledge-index 2>/dev/null || true
-    echo "Removed."
 }
 
 # ---------------------------------------------------------------------------
@@ -1450,18 +764,8 @@ PYEOF
 _load_state
 
 case "${1:-help}" in
-    deploy)         cmd_deploy ;;
-    configure)      cmd_configure "$@" ;;
-    join)           shift; cmd_join "$@" ;;
-    unjoin)         shift; cmd_unjoin "$@" ;;
-    pause)          cmd_pause ;;
-    purge)          shift; cmd_purge "$@" ;;
-    rename)         shift; cmd_rename "$@" ;;
     list)           shift; cmd_list "$@" ;;
-    status)         shift; cmd_status "$@" ;;
-    suggestions)    shift; cmd_suggestions "$@" ;;
     remote)         shift; cmd_remote "$@" ;;
-    undeploy)       cmd_undeploy ;;
     harden-worker)  shift; cmd_harden_worker "$@" ;;
     help|--help|-h) usage ;;
     *)
