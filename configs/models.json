@@ -151,6 +151,21 @@
       }
     },
     {
+      "id": "qwen3.8:27b",
+      "description": "qwen3.8:27b \u2014 CPU inference via Ollama",
+      "litellm_params": {
+        "model": "ollama_chat/qwen3.8:27b",
+        "api_base": "http://ollama.ai-stack:11434",
+        "api_key": "none",
+        "max_tokens": 4096
+      },
+      "model_info": {
+        "mode": "chat",
+        "input_cost_per_token": 0,
+        "output_cost_per_token": 0
+      }
+    },
+    {
       "id": "llama3.1:8b-instruct-q4_K_M",
       "description": "llama3.1:8b-instruct-q4_K_M \u2014 remote Ollama on macbook-m1",
       "litellm_params": {
