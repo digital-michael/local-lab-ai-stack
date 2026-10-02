@@ -334,6 +334,52 @@ touch /etc/dovecot/users
 chmod 640 /etc/dovecot/users
 chgrp dovecot /etc/dovecot/users
 
+# Fedora's dovecot package ships /etc/dovecot/dovecot.conf pre-populated
+# with its own "minimal configuration file using system user authentication"
+# template (its own comment, verbatim) -- including a default
+# `passdb pam {}` / `userdb passwd {}` pair for real Unix accounts. That is
+# a DIFFERENTLY NAMED block from the `passdb passwdfile {}` /
+# `userdb static_vmail {}` pair this script adds in 99-local.conf below, and
+# Dovecot does not let one named passdb/userdb block override another by
+# purpose -- distinctly named blocks just accumulate as a list, evaluated in
+# file order (dovecot.conf's own body first, conf.d/*.conf after, confirmed
+# via `doveconf -P`). The default pam passdb harmlessly falls through on
+# "user unknown" to reach ours (confirmed: `doveadm auth test` -- which only
+# exercises the passdb/credential-check step -- succeeded every time,
+# regardless of password, even while real logins kept failing). The
+# default `userdb passwd {}` does NOT fall through the same way for a
+# virtual user with no real Unix account: every actual IMAP LOGIN needs a
+# successful userdb lookup too (to resolve mailbox uid/gid/home), and that
+# one failed outright -- which is exactly why the password itself was never
+# the problem (confirmed by testing with a password change: doveadm auth
+# test kept succeeding, every real login kept 401'ing, identically before
+# and after).
+# Removed here rather than left in place: this host has no real Unix mail
+# accounts at all, so the whole system-user template section is dead
+# weight that actively conflicts with the virtual-mailbox design.
+DOVECOT_CONF="/etc/dovecot/dovecot.conf"
+cp "$DOVECOT_CONF" "${DOVECOT_CONF}.bak.$(date +%Y%m%d%H%M%S)"
+python3 - "$DOVECOT_CONF" <<'PYEOF'
+import re, sys
+path = sys.argv[1]
+with open(path) as f:
+    content = f.read()
+pattern = re.compile(
+    r"# Authenticate as system users:\n"
+    r"passdb pam \{\n\}\n"
+    r"\n"
+    r"userdb passwd \{\n\}\n"
+    r"\n"
+)
+if pattern.search(content):
+    content = pattern.sub("", content, count=1)
+    with open(path, "w") as f:
+        f.write(content)
+    print(f"Removed the default system-user passdb/userdb block from {path}")
+else:
+    print(f"{path} already has no default system-user passdb/userdb block — nothing to do")
+PYEOF
+
 # Dovecot 2.4 (this is the 2.4.x generation, not legacy 2.3) changed its
 # config syntax substantially from what's documented almost everywhere —
 # mail_location split into mail_driver/mail_path, passdb/userdb now require
