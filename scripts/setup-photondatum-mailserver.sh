@@ -530,6 +530,21 @@ if [[ ! -f "$RC_DB" ]]; then
 fi
 chown -R apache:apache "$RC_DATA_DIR" 2>/dev/null || chown -R caddy:caddy "$RC_DATA_DIR"
 
+# chown alone isn't enough: sqlite3 (run here as root) creates roundcube.db
+# at mode 0644 -- owner read-write, group/other READ ONLY. The php-fpm pool
+# below runs as user "caddy", reaching this file only via its apache group
+# membership (usermod -a -G apache caddy below), and group permission on
+# the FILE ITSELF (not just the 0770 directory, which was already fine)
+# still denies write -- confirmed directly: reads succeeded (login pages
+# loaded fine), but every write (e.g. auto-provisioning a mailbox's first
+# Roundcube user row) failed with sqlite's own "attempt to write a
+# readonly database", traced via a PDO test run from inside the actual
+# php-fpm worker. `find -type f` (not a plain `chmod -R` on the dir, which
+# would also flip the directory's own already-correct 0770 to something
+# else) covers the main .db file now and any -wal/-shm/-journal sidecar
+# files SQLite creates during a write.
+find "$RC_DATA_DIR" -type f -exec chmod 660 {} \;
+
 # The package ships /var/lib/roundcubemail and /var/log/roundcubemail owned
 # apache:apache mode 0770 (confirmed via a live install, not assumed), but
 # the PHP-FPM pool below runs as user/group "caddy" (there's no reason to
