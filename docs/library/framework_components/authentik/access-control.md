@@ -120,8 +120,20 @@ group name via `--team` (e.g. `--team "team-family"`).
 > is now `cap-superadmin` + `team-alpha` (was `bundle-admin`/`bundle-developer`/
 > `bundle-agent`/`bundle-agent-mcp`). `team-default`'s own OpenWebUI group
 > was created with a single-model grant (`qwen2.5-1.5b`, Michael's choice —
-> "the smaller qwen model"). See `output/CENTAURI-playbook.md` §13 L-44 for
-> the full build and the exact reasoning for each naming/wiring choice.
+> "the smaller qwen model").
+>
+> **2026-10-02, final cleanup.** All 8 `access-<slug>` policies' now-dead
+> `ak_is_group_member(request.user, name="bundle-*")` clauses (every
+> `bundle-*` name, not just `bundle-admin` — all four are equally deleted)
+> were removed — safe since `request.user.is_superuser` already covers
+> `cap-superadmin`/`team-cts` and every `cap-*` check already covers
+> everyone else. `access-forgejo`'s `forgejo-guest` clause was kept — that
+> group still exists, just parented now, not deleted. Every policy now
+> reads as just `request.user.is_superuser or
+> ak_is_group_member(request.user, name="cap-X")` (plus `forgejo-guest` on
+> `access-forgejo`) — no legacy names left anywhere in live policy code.
+> See `output/CENTAURI-playbook.md` §13 L-44 for the full build and the
+> exact reasoning for each naming/wiring choice.
 
 ---
 
