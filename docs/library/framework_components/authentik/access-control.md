@@ -23,13 +23,16 @@ regardless of their group membership.
 
 ## Groups
 
-`bundle-agent`/`bundle-agent-mcp`/`bundle-developer`/`bundle-admin` are
-**retired as of 2026-10-02** — see the dated notes below for the full
-capability/role/team rebuild. Current real groups:
+`bundle-agent`/`bundle-agent-mcp`/`bundle-developer`/`bundle-admin`/
+`forgejo-guest` are all **retired as of 2026-10-02** — see the dated notes
+below for the full capability/role/team rebuild. `forgejo-guest` was last
+to go (deleted separately, after confirming zero members/children/FK
+references — nothing used it in practice). Read-only Forgejo access is now
+purely a `cap-forgejo-guest` capability, available to wire into any future
+team, with no flat legacy group of its own anymore. Current real groups:
 
 | Group | Services included |
 |---|---|
-| `forgejo-guest` | git.photondatum.space (read-only public repos, no forks) — still a standalone flat group, now also wired into the `cap-*` hierarchy (parent: `cap-forgejo-guest`) |
 | `team-default` | agent.photondatum.space only, curated single-model subset — the default landing group for the generic `invitation-enrollment` flow (replaces `bundle-agent`'s old role) |
 | `team-guest` | agent.photondatum.space only — for external guests/testers invited via the `enrollment-agent-only` flow (renamed from `agent-only`, 2026-10-02) |
 | `team-family` | agent.photondatum.space only — invited via `enrollment-family-group` (see `scripts/provision-user.sh`); renamed from `Family Group`, 2026-10-02 |
@@ -38,8 +41,7 @@ capability/role/team rebuild. Current real groups:
 
 New invited users (the generic `invitation-enrollment` flow, not a
 team-specific one) land in `team-default` by default; akadmin promotes as
-needed. `forgejo-guest` is for external collaborators who need read-only
-repo access without full developer access. `team-guest`/`team-family`/
+needed. `team-guest`/`team-family`/
 `team-alpha` are self-contained teams with their own dedicated invitation
 flow, granted access to `agent` via a **direct Group PolicyBinding** on the
 Application — see the Registered Applications note below. Provisioning a
@@ -130,8 +132,18 @@ group name via `--team` (e.g. `--team "team-family"`).
 > everyone else. `access-forgejo`'s `forgejo-guest` clause was kept — that
 > group still exists, just parented now, not deleted. Every policy now
 > reads as just `request.user.is_superuser or
-> ak_is_group_member(request.user, name="cap-X")` (plus `forgejo-guest` on
-> `access-forgejo`) — no legacy names left anywhere in live policy code.
+> ak_is_group_member(request.user, name="cap-X")`.
+>
+> **2026-10-02, later still.** Michael asked whether `forgejo-guest` itself
+> (the group, kept alive above) was safe to remove too. Checked first:
+> zero members, zero children, no `UserWriteStage.create_users_group`
+> pointed at it — genuinely unused, not just currently-empty. Deleted it,
+> and removed `access-forgejo`'s now-dead `forgejo-guest` clause in the
+> same step (so this cleanup round didn't reintroduce the exact dead-code
+> pattern the previous round just fixed). Read-only Forgejo access is now
+> purely the `cap-forgejo-guest` capability — no flat legacy group backing
+> it, available to wire into a future team whenever one needs it. No
+> legacy group name remains anywhere in live policy code or the group list.
 > See `output/CENTAURI-playbook.md` §13 L-44 for the full build and the
 > exact reasoning for each naming/wiring choice.
 
@@ -147,7 +159,7 @@ group name via `--team` (e.g. `--team "team-family"`).
 |---|---|---|---|
 | `agent` | Agent (OpenWebUI) | `https://agent.photondatum.space` | agent, agent-mcp, developer, admin (via `access-agent` policy); **team-guest, team-family, team-alpha** (via direct Group bindings — see note) |
 | `agent-lan` | Agent (OpenWebUI) LAN | `https://openwebui.stack.localhost` | same as `agent` (bound to `access-agent`) |
-| `forgejo-oidc` | Forgejo (Git) | `https://git.photondatum.space` | developer, admin, forgejo-guest |
+| `forgejo-oidc` | Forgejo (Git) | `https://git.photondatum.space` | admin (`is_superuser`), `cap-forgejo-guest`, `cap-forgejo-dev` (and anything composed from them — currently `team-alpha`/`team-cts` for dev-level, nothing yet for guest-level) |
 | `homepage` | Homepage Dashboard | `https://dashboard.photondatum.space` | admin |
 | `homepage-lan` | Homepage Dashboard LAN | `https://dashboard.stack.localhost` | same as `homepage` (bound to `access-homepage`) |
 | `knowledge-index` | Knowledge Index | `https://ki.photondatum.space` | developer, admin |
