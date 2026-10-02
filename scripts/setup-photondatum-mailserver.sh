@@ -583,6 +583,23 @@ cat > /etc/roundcubemail/config.inc.php <<EOF
 // Roundcube wasn't using that mechanism at all by default. Forcing 'php'
 // here switches Roundcube onto the exact mechanism just proven to work.
 \$config['session_storage'] = 'php';
+// Without this, rcmail::login() silently returns false for a mailbox's
+// very FIRST login attempt even after a fully successful IMAP auth --
+// confirmed by reading that method directly: if there's no existing row
+// in Roundcube's OWN users table yet (nothing to do with Dovecot/virtual
+// mailboxes at all) and auto_create_user isn't enabled, it logs "Access
+// denied for new user ... 'auto_create_user' is disabled" and falls
+// through to return false, which looks identical to a real credential
+// failure ("Login failed.") from the outside. This is exactly why
+// `doveadm auth test` and raw IMAP LOGIN tests kept succeeding with the
+// real password while every real Roundcube login kept failing --
+// those bypass Roundcube's own user database entirely, so they never
+// exercised this check. Since Dovecot (not Roundcube) is the actual
+// authority over mailbox accounts here, enabling this is the correct
+// and standard configuration for any IMAP-backed Roundcube install, not
+// a security tradeoff -- the real auth already happened against Dovecot
+// before this check is ever reached.
+\$config['auto_create_user'] = true;
 \$config['support_url'] = '';
 \$config['product_name'] = 'photondatum.space Mail';
 \$config['des_key'] = '${DES_KEY}';
