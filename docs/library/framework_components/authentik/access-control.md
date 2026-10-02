@@ -83,10 +83,17 @@ automates end to end — pass the current group name via `--team` (e.g.
 > `cap-knowledge-index` (full developer scope, via `role-developer`);
 > `team-cts` → full admin everywhere (`cap-superadmin`'s `is_superuser` flag)
 > plus `cap-forgejo-admin`/`cap-forgejo-dev` explicitly. `bundle-*`/
-> `forgejo-guest` are left exactly as they were — still flat, still
-> name-checked, not part of the new hierarchy, not planned for retirement
-> in this pass. See `output/CENTAURI-playbook.md` §13 L-44 for the full
-> build and the exact reasoning for each naming/wiring choice.
+> `forgejo-guest` are still flat, still name-checked by their own original
+> clauses in each policy — but as of the same day, also brought **into**
+> the new hierarchy as children of the matching capability groups
+> (`bundle-agent`→`cap-agent`, `bundle-agent-mcp`→`cap-agent-mcp`,
+> `bundle-developer`→`cap-agent-mcp`+`cap-forgejo-dev`+`cap-knowledge-index`,
+> `forgejo-guest`→`cap-forgejo-guest`), confirmed zero-risk first since all
+> four had **zero real members** at the time. `bundle-admin` was left
+> unparented — it already independently carries `is_superuser=True`, so
+> parenting it to `cap-superadmin` would be pure redundancy. See
+> `output/CENTAURI-playbook.md` §13 L-44 for the full build and the exact
+> reasoning for each naming/wiring choice.
 
 ---
 
