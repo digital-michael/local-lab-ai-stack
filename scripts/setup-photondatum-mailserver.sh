@@ -445,8 +445,15 @@ service lmtp {
   }
 }
 
+# Dovecot 2.4's new config parser does NOT expand the old pre-2.4
+# "$mail_plugins sieve" append idiom (used to inherit+extend a parent
+# scope's mail_plugins list) — it takes "$mail_plugins" as a literal,
+# nonexistent plugin name instead, which fatals LMTP on every single
+# delivery ("Plugin '\$mail_plugins' not found"). Since nothing else in
+# this config sets mail_plugins globally, there's nothing to inherit from
+# anyway — just set the list directly.
 protocol lmtp {
-  mail_plugins = \$mail_plugins sieve
+  mail_plugins = sieve
 }
 EOF
 
