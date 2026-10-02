@@ -536,10 +536,13 @@ cmd_generate_litellm_config() {
         exit 1
     fi
 
-    # Build local model entries (models without 'host' field)
+    # Build local model entries (models without 'host' field). A model with
+    # "enabled": false is kept in config.json (so it's never lost, just not
+    # registered/routed) but excluded here entirely -- re-enable by flipping
+    # that one field back, no need to re-type the whole entry from memory.
     local entries
     entries=$(jq -c '[
-      .models[] | select(has("host") | not) |
+      .models[] | select(has("host") | not) | select(.enabled != false) |
       if .backend == "ollama" then {
         id: .name,
         description: (.name + " — CPU inference via Ollama"),
@@ -681,7 +684,9 @@ entries = json.loads(sys.argv[2])
 print(json.dumps({'_comment': comment, 'default_models': entries}, indent=2))
 PYEOF
 
-    echo "Written: $models_file ($model_count model(s))"
+    local written_count
+    written_count=$(echo "$entries" | jq 'length')
+    echo "Written: $models_file ($written_count model(s))"
     echo "Run 'bash scripts/pull-models.sh' to register routes in LiteLLM."
 }
 

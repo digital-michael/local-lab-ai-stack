@@ -42,7 +42,8 @@
       "backend": "vllm",
       "device": "gpu",
       "repo": "Qwen/Qwen2.5-1.5B-Instruct",
-      "quantization": null
+      "quantization": null,
+      "enabled": false
     },
     {
       "name": "llama3.1:8b-instruct-q4_K_M",
