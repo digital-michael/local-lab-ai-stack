@@ -51,7 +51,7 @@
 # anything created without --send in the first place.
 #
 # Usage:
-#   scripts/provision-user.sh --email new.person@example.com [--team "Family Group"] [--send]
+#   scripts/provision-user.sh --email new.person@example.com [--team "team-family"] [--send]
 #   scripts/provision-user.sh --email new.person@example.com        # lists teams, prompts for one
 #   scripts/provision-user.sh --see-queue                           # lists pending, prompts to send all
 #

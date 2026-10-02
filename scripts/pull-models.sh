@@ -345,6 +345,16 @@ c.execute(\"SELECT id FROM user WHERE role='admin' ORDER BY created_at ASC LIMIT
 row = c.fetchone()
 owner = row[0] if row else None
 
+# Groups that see every local model by default — the trusted/internal
+# bundles, mirroring Authentik's reachable-to-agent group set. Deliberately
+# excludes agent-only/Family Group/Alpha Group (curated external teams):
+# those get specific per-team grants decided separately, never this
+# blanket default. A group that doesn't exist yet (OpenWebUI side not
+# provisioned) is skipped, not an error.
+ALL_ACCESS_GROUPS = ['bundle-admin', 'bundle-developer', 'bundle-agent', 'bundle-agent-mcp']
+c.execute('SELECT id, name FROM \"group\" WHERE name IN ({})'.format(','.join('?' * len(ALL_ACCESS_GROUPS))), ALL_ACCESS_GROUPS)
+all_access_group_ids = [row[0] for row in c.fetchall()]
+
 now = int(time.time())
 synced, skipped = 0, 0
 for model_id, tags in pairs.items():
@@ -365,11 +375,12 @@ for model_id, tags in pairs.items():
         continue
     c.execute(\"SELECT id FROM access_grant WHERE resource_type='model' AND resource_id=?\", (model_id,))
     if not c.fetchone():
-        c.execute(
-            \"INSERT INTO access_grant (id, resource_type, resource_id, principal_type, principal_id, permission, created_at) \"
-            \"VALUES (?, 'model', ?, 'user', '*', 'read', ?)\",
-            (str(uuid.uuid4()), model_id, now)
-        )
+        for group_id in all_access_group_ids:
+            c.execute(
+                \"INSERT INTO access_grant (id, resource_type, resource_id, principal_type, principal_id, permission, created_at) \"
+                \"VALUES (?, 'model', ?, 'group', ?, 'read', ?)\",
+                (str(uuid.uuid4()), model_id, group_id, now)
+            )
 conn.commit()
 print(f'  OpenWebUI: synced {synced} model(s)' + (f', skipped {skipped} (no admin user found)' if skipped else ''))
 "
