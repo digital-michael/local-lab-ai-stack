@@ -79,7 +79,7 @@ log() { echo; echo "=== $* ==="; }
 log "Installing packages"
 dnf install -y \
     postfix dovecot dovecot-pigeonhole \
-    opendkim \
+    opendkim opendkim-tools \
     spamassassin spamass-milter \
     roundcubemail \
     php php-fpm php-mbstring php-intl php-xml php-pdo php-pdo_sqlite php-gd php-zip \
@@ -111,7 +111,7 @@ if ! getent group vmail >/dev/null; then
     groupadd -g "$VMAIL_GID" vmail
 fi
 if ! getent passwd vmail >/dev/null; then
-    useradd -r -u "$VMAIL_UID" -g vmail -d "$VMAIL_HOME" -s /sbin/nologin -m vmail
+    useradd -u "$VMAIL_UID" -g vmail -d "$VMAIL_HOME" -s /sbin/nologin -m vmail
 fi
 mkdir -p "$VMAIL_HOME/$DOMAIN"
 chown -R vmail:vmail "$VMAIL_HOME"
