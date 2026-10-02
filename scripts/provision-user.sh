@@ -37,6 +37,11 @@
 # recorded in Authentik's own Invitation.fixed_data field (otherwise empty
 # and unused) — that's what --see-queue reads back later.
 #
+# Every email sent (--send or a later --see-queue send) is Bcc'd to the
+# secret's own "from" address by default (invites@photondatum.space), as a
+# durable audit log of invites sent — the invitee never sees this header.
+# Override with an "audit_bcc" key in the SMTP secret, or "" to disable.
+#
 # --see-queue (used instead of --email, not together with it) lists every
 # invitation this script has created that's still unexpired and not yet
 # marked sent, then loops on three options: delete one item (by number,
@@ -118,6 +123,8 @@ Options:
                          live-discovered teams and prompts for exactly one.
   --send                 Email the invite link immediately via SMTP
                          (default: leave unsent, just print the link).
+                         Bcc'd to the secret's "from" address by default
+                         as an audit log (see "audit_bcc" below).
   --see-queue            List pending invitations; loop: delete an item
                          by number, send all, or abort. Used instead of
                          --email.
@@ -308,6 +315,15 @@ def send_invite_email(to_email, team, invite_url, expires):
     msg["Subject"] = f"You're invited to join {team} on agent.photondatum.space"
     msg["From"] = creds["from"]
     msg["To"] = to_email
+    # Audit-log copy: Bcc defaults to the same mailbox we send from
+    # (invites@photondatum.space), so every invite leaves a durable trail
+    # there. smtplib.send_message() resolves Bcc into the real recipient
+    # list but strips the header before the wire send, so the invitee never
+    # sees it. Override via an "audit_bcc" key in the SMTP secret, or set it
+    # to "" to disable.
+    audit_bcc = creds.get("audit_bcc", creds["from"])
+    if audit_bcc:
+        msg["Bcc"] = audit_bcc
     msg.set_content(
         f"You've been invited to join '{team}' on agent.photondatum.space.\n\n"
         f"Use this link to create your account (expires {expires}):\n{invite_url}\n\n"
