@@ -526,6 +526,19 @@ pm.max_children = 10
 pm.start_servers = 2
 pm.min_spare_servers = 1
 pm.max_spare_servers = 3
+; /etc/php.ini ships session.save_path commented out (confirmed on a live
+; install), so without this PHP falls back to its compiled-in default --
+; /tmp on this system -- which is SELinux type tmp_t. httpd_t (confirmed
+; via `ps -eZ` to be what both Caddy and this pool run under) isn't allowed
+; to write there by default policy, so sessions silently failed to persist
+; between the Roundcube login page load and its POST, and the login form
+; failed with "Invalid request! No data was sent." (no session == no valid
+; request token). Fedora's own stock www.conf pool sets exactly this same
+; override for exactly this reason -- mirroring it here rather than
+; reinventing it. /var/lib/php/session is httpd_var_run_t, which httpd_t
+; can read/write by default, and is group "apache" mode 0770 (confirmed),
+; which the `usermod -a -G apache caddy` above already covers.
+php_value[session.save_path] = /var/lib/php/session
 EOF
 
 # ---------------------------------------------------------------------------
