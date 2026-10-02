@@ -468,19 +468,21 @@ import re, sys
 path, host = sys.argv[1], sys.argv[2]
 with open(path) as f:
     content = f.read()
-old = f"""{host} {{
-    root * /var/www/photondatum
-    file_server
-}}"""
-new = f"""{host} {{
-    root * /var/www/roundcube
-    php_fastcgi unix//run/php-fpm/roundcube.sock
-    file_server
-}}"""
-if old not in content:
-    print(f"WARNING: expected placeholder block for {host} not found verbatim — Caddyfile left unchanged, edit it by hand.", file=sys.stderr)
+# Whitespace-tolerant: the live Caddyfile uses tabs, not the 4-space
+# indentation an earlier version of this matched literally against (which
+# silently failed — found when actually run, not assumed). Match any
+# leading whitespace on the two inner lines instead of a fixed indent style.
+pattern = re.compile(
+    re.escape(host) + r" \{\n"
+    r"[ \t]*root \* /var/www/photondatum\n"
+    r"[ \t]*file_server\n"
+    r"\}\n?"
+)
+new = f"{host} {{\n\troot * /var/www/roundcube\n\tphp_fastcgi unix//run/php-fpm/roundcube.sock\n\tfile_server\n}}\n"
+if not pattern.search(content):
+    print(f"WARNING: expected placeholder block for {host} not found — Caddyfile left unchanged, edit it by hand.", file=sys.stderr)
     sys.exit(0)
-content = content.replace(old, new)
+content = pattern.sub(new, content, count=1)
 with open(path, "w") as f:
     f.write(content)
 print(f"Updated {host}'s block in {path}")
