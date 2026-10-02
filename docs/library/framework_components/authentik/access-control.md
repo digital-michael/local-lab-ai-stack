@@ -21,30 +21,31 @@ regardless of their group membership.
 
 ---
 
-## Bundle Groups
+## Groups
+
+`bundle-agent`/`bundle-agent-mcp`/`bundle-developer`/`bundle-admin` are
+**retired as of 2026-10-02** — see the dated notes below for the full
+capability/role/team rebuild. Current real groups:
 
 | Group | Services included |
 |---|---|
-| `bundle-agent` | agent.photondatum.space, chat.photondatum.space (future) |
-| `bundle-agent-mcp` | agent + mcp.photondatum.space |
-| `bundle-developer` | agent + git.photondatum.space + knowledge-index |
-| `bundle-admin` | all services including grafana, prometheus, homepage, litellm |
-| `forgejo-guest` | git.photondatum.space (read-only public repos, no forks) |
+| `forgejo-guest` | git.photondatum.space (read-only public repos, no forks) — still a standalone flat group, now also wired into the `cap-*` hierarchy (parent: `cap-forgejo-guest`) |
+| `team-default` | agent.photondatum.space only, curated single-model subset — the default landing group for the generic `invitation-enrollment` flow (replaces `bundle-agent`'s old role) |
 | `team-guest` | agent.photondatum.space only — for external guests/testers invited via the `enrollment-agent-only` flow (renamed from `agent-only`, 2026-10-02) |
 | `team-family` | agent.photondatum.space only — invited via `enrollment-family-group` (see `scripts/provision-user.sh`); renamed from `Family Group`, 2026-10-02 |
-| `team-alpha` | agent.photondatum.space only (today) — invited via `enrollment-alpha-group`; renamed from `Alpha Group`, 2026-10-02 |
+| `team-alpha` | agent.photondatum.space, mcp, forgejo-dev, knowledge-index (full developer scope via `role-developer`) — invited via `enrollment-alpha-group`; renamed from `Alpha Group`, 2026-10-02 |
+| `team-cts` | full admin everywhere — new team, 2026-10-02 |
 
-Users may be in multiple bundles. New invited users land in `bundle-agent`
-by default; akadmin promotes as needed. `forgejo-guest` is for external
-collaborators who need read-only repo access without full developer bundle access.
-`team-guest`/`team-family`/`team-alpha` are self-contained teams with their
-own dedicated invitation flow. Unlike the bundles above, they're granted
-access to `agent` via a **direct Group PolicyBinding** on the Application,
-not the `access-agent` Expression Policy's OR-list — see the Registered
-Applications note below. Provisioning a new user into any of them (or a
-future team following the same pattern) is what `scripts/provision-user.sh`
-automates end to end — pass the current group name via `--team` (e.g.
-`--team "team-family"`).
+New invited users (the generic `invitation-enrollment` flow, not a
+team-specific one) land in `team-default` by default; akadmin promotes as
+needed. `forgejo-guest` is for external collaborators who need read-only
+repo access without full developer access. `team-guest`/`team-family`/
+`team-alpha` are self-contained teams with their own dedicated invitation
+flow, granted access to `agent` via a **direct Group PolicyBinding** on the
+Application — see the Registered Applications note below. Provisioning a
+new user into any of them (or a future team following the same pattern) is
+what `scripts/provision-user.sh` automates end to end — pass the current
+group name via `--team` (e.g. `--team "team-family"`).
 
 > **2026-10-02 — capability/role/team hierarchy (D-046):** `bundle-*` and
 > `forgejo-guest` above are flat groups checked **by literal name** inside
@@ -91,9 +92,36 @@ automates end to end — pass the current group name via `--team` (e.g.
 > `forgejo-guest`→`cap-forgejo-guest`), confirmed zero-risk first since all
 > four had **zero real members** at the time. `bundle-admin` was left
 > unparented — it already independently carries `is_superuser=True`, so
-> parenting it to `cap-superadmin` would be pure redundancy. See
-> `output/CENTAURI-playbook.md` §13 L-44 for the full build and the exact
-> reasoning for each naming/wiring choice.
+> parenting it to `cap-superadmin` would be pure redundancy.
+>
+> **2026-10-02, later the same day — full `bundle-*` retirement.** Michael
+> asked to move `bundle-admin`'s real members (Michael + `akadmin`) to
+> `cap-superadmin` and delete it — done, `is_superuser=True` confirmed intact
+> for both via `cap-superadmin` directly afterward. Then asked to delete the
+> other three (`bundle-agent`/`bundle-agent-mcp`/`bundle-developer`) since
+> they were confirmed empty — **this cascaded and nulled out
+> `invitation-user-write`'s `create_users_group`** (it pointed at
+> `bundle-agent`), silently breaking the *generic* `invitation-enrollment`
+> flow: every ordinary new-user invite would have landed in no group at all.
+> Caught immediately by checking every `UserWriteStage`'s `create_users_group`
+> right after the deletion, not after someone reported a broken invite. Fixed
+> by creating a new `team-default` group (parent: `role-member-free`) and
+> repointing `invitation-user-write` at it — the direct replacement for what
+> `bundle-agent` used to represent. Also renamed the **OpenWebUI-side**
+> groups to match every Authentik rename/replacement so far (`Family
+> Group`→`team-family`, `Alpha Group`→`team-alpha`, `agent-only`→`team-guest`,
+> `bundle-admin`→`cap-superadmin`) — these had been missed during the
+> earlier renames, meaning `team-family`/`team-alpha`/`team-guest` members
+> were already silently getting **zero** OpenWebUI model grants before this
+> fix, since the sync matches by exact name. Deleted the now-orphaned
+> `bundle-agent`/`bundle-agent-mcp`/`bundle-developer` OpenWebUI groups and
+> their model grants (9 each, all unreachable once their Authentik
+> originals were gone). `pull-models.sh`'s default "all access" grant list
+> is now `cap-superadmin` + `team-alpha` (was `bundle-admin`/`bundle-developer`/
+> `bundle-agent`/`bundle-agent-mcp`). `team-default`'s own OpenWebUI group
+> was created with a single-model grant (`qwen2.5-1.5b`, Michael's choice —
+> "the smaller qwen model"). See `output/CENTAURI-playbook.md` §13 L-44 for
+> the full build and the exact reasoning for each naming/wiring choice.
 
 ---
 
@@ -142,9 +170,13 @@ when Traefik calls the forwardAuth endpoint.
 3. Create an `access-<slug>` ExpressionPolicy:
 
    ```python
-   return ak_is_group_member(request.user, name="bundle-X") or \
-          ak_is_group_member(request.user, name="bundle-admin")
+   return request.user.is_superuser or \
+          ak_is_group_member(request.user, name="cap-X")
    ```
+
+   (`request.user.is_superuser` alone covers `cap-superadmin`/`team-cts` —
+   no need to name them explicitly. Create the new `cap-X` capability group
+   first if one doesn't already exist for this service.)
 
 4. Bind the policy to the application (order=0)
 
@@ -172,7 +204,7 @@ allowed bundles without touching user records.
 3. Set expiry and single-use as appropriate
 4. Send the generated link to the invitee
 5. Invitee clicks link, fills in username/name/email/password
-6. Account is created as **active**, assigned to `bundle-agent` automatically
+6. Account is created as **active**, assigned to `team-default` automatically
 7. akadmin promotes to additional bundles as needed
 
 For a team with its own dedicated flow (`team-guest`, `team-family`, `team-alpha` — see
@@ -207,13 +239,13 @@ sources M2M via admin UI or Django ORM.
 
 Two invitation flows exist for different invitee types:
 
-### Flow 1: `invitation-enrollment` — standard invite (username/password, lands in bundle-agent)
+### Flow 1: `invitation-enrollment` — standard invite (username/password, lands in team-default)
 
 | Stage | Name | Purpose |
 |---|---|---|
 | 0 | `invitation-invite-check` | Reject requests without a valid invite token |
 | 10 | `invitation-user-fields` | Collect username, name, email, password |
-| 20 | `invitation-user-write` | Create user as active + internal, assign `bundle-agent` |
+| 20 | `invitation-user-write` | Create user as active + internal, assign `team-default` (repointed from `bundle-agent`, 2026-10-02 — see dated note above) |
 | 30 | `invitation-user-login` | Log the user in immediately after registration |
 
 `continue_flow_without_invitation = False` — the flow is unusable without a
