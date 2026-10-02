@@ -345,13 +345,13 @@ c.execute(\"SELECT id FROM user WHERE role='admin' ORDER BY created_at ASC LIMIT
 row = c.fetchone()
 owner = row[0] if row else None
 
-# Groups that see every local model by default — the trusted/internal
-# bundles, mirroring Authentik's reachable-to-agent group set. Deliberately
-# excludes agent-only/Family Group/Alpha Group (curated external teams):
-# those get specific per-team grants decided separately, never this
-# blanket default. A group that doesn't exist yet (OpenWebUI side not
-# provisioned) is skipped, not an error.
-ALL_ACCESS_GROUPS = ['bundle-admin', 'bundle-developer', 'bundle-agent', 'bundle-agent-mcp']
+# Groups that see every local model by default: the admin team
+# (cap-superadmin) and the one full-developer team (team-alpha, via
+# Authentik's role-developer). Deliberately excludes team-family/team-guest
+# (curated teams): those get specific per-team grants decided separately,
+# never this blanket default. A group that doesn't exist yet (OpenWebUI
+# side not provisioned) is skipped, not an error.
+ALL_ACCESS_GROUPS = ['cap-superadmin', 'team-alpha']
 c.execute('SELECT id, name FROM \"group\" WHERE name IN ({})'.format(','.join('?' * len(ALL_ACCESS_GROUPS))), ALL_ACCESS_GROUPS)
 all_access_group_ids = [row[0] for row in c.fetchall()]
 
