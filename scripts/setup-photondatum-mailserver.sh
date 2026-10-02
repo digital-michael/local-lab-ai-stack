@@ -455,6 +455,13 @@ systemctl enable --now spamassassin
 cat > /etc/sysconfig/spamass-milter-postfix <<'EOF'
 EXTRA_FLAGS="-g postfix"
 EOF
+# -g postfix has spamass-milter chgrp its own socket to the postfix group —
+# but it runs as the unprivileged sa-milt user, and an unprivileged owner can
+# only change a file's group to one they're already a member of (confirmed:
+# "group option, chown: Operation not permitted", exit 77/NOPERM, without
+# this). Mirrors the same fix already applied the other direction for
+# OpenDKIM (usermod -a -G opendkim postfix) above.
+usermod -a -G postfix sa-milt
 
 # ---------------------------------------------------------------------------
 # 9. Roundcube — PHP-FPM pool + SQLite DB, Caddy fronting it at
