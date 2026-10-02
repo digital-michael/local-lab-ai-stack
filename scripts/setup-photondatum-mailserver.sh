@@ -569,6 +569,20 @@ cat > /etc/roundcubemail/config.inc.php <<EOF
 \$config['smtp_port'] = 587;
 \$config['smtp_user'] = '%u';
 \$config['smtp_pass'] = '%p';
+// Roundcube's OWN default session storage driver is 'db' (its SQLite
+// database), NOT plain PHP file-based sessions -- confirmed by reading
+// rcube.php directly: \$storage = \$this->config->get('session_storage', 'db').
+// Every login attempt failed with "Invalid request! No data was saved."
+// regardless of password, TLS fixes, or dovecot fixes, because of this --
+// confirmed by writing a standalone diagnostic page that uses plain PHP
+// sessions directly (bypassing Roundcube's framework) and proving THOSE
+// persist perfectly (same session_id, same request_token, across separate
+// requests) -- meaning the earlier session.save_path fix (for PHP's native
+// file-based sessions) was real and necessary for other things, but never
+// actually touched the code path Roundcube's login form depends on, since
+// Roundcube wasn't using that mechanism at all by default. Forcing 'php'
+// here switches Roundcube onto the exact mechanism just proven to work.
+\$config['session_storage'] = 'php';
 \$config['support_url'] = '';
 \$config['product_name'] = 'photondatum.space Mail';
 \$config['des_key'] = '${DES_KEY}';
