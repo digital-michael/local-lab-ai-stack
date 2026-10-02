@@ -77,7 +77,7 @@ automates end to end — pass the current group name via `--team` (e.g.
 > rewrite — one `access-<slug>` ExpressionPolicy at a time, each verified
 > against whoever currently relies on it — is the deliberately-deferred next
 > phase, not done in the same pass as the group creation to limit blast
-> radius. See `output/CENTAURI-playbook.md` §13 L-46 for the full build and
+> radius. See `output/CENTAURI-playbook.md` §13 L-44 for the full build and
 > the exact reasoning for each naming/wiring choice.
 
 ---
