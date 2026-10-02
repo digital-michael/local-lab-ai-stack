@@ -151,26 +151,21 @@ group name via `--team` (e.g. `--team "team-family"`).
 
 ## Registered Applications
 
-> **2026-09-30 (D-045):** the `knowledge-index` and `knowledge-index-lan` applications point at the
-> removed Python Knowledge Index. They still exist in Authentik until an operator deletes them
-> (or repoints them at the Go Knowledge Index); `bundle-developer`'s knowledge-index grant goes with them.
+> **2026-09-30 (D-045):** the `knowledge-index` application points at the removed Python Knowledge
+> Index. It still exists in Authentik until an operator deletes it (or repoints it at the Go
+> Knowledge Index). `knowledge-index-lan` was the other half of this note — resolved 2026-10-02 as
+> part of the broader `*-lan` retirement below, not specifically because of D-045.
 
 | Application slug | Name | External URL | Allowed bundles |
 |---|---|---|---|
 | `agent` | Agent (OpenWebUI) | `https://agent.photondatum.space` | agent, agent-mcp, developer, admin (via `access-agent` policy); **team-guest, team-family, team-alpha** (via direct Group bindings — see note) |
-| `agent-lan` | Agent (OpenWebUI) LAN | `https://openwebui.stack.localhost` | same as `agent` (bound to `access-agent`) |
 | `forgejo-oidc` | Forgejo (Git) | `https://git.photondatum.space` | admin (`is_superuser`), `cap-forgejo-guest`, `cap-forgejo-dev` (and anything composed from them — currently `team-alpha`/`team-cts` for dev-level, nothing yet for guest-level) |
 | `homepage` | Homepage Dashboard | `https://dashboard.photondatum.space` | admin |
-| `homepage-lan` | Homepage Dashboard LAN | `https://dashboard.stack.localhost` | same as `homepage` (bound to `access-homepage`) |
 | `knowledge-index` | Knowledge Index | `https://ki.photondatum.space` | developer, admin |
-| `knowledge-index-lan` | Knowledge Index (LAN) | `https://ki.stack.localhost` | **none bound** — see note below |
 | `grafana` | Grafana | `https://grafana.photondatum.space` | admin |
-| `grafana-lan` | Grafana LAN | `https://grafana.stack.localhost` | same as `grafana` (bound to `access-grafana`) |
 | `prometheus` | Prometheus | `https://prometheus.photondatum.space` | admin |
-| `prometheus-lan` | Prometheus LAN | `https://prometheus.stack.localhost` | same as `prometheus` (bound to `access-prometheus`) |
 | `mcp` | MCP | `https://ki.photondatum.space/mcp` (meta_launch_url) | agent-mcp, developer, admin |
 | `flowise` | Flowise | `https://flowise.photondatum.space` | admin |
-| `flowise-lan` | Flowise LAN | `https://flowise.stack.localhost` | same as `flowise` (bound to `access-flowise`) |
 | `litellm` | LiteLLM | `https://litellm.photondatum.space` | admin |
 
 > **Note — `agent`'s direct Group bindings (`team-guest`, `team-family`, `team-alpha`):** the `agent` Application has three `PolicyBinding`s targeting a specific Group directly (not a Policy) alongside its one `access-agent` Expression Policy binding — `policy_engine_mode: any` means any bound check passing is sufficient, so these three groups get through without being listed in `access-agent`'s own expression. This is the right mechanism for a self-contained team that should only ever reach `agent` and nothing else: no policy expression to keep in sync as teams are added, just one more binding per team, which is exactly what creating a team's dedicated invitation flow needs anyway (see Invitation Flow Details below and `scripts/provision-user.sh`).
@@ -179,9 +174,9 @@ group name via `--team` (e.g. `--team "team-family"`).
 >
 > **Note — `litellm`:** LiteLLM uses an OAuth2Provider (OIDC), not a ProxyProvider — and unlike the other services here, it has **no LAN ProxyProvider either**. The Traefik `litellm` (LAN) and `litellm-public` routers both have only `secure-headers` middleware — no Authentik forwardAuth on either — because LiteLLM's own OAuth handles auth regardless of which hostname is used. Adding forwardAuth would cause two Authentik round-trips per session. The OAuth2 provider does **not** need to be assigned to the Embedded Outpost (outpost is for ProxyProviders only).
 >
-> **Note — `*-lan` applications (`agent-lan`, `flowise-lan`, `homepage-lan`, `grafana-lan`, `prometheus-lan`, `knowledge-index-lan`):** Each of these six services has exactly one ProxyProvider whose `external_host` points at the **public** `*.photondatum.space` hostname. At some point each one's `external_host` was migrated from the LAN hostname to the public one with nothing left behind to serve the LAN path — since these backend container ports are bound to `127.0.0.1` only, that made `*.stack.localhost` the *only* way another LAN device could reach them, and it 404'd at Authentik (no provider matched). Fixed 2026-07-20 by creating a second "LAN" ProxyProvider + Application for each (`mode=forward_single`, `external_host=https://<service>.stack.localhost`, same `internal_host`), all enrolled in the Embedded Outpost alongside their public counterparts (required — see [Lesson §16](lessons_learned.md#16-new-proxyprovider-applications-are-not-auto-enrolled-in-the-embedded-outpost)). Five of the six were bound to the *same* access policy as their public counterpart (`access-agent`, `access-flowise`, `access-homepage`, `access-grafana`, `access-prometheus`) so LAN access requires the same group membership as public access. `knowledge-index-lan` predates this fix (2026-07-10) and was created with **no** policy binding at all — meaning it's open to any authenticated Authentik user regardless of bundle. That's an inconsistency with the pattern established here, not a deliberate design choice; worth revisiting.
+> **`*-lan` applications — retired 2026-10-02.** `agent-lan`, `flowise-lan`, `homepage-lan`, `grafana-lan`, `prometheus-lan`, `knowledge-index-lan` (and their ProxyProviders) existed to let a LAN device reach a service via `*.stack.localhost` without going out through the public internet and back in. Michael determined nothing actually needed that path (always used the public `*.photondatum.space` hostnames even from the LAN) and asked them removed — if a real need shows up later, the plan is to evaluate a Headscale-based solution instead of rebuilding this. Deleted all 6 Applications + paired ProxyProviders via the API, then removed the now-dead Traefik routers that pointed at them (`openwebui`, `grafana`, `prometheus`, `homepage`, `flowise`, plus the `openwebui-static` companion bypass router) from `configs/traefik/dynamic/services.yaml` — confirmed via Traefik's own `/api/http/routers` that the hot-reload picked up the change with no restart needed. `knowledge-index-lan` never had a matching Traefik router at all (consistent with its earlier-noted no-policy-binding inconsistency — it was already the odd one out), so nothing additional to clean up there. `qdrant`/`minio-console`'s own `*.stack.localhost` routers were explicitly left alone — out of scope, never had a corresponding Authentik Application in the first place.
 >
-> Flowise also had no LAN Traefik router at all until this fix — `configs/traefik/dynamic/services.yaml` only had `flowise-public`, so Homepage's `flowise.stack.localhost` tile link 404'd at Traefik itself (before ever reaching Authentik). Added a plain `flowise` router matching the pattern of the other LAN routers.
+> (Historical footnote, now moot: the `flowise` LAN router removed above had itself only existed since 2026-07-20, added back then to fix Homepage's `flowise.stack.localhost` tile 404ing at Traefik before ever reaching Authentik — that whole LAN path is gone now, tile and all, and would need revisiting together if LAN access is ever rebuilt.)
 
 Each application has an `access-<slug>` ExpressionPolicy bound to it that
 checks `ak_is_group_member` for the allowed bundles. Authentik enforces this
