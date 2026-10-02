@@ -68,17 +68,25 @@ automates end to end — pass the current group name via `--team` (e.g.
 > which **is** recursive and **is** already checked generically by every
 > `access-<slug>` policy (`request.user.is_superuser or
 > ak_is_group_member(...)`) — so `team-cts` already has real, full admin
-> access everywhere today, no policy changes needed. The other new `cap-*`/
-> `role-*` grants (agent/forgejo-dev/mcp/knowledge-index for `team-family`/
-> `team-alpha`) are **not yet real** beyond what their existing direct
-> `agent` PolicyBinding already granted — each `access-<slug>` policy still
-> needs rewriting to check the new names (or both old and new, during
-> migration) before `cap-forgejo-dev` etc. actually unlocks anything. That
-> rewrite — one `access-<slug>` ExpressionPolicy at a time, each verified
-> against whoever currently relies on it — is the deliberately-deferred next
-> phase, not done in the same pass as the group creation to limit blast
-> radius. See `output/CENTAURI-playbook.md` §13 L-44 for the full build and
-> the exact reasoning for each naming/wiring choice.
+> access everywhere today, no policy changes needed.
+>
+> **2026-10-02, same day — policy rewrite completed:** all 8 `access-<slug>`
+> ExpressionPolicies (`access-agent`, `access-flowise`, `access-forgejo`,
+> `access-grafana`, `access-homepage`, `access-knowledge-index`,
+> `access-mcp`, `access-prometheus`) were patched **additively** — the new
+> `cap-*` check appended with `or` to the existing `bundle-*` checks, nothing
+> removed — so every current real user's access is unchanged, and the new
+> hierarchy is now fully real, not just wired. Effective access per team,
+> confirmed via each group's live ancestor closure: `team-family`/
+> `team-guest` → `cap-agent` only (moderate models); `team-alpha` →
+> `cap-agent` (all models) + `cap-agent-mcp` + `cap-forgejo-dev` +
+> `cap-knowledge-index` (full developer scope, via `role-developer`);
+> `team-cts` → full admin everywhere (`cap-superadmin`'s `is_superuser` flag)
+> plus `cap-forgejo-admin`/`cap-forgejo-dev` explicitly. `bundle-*`/
+> `forgejo-guest` are left exactly as they were — still flat, still
+> name-checked, not part of the new hierarchy, not planned for retirement
+> in this pass. See `output/CENTAURI-playbook.md` §13 L-44 for the full
+> build and the exact reasoning for each naming/wiring choice.
 
 ---
 
