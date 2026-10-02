@@ -327,8 +327,17 @@ chgrp dovecot /etc/dovecot/users
 # writing it here — not trusted from any single blog post or AI-summarized
 # doc page, several of which gave subtly different or SQL-backend-specific
 # syntax that doesn't apply to this plain passwd-file setup.
-DOVECOT_VERSION="$(doveconf -c /dev/null dovecot_config_version 2>/dev/null | awk '{print $NF}')"
-[[ -z "$DOVECOT_VERSION" ]] && DOVECOT_VERSION="2.4.5"
+# Hardcoded rather than self-detected: an earlier attempt at auto-detecting
+# this via `doveconf -c /dev/null dovecot_config_version` killed the script
+# outright under set -e — doveconf itself requires dovecot_config_version to
+# be literally the first setting in any file it's given via -c, so querying
+# against an empty /dev/null fails immediately, and that failure propagates
+# through the command substitution before the "fall back to a default" logic
+# below it ever gets a chance to run. Matches the Dovecot actually installed
+# and tested against on this host (Fedora 43, dovecot-2.4.5) — if that ever
+# changes, this needs a human to re-verify the config syntax again anyway,
+# not a silent runtime auto-detect.
+DOVECOT_VERSION="2.4.5"
 
 cat > /etc/dovecot/conf.d/99-local.conf <<EOF
 dovecot_config_version = ${DOVECOT_VERSION}
