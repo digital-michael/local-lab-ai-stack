@@ -63,7 +63,7 @@ if [[ "$actual_host" != "photondatum"* ]]; then
     exit 1
 fi
 
-for cmd in dnf systemctl firewall-cmd postconf postmap caddy; do
+for cmd in dnf systemctl firewall-cmd caddy; do
     if ! command -v "$cmd" &>/dev/null; then
         echo "ERROR: required command not found: $cmd" >&2
         exit 1
@@ -83,7 +83,7 @@ dnf install -y \
     spamassassin spamass-milter \
     roundcubemail \
     php php-fpm php-mbstring php-intl php-xml php-pdo php-pdo_sqlite php-gd php-zip \
-    policycoreutils-python-utils
+    policycoreutils-python-utils sqlite
 
 # ---------------------------------------------------------------------------
 # 2. Firewall — mail ports only. The admin/management side of every
