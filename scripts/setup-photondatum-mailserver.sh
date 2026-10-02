@@ -484,6 +484,17 @@ if [[ ! -f "$RC_DB" ]]; then
 fi
 chown -R apache:apache "$RC_DATA_DIR" 2>/dev/null || chown -R caddy:caddy "$RC_DATA_DIR"
 
+# The package ships /var/lib/roundcubemail and /var/log/roundcubemail owned
+# apache:apache mode 0770 (confirmed via a live install, not assumed), but
+# the PHP-FPM pool below runs as user/group "caddy" (there's no reason to
+# run httpd here at all — Caddy is the webserver). An unprivileged process
+# can't read a 0770 dir it's not in the owning group for, so without this,
+# php-fpm gets "Permission denied" opening roundcube.db and writing logs/temp.
+# Group membership (rather than chowning the package's dirs to caddy:caddy)
+# survives a package reinstall resetting ownership — same pattern already
+# used for opendkim/postfix and sa-milt/postfix above.
+usermod -a -G apache caddy
+
 DES_KEY="$(openssl rand -base64 24)"
 mkdir -p /etc/roundcubemail
 cat > /etc/roundcubemail/config.inc.php <<EOF
@@ -535,17 +546,39 @@ with open(path) as f:
 # indentation an earlier version of this matched literally against (which
 # silently failed — found when actually run, not assumed). Match any
 # leading whitespace on the two inner lines instead of a fixed indent style.
-pattern = re.compile(
+new = f"{host} {{\n\troot * /usr/share/roundcubemail/public_html\n\tphp_fastcgi unix//run/php-fpm/roundcube.sock\n\tfile_server\n}}\n"
+# Two possible prior states to migrate from: the original static placeholder
+# this block replaces the first time the script ever runs, or (self-heal)
+# an earlier buggy version of THIS script's own output that pointed root at
+# /var/www/roundcube -- a path the roundcubemail dnf package never creates
+# (it installs to /usr/share/roundcubemail/public_html; confirmed against
+# the live package's file list, not assumed) which silently 404'd every
+# request. Matching both keeps re-running the script self-correcting
+# instead of silently no-op'ing against an already-wrong live file.
+placeholder = re.compile(
     re.escape(host) + r" \{\n"
     r"[ \t]*root \* /var/www/photondatum\n"
     r"[ \t]*file_server\n"
     r"\}\n?"
 )
-new = f"{host} {{\n\troot * /var/www/roundcube\n\tphp_fastcgi unix//run/php-fpm/roundcube.sock\n\tfile_server\n}}\n"
-if not pattern.search(content):
+buggy_root = re.compile(
+    re.escape(host) + r" \{\n"
+    r"[ \t]*root \* /var/www/roundcube\n"
+    r"[ \t]*php_fastcgi unix//run/php-fpm/roundcube\.sock\n"
+    r"[ \t]*file_server\n"
+    r"\}\n?"
+)
+if placeholder.search(content):
+    content = placeholder.sub(new, content, count=1)
+elif buggy_root.search(content):
+    content = buggy_root.sub(new, content, count=1)
+    print(f"Fixed {host}'s block in {path} (was pointing root at the wrong path)")
+elif new in content:
+    print(f"{host}'s block in {path} is already up to date — nothing to do")
+    sys.exit(0)
+else:
     print(f"WARNING: expected placeholder block for {host} not found — Caddyfile left unchanged, edit it by hand.", file=sys.stderr)
     sys.exit(0)
-content = pattern.sub(new, content, count=1)
 with open(path, "w") as f:
     f.write(content)
 print(f"Updated {host}'s block in {path}")
@@ -554,16 +587,25 @@ PYEOF
 caddy validate --config "$CADDYFILE" --adapter caddyfile
 
 # ---------------------------------------------------------------------------
-# 11. SELinux — Caddy runs under httpd_t (confirmed), which already has
-#     httpd_can_network_connect on; the roundcube docroot and PHP-FPM socket
-#     need the standard httpd contexts so that still applies under
-#     enforcing mode.
+# 11. SELinux — Caddy and the Roundcube PHP-FPM pool both run under httpd_t
+#     (confirmed via `ps -eZ` against a live install, not assumed), which
+#     already has httpd_can_network_connect on. The real Roundcube docroot
+#     is /usr/share/roundcubemail/public_html (confirmed via `rpm -ql
+#     roundcubemail` -- an earlier version of this script relabeled
+#     /var/www/roundcube instead, a path the package never creates, which
+#     did nothing). Its "plugins" and "skins" entries are symlinks out to
+#     /usr/share/roundcubemail/{plugins,skins}, so the whole package tree
+#     needs the content type, not just public_html itself. The package's
+#     own /var/lib/roundcubemail (httpd_var_lib_t) and /var/log/roundcubemail
+#     (httpd_log_t) already carry the correct SELinux types out of the box
+#     for an httpd_t process to manage -- confirmed via `ls -Z` -- so only
+#     DAC (the usermod -a -G apache caddy above) was missing for those, not
+#     a relabel.
 # ---------------------------------------------------------------------------
 log "Applying SELinux contexts"
-semanage fcontext -a -t httpd_sys_rw_content_t "/var/www/roundcube/logs(/.*)?" 2>/dev/null || true
-semanage fcontext -a -t httpd_sys_rw_content_t "/var/www/roundcube/temp(/.*)?" 2>/dev/null || true
-semanage fcontext -a -t httpd_sys_content_t "/var/www/roundcube(/.*)?" 2>/dev/null || true
-restorecon -Rv /var/www/roundcube >/dev/null 2>&1 || true
+semanage fcontext -a -t httpd_sys_content_t "/usr/share/roundcubemail(/.*)?" 2>/dev/null || true
+restorecon -Rv /usr/share/roundcubemail >/dev/null 2>&1 || true
+restorecon -Rv /var/lib/roundcubemail /var/log/roundcubemail >/dev/null 2>&1 || true
 # opendkim and spamass-milter use their own packaged default socket
 # locations (/run/opendkim, /run/spamass-milter) -- already correctly
 # SELinux-labeled by the base policy, nothing to add here. An earlier
@@ -596,6 +638,12 @@ systemctl enable --now spamass-milter
 systemctl enable --now dovecot
 systemctl enable --now postfix
 systemctl enable --now php-fpm
+# A plain `enable --now` is a no-op on an already-running service, but a
+# supplementary group added via `usermod -a -G` above only takes effect for
+# NEW processes -- an already-running php-fpm wouldn't pick up caddy's new
+# apache group membership without this (confirmed: that's exactly what left
+# Roundcube unable to open its own SQLite db/logs/temp on a prior run).
+systemctl restart php-fpm
 systemctl reload caddy
 
 # ---------------------------------------------------------------------------
