@@ -315,20 +315,44 @@ touch /etc/dovecot/users
 chmod 640 /etc/dovecot/users
 chgrp dovecot /etc/dovecot/users
 
+# Dovecot 2.4 (this is the 2.4.x generation, not legacy 2.3) changed its
+# config syntax substantially from what's documented almost everywhere —
+# mail_location split into mail_driver/mail_path, passdb/userdb now require
+# a name, ssl_cert/ssl_key renamed to ssl_server_cert_file/ssl_server_key_file,
+# and every file here now needs dovecot_config_version/dovecot_storage_version
+# as literal first settings. None of this was guessed: found the first break
+# the hard way (doveconf: "Unknown setting: mail_location" at actual runtime),
+# then verified every single line below by testing it directly against this
+# host's installed `doveconf` binary (dovecot_config_version 2.4.5) before
+# writing it here — not trusted from any single blog post or AI-summarized
+# doc page, several of which gave subtly different or SQL-backend-specific
+# syntax that doesn't apply to this plain passwd-file setup.
+DOVECOT_VERSION="$(doveconf -c /dev/null dovecot_config_version 2>/dev/null | awk '{print $NF}')"
+[[ -z "$DOVECOT_VERSION" ]] && DOVECOT_VERSION="2.4.5"
+
 cat > /etc/dovecot/conf.d/99-local.conf <<EOF
-mail_location = maildir:${VMAIL_HOME}/%d/%n
+dovecot_config_version = ${DOVECOT_VERSION}
+dovecot_storage_version = ${DOVECOT_VERSION}
+
+mail_driver = maildir
+mail_path = ${VMAIL_HOME}/%{user|domain}/%{user|username}
 mail_uid = vmail
 mail_gid = vmail
 first_valid_uid = ${VMAIL_UID}
 last_valid_uid = ${VMAIL_UID}
 
-passdb {
+passdb passwdfile {
   driver = passwd-file
-  args = scheme=SHA512-CRYPT username_format=%u /etc/dovecot/users
+  passwd_file_path = /etc/dovecot/users
+  default_password_scheme = SHA512-CRYPT
 }
-userdb {
+userdb static_vmail {
   driver = static
-  args = uid=vmail gid=vmail home=${VMAIL_HOME}/%d/%n
+  fields {
+    uid = vmail
+    gid = vmail
+    home = ${VMAIL_HOME}/%{user|domain}/%{user|username}
+  }
 }
 
 service auth {
@@ -352,22 +376,28 @@ protocol lmtp {
 }
 EOF
 
-# Dovecot, unlike Postfix, does not tolerate ssl_cert/ssl_key pointing at a
-# file that doesn't exist — with ssl=required it refuses to start at all,
-# not a graceful degrade. So this part genuinely can't be set unconditionally:
-# if the shared cert isn't there yet, leave Dovecot on its own packaged
-# self-signed default (ships automatically via mkcert.sh, always present)
-# and note in the final summary that THIS script needs a re-run once the
-# real cert exists — the daily timer alone won't fix Dovecot's half, only
-# Postfix's.
+# Dovecot, unlike Postfix, does not tolerate ssl_server_cert_file/key_file
+# pointing at a file that doesn't exist — with ssl=required it refuses to
+# start at all, not a graceful degrade. Also unlike older Dovecot, 2.4 has
+# NO compiled-in default cert path at all (verified: both settings resolve
+# empty with nothing configured) — the self-signed cert/key the package
+# ships via mkcert.sh still exist on disk, but Dovecot won't find them on
+# its own anymore, so the "fall back to default" case has to point at them
+# explicitly too, not just omit the setting as earlier versions allowed.
 if [[ "$HAVE_SHARED_CERT" == "1" ]]; then
     cat >> /etc/dovecot/conf.d/99-local.conf <<EOF
 
 ssl = required
-ssl_cert = <${SHARED_CERT_DIR}/fullchain.pem
-ssl_key = <${SHARED_CERT_DIR}/privkey.pem
+ssl_server_cert_file = ${SHARED_CERT_DIR}/fullchain.pem
+ssl_server_key_file = ${SHARED_CERT_DIR}/privkey.pem
 EOF
 else
+    cat >> /etc/dovecot/conf.d/99-local.conf <<'EOF'
+
+ssl = required
+ssl_server_cert_file = /etc/pki/dovecot/certs/dovecot.pem
+ssl_server_key_file = /etc/pki/dovecot/private/dovecot.pem
+EOF
     echo "NOTE: no shared cert yet — Dovecot will use its own self-signed default for now." >&2
     echo "      Unlike Postfix, Dovecot needs this script re-run (not just time) once" >&2
     echo "      Caddy's real cert for ${MAIL_HOST} exists, to pick it up." >&2
@@ -501,6 +531,20 @@ semanage fcontext -a -t httpd_sys_rw_content_t "/var/www/roundcube/logs(/.*)?" 2
 semanage fcontext -a -t httpd_sys_rw_content_t "/var/www/roundcube/temp(/.*)?" 2>/dev/null || true
 semanage fcontext -a -t httpd_sys_content_t "/var/www/roundcube(/.*)?" 2>/dev/null || true
 restorecon -Rv /var/www/roundcube >/dev/null 2>&1 || true
+# opendkim's and spamass-milter's sockets were moved out of their packaged
+# defaults (/run/opendkim, /run/spamass-milter) into /var/spool/postfix/...
+# for Postfix's local: milter addressing (resolved relative to the queue
+# directory) — but that directory tree carries postfix_spool_t, Postfix's
+# own private type, which neither daemon's confined domain can write into.
+# Confirmed via `matchpathcon` against each daemon's own default path (not
+# guessed) that dkim_milter_data_t / spamass_milter_data_t are the types
+# Fedora's policy actually expects here; relabeling to match is what makes
+# the default-path behavior work at this custom path too — found necessary
+# when opendkim and spamass-milter both failed to start with "socket
+# cleanup failed: Permission denied" despite correct Unix ownership.
+semanage fcontext -a -t dkim_milter_data_t "/var/spool/postfix/opendkim(/.*)?" 2>/dev/null || true
+semanage fcontext -a -t spamass_milter_data_t "/var/spool/postfix/spamass(/.*)?" 2>/dev/null || true
+restorecon -Rv /var/spool/postfix/opendkim /var/spool/postfix/spamass >/dev/null 2>&1 || true
 # Roundcube talks to Postfix/Dovecot over TCP (127.0.0.1:587/143), not by
 # invoking a local sendmail binary, so httpd_can_sendmail isn't the relevant
 # boolean here — httpd_can_network_connect (confirmed already "on" on this
