@@ -547,9 +547,25 @@ cat > /etc/roundcubemail/config.inc.php <<EOF
 <?php
 \$config = [];
 \$config['db_dsnw'] = 'sqlite:///${RC_DB}?mode=0640';
-\$config['default_host'] = 'tls://127.0.0.1';
+// Must be the hostname the TLS cert actually covers (mail.photondatum.space),
+// NOT 127.0.0.1/localhost -- confirmed directly with a standalone PHP
+// reproduction of exactly what rcube_imap_generic.php does internally
+// (stream_socket_client + stream_socket_enable_crypto, no explicit SSL
+// context since imap_conn_options isn't set): PHP enforces certificate
+// hostname (subjectAltName) verification strictly by default on that call,
+// and silently fails the STARTTLS upgrade for a loopback address with a
+// cert issued for the real hostname -- "Peer certificate subjectAltName
+// did not match expected name 127.0.0.1". Every login attempt failed at
+// this step, before Roundcube ever got to send credentials, independent of
+// the password -- which is why a manual openssl s_client STARTTLS test
+// against 127.0.0.1 kept "succeeding" throughout debugging: unlike PHP, it
+// does not enforce hostname verification unless explicitly told to, so it
+// never caught this. Postfix's submission port (587, used for smtp_server
+// below) serves the exact same certificate, so it has the identical
+// requirement.
+\$config['default_host'] = 'tls://${MAIL_HOST}';
 \$config['default_port'] = 143;
-\$config['smtp_server'] = 'tls://127.0.0.1';
+\$config['smtp_server'] = 'tls://${MAIL_HOST}';
 \$config['smtp_port'] = 587;
 \$config['smtp_user'] = '%u';
 \$config['smtp_pass'] = '%p';
