@@ -231,7 +231,21 @@ postconf -e "smtpd_tls_cert_file = ${SHARED_CERT_DIR}/fullchain.pem"
 postconf -e "smtpd_tls_key_file = ${SHARED_CERT_DIR}/privkey.pem"
 postconf -e "smtpd_tls_security_level = may"
 postconf -e "smtp_tls_security_level = may"
-postconf -e "smtpd_milters = local:opendkim/opendkim.sock, local:spamass/spamass.sock"
+# Absolute unix: paths pointing at each milter's own packaged default
+# socket location (/run/opendkim, /run/spamass-milter) -- NOT a custom
+# location under the postfix queue dir as an earlier version of this
+# script used. That seemed necessary assuming smtpd ran chrooted (which
+# would make local: 's queue-dir-relative resolution the only way to reach
+# a milter socket), but this host's master.cf ships chroot=n on every smtpd
+# variant (confirmed directly), so smtpd can already reach any absolute
+# path. The custom location actively broke things: confirmed via
+# `ausearch -m avc` that dkim_milter_t/spamass_milter_t were both denied
+# *search* on the postfix spool directory itself (postfix_spool_t) before
+# ever reaching the relabeled subdirectory -- relabeling the leaf directory
+# can't fix a denial one level up blocking entry to it at all. The default
+# /run/* paths are pre-labeled correctly by the base policy for exactly
+# this integration and don't need any custom SELinux work at all.
+postconf -e "smtpd_milters = unix:/run/opendkim/opendkim.sock, unix:/run/spamass-milter/spamass-milter.sock"
 postconf -e "non_smtpd_milters = \$smtpd_milters"
 postconf -e "milter_default_action = accept"
 postconf -e "milter_protocol = 6"
@@ -294,10 +308,15 @@ ${DOMAIN}
 *.${DOMAIN}
 EOF
 
-mkdir -p /var/spool/postfix/opendkim
-chown opendkim:postfix /var/spool/postfix/opendkim
+# Socket is explicitly reset to the package default (/run/opendkim/opendkim.sock
+# -- confirmed correct and already properly SELinux-labeled by the base
+# policy) rather than just left alone: an earlier version of this script
+# pointed it at a custom path instead, and anyone who already ran that
+# version has it sitting in /etc/opendkim.conf right now, which merely not
+# touching this line would leave in place. Mode also changes (v -> sv, to
+# actually sign outgoing mail, not just verify).
 sed -i \
-    -e 's/^Socket.*/Socket                  local:\/var\/spool\/postfix\/opendkim\/opendkim.sock/' \
+    -e 's/^Socket.*/Socket                  local:\/run\/opendkim\/opendkim.sock/' \
     -e 's/^#\?Mode.*/Mode                    sv/' \
     /etc/opendkim.conf
 grep -q '^KeyTable' /etc/opendkim.conf || echo "KeyTable /etc/opendkim/KeyTable" >> /etc/opendkim.conf
@@ -420,22 +439,20 @@ fi
 # ---------------------------------------------------------------------------
 log "Configuring SpamAssassin + spamass-milter"
 systemctl enable --now spamassassin
-mkdir -p /var/spool/postfix/spamass
-# spamass-milter runs as the unprivileged 'sa-milt' user (confirmed from its
-# own shipped unit file, not a guess) — it needs write access to create the
-# socket; -g postfix (below) then makes that socket itself group-writable
-# by postfix, which is the documented, intended way to wire this milter up
-# to an MTA that doesn't run as root, rather than hand-chmod'ing it here.
-chown sa-milt:postfix /var/spool/postfix/spamass
-chmod 750 /var/spool/postfix/spamass
+# Socket is left at its package default (/run/spamass-milter/spamass-milter.sock
+# — confirmed auto-created via its own shipped tmpfiles.d rule, correctly
+# SELinux-labeled by the base policy already) rather than a custom location
+# under the postfix spool tree, which an earlier version of this script used
+# and which broke: confirmed via `ausearch -m avc` that both this milter's
+# and OpenDKIM's domains were denied *search* on the postfix spool directory
+# itself, before ever reaching the custom subdirectory's own label. Only
+# -g postfix is still needed here — it makes the milter's own socket
+# group-writable by postfix (the documented, intended way to wire a non-root
+# milter up to a non-root MTA), independent of where the socket lives.
 # /etc/sysconfig/spamass-milter-postfix is a supported override file the
 # shipped unit already reads (EnvironmentFile=-...) but doesn't ship a
-# default for — writing it fresh here, rather than sed-patching the main
-# /etc/sysconfig/spamass-milter (which ships SOCKET/EXTRA_FLAGS commented
-# out, so a naive sed replace on an already-uncommented pattern would
-# silently match nothing).
+# default for.
 cat > /etc/sysconfig/spamass-milter-postfix <<'EOF'
-SOCKET=/var/spool/postfix/spamass/spamass.sock
 EXTRA_FLAGS="-g postfix"
 EOF
 
@@ -540,20 +557,19 @@ semanage fcontext -a -t httpd_sys_rw_content_t "/var/www/roundcube/logs(/.*)?" 2
 semanage fcontext -a -t httpd_sys_rw_content_t "/var/www/roundcube/temp(/.*)?" 2>/dev/null || true
 semanage fcontext -a -t httpd_sys_content_t "/var/www/roundcube(/.*)?" 2>/dev/null || true
 restorecon -Rv /var/www/roundcube >/dev/null 2>&1 || true
-# opendkim's and spamass-milter's sockets were moved out of their packaged
-# defaults (/run/opendkim, /run/spamass-milter) into /var/spool/postfix/...
-# for Postfix's local: milter addressing (resolved relative to the queue
-# directory) — but that directory tree carries postfix_spool_t, Postfix's
-# own private type, which neither daemon's confined domain can write into.
-# Confirmed via `matchpathcon` against each daemon's own default path (not
-# guessed) that dkim_milter_data_t / spamass_milter_data_t are the types
-# Fedora's policy actually expects here; relabeling to match is what makes
-# the default-path behavior work at this custom path too — found necessary
-# when opendkim and spamass-milter both failed to start with "socket
-# cleanup failed: Permission denied" despite correct Unix ownership.
-semanage fcontext -a -t dkim_milter_data_t "/var/spool/postfix/opendkim(/.*)?" 2>/dev/null || true
-semanage fcontext -a -t spamass_milter_data_t "/var/spool/postfix/spamass(/.*)?" 2>/dev/null || true
-restorecon -Rv /var/spool/postfix/opendkim /var/spool/postfix/spamass >/dev/null 2>&1 || true
+# opendkim and spamass-milter use their own packaged default socket
+# locations (/run/opendkim, /run/spamass-milter) -- already correctly
+# SELinux-labeled by the base policy, nothing to add here. An earlier
+# version of this script moved them under /var/spool/postfix/... instead
+# (for Postfix's local: milter addressing) and relabeled just those
+# subdirectories, which didn't work: `ausearch -m avc` showed both daemons'
+# domains denied *search* on the postfix spool directory itself
+# (postfix_spool_t) before ever reaching the relabeled subdirectory --
+# that denial is one level up from anything a leaf-directory relabel can
+# fix. Confirmed separately that Postfix's smtpd doesn't run chrooded on
+# this host, so there was never a reason to move the sockets in the first
+# place; using unix:/run/.../*.sock (absolute paths) in smtpd_milters
+# instead fixed this at the root rather than fighting the policy further.
 # Roundcube talks to Postfix/Dovecot over TCP (127.0.0.1:587/143), not by
 # invoking a local sendmail binary, so httpd_can_sendmail isn't the relevant
 # boolean here — httpd_can_network_connect (confirmed already "on" on this
