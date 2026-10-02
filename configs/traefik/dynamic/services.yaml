@@ -11,37 +11,6 @@
 
 http:
   routers:
-    openwebui:
-      rule: "Host(`openwebui.stack.localhost`)"
-      entryPoints:
-        - websecure
-      service: openwebui
-      middlewares:
-        - authentik
-        - secure-headers
-        - nocache
-      tls: {}
-
-    grafana:
-      rule: "Host(`grafana.stack.localhost`)"
-      entryPoints:
-        - websecure
-      service: grafana
-      middlewares:
-        - authentik
-        - secure-headers
-      tls: {}
-
-    prometheus:
-      rule: "Host(`prometheus.stack.localhost`)"
-      entryPoints:
-        - websecure
-      service: prometheus
-      middlewares:
-        - authentik
-        - secure-headers
-      tls: {}
-
     # Note: auth.stack.localhost router removed — Authentik now runs on
     # photondatum.space VPS. Access via https://auth.photondatum.space.
 
@@ -121,28 +90,6 @@ http:
         - secure-headers
       tls: {}
 
-    homepage:
-      rule: "Host(`dashboard.stack.localhost`)"
-      entryPoints:
-        - websecure
-      service: homepage
-      middlewares:
-        - authentik
-        - secure-headers
-      tls: {}
-
-    # LAN entry — flowise.stack.localhost never had a router (gap found 2026-07-20:
-    # Homepage's tile linked here but Traefik had no matching rule, so it 404'd).
-    flowise:
-      rule: "Host(`flowise.stack.localhost`)"
-      entryPoints:
-        - websecure
-      service: flowise
-      middlewares:
-        - authentik
-        - secure-headers
-      tls: {}
-
     # Public entry — flowise.photondatum.space proxied via Caddy on photondatum.space.
     flowise-public:
       rule: "Host(`flowise.photondatum.space`)"
@@ -162,15 +109,6 @@ http:
     # Authentik forwardAuth must not intercept them. OpenWebUI's own JWT gates these.
     openwebui-public-static:
       rule: "Host(`agent.photondatum.space`) && (PathPrefix(`/_app`) || PathPrefix(`/ws`))"
-      entryPoints:
-        - websecure
-      service: openwebui
-      middlewares:
-        - secure-headers
-      tls: {}
-
-    openwebui-static:
-      rule: "Host(`openwebui.stack.localhost`) && (PathPrefix(`/_app`) || PathPrefix(`/ws`))"
       entryPoints:
         - websecure
       service: openwebui
