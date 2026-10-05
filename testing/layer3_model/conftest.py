@@ -5,13 +5,14 @@
 # Install dependencies:
 #   pip install pytest httpx pytest-asyncio
 
-import json
 import os
 import subprocess
 import time
 
 import httpx
 import pytest
+
+import model_choices
 
 # ---------------------------------------------------------------------------
 # Paths and base URLs
@@ -106,27 +107,8 @@ def qdrant_headers(qdrant_api_key: str) -> dict:
 
 @pytest.fixture(scope="session")
 def default_test_model() -> str:
-    """
-    Determine the model identifier to use for reasoning tests.
-
-    Resolution order:
-    1. TEST_MODEL environment variable
-    2. First entry in configs/models.json default_models list
-    3. Hard-coded fallback: llamacpp/phi-3-mini-4k-instruct-q4
-    """
-    model = os.environ.get("TEST_MODEL", "")
-    if model:
-        return model
-
-    if os.path.exists(MODELS_FILE):
-        with open(MODELS_FILE) as f:
-            data = json.load(f)
-        models = data.get("default_models", [])
-        if models:
-            return models[0]["id"]
-
-    # Fallback — will be skipped by model_available if not loaded
-    return "llama3.1-8b"
+    """Model for reasoning tests: testing/models.json default_chat (TEST_MODEL overrides)."""
+    return model_choices.default_chat()
 
 
 @pytest.fixture(scope="session")
@@ -191,6 +173,24 @@ def model_available(
 
     return default_test_model
 
+
+
+@pytest.fixture(scope="session")
+def tool_test_model(
+    http_client: httpx.Client,
+    litellm_headers: dict,
+    model_available: str,
+) -> str:
+    """Model for tool-calling tests: testing/models.json tool_calling (TEST_TOOL_MODEL
+    overrides; null falls back to the default chat model). Skips if it is not loaded."""
+    model = model_choices.tool_calling()
+    if model == model_available:
+        return model
+    response = http_client.get("/models", headers=litellm_headers)
+    loaded = [m["id"] for m in response.json().get("data", [])]
+    if model not in loaded:
+        pytest.skip(f"Tool-calling model '{model}' (testing/models.json) is not loaded. Loaded: {loaded}")
+    return model
 
 # ---------------------------------------------------------------------------
 # Helper: poll a condition with timeout and interval

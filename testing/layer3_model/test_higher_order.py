@@ -208,7 +208,7 @@ def test_failover_vllm_to_ollama(
 def test_tool_calling(
     http_client: httpx.Client,
     litellm_headers: dict,
-    model_available: str,
+    tool_test_model: str,
 ) -> None:
     """
     T-072: Model returns a tool_calls block when given a function definition
@@ -248,7 +248,7 @@ def test_tool_calling(
         body = chat_completion(
             http_client,
             litellm_headers,
-            model_available,
+            tool_test_model,
             messages,
             tools=tools,
             max_tokens=100,
@@ -258,7 +258,7 @@ def test_tool_calling(
         # the feature is not supported — mark as skip rather than fail.
         if "400" in str(exc) or "500" in str(exc) or "not support" in str(exc).lower():
             pytest.skip(
-                f"Model '{model_available}' does not support tool-calling: {exc}"
+                f"Model '{tool_test_model}' does not support tool-calling: {exc}"
             )
         raise
 
@@ -289,7 +289,7 @@ def test_tool_calling(
         )
     else:
         pytest.skip(
-            f"Model '{model_available}' returned a text response instead of "
+            f"Model '{tool_test_model}' returned a text response instead of "
             f"tool_calls (finish_reason={finish_reason!r}). "
             "The model may not support tool-calling or the prompt was not "
             "strong enough to elicit a function call."

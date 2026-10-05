@@ -22,6 +22,8 @@ from typing import Generator
 import httpx
 import pytest
 
+import model_choices
+
 from .conftest import (
     LITELLM_BASE_URL,
     MetricsRecorder,
@@ -64,10 +66,13 @@ _workers = load_active_workers()
 _routing_params = []
 for _node in _workers:
     _alias = _node["alias"]
-    _models = _node.get("models", [])
+    _models = model_choices.worker_models(_alias)
     if not _models:
+        # An active worker with no declared models is a configuration gap, not
+        # "no workers": surface it as a failing case instead of dropping it.
+        _routing_params.append(pytest.param(_node, "", {}, id=f"{_alias}::undeclared"))
         continue
-    _model = _models[0]  # first declared model
+    _model = _models[0]  # first declared model (testing/models.json)
     _route_id = f"ollama/{_model}@{_alias}"
     for _case in _PROMPT_CASES:
         _routing_params.append(
@@ -95,8 +100,13 @@ def test_l2_routing_coherence(
     metrics_recorder: MetricsRecorder,
 ) -> None:
     """T-510+: LiteLLM routes to alias target and model response is coherent."""
-    if not node or not route_id or not case:
+    if not node:
         pytest.skip("No active worker nodes configured")
+    if not route_id:
+        pytest.fail(
+            f"Worker '{node['alias']}' has no models in testing/models.json \"workers\" -- "
+            f"declare what it serves (from scripts/model-inventory.sh on the controller)"
+        )
 
     alias = node["alias"]
     case_id = case["case_id"]

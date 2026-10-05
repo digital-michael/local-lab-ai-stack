@@ -20,6 +20,8 @@ import os
 import httpx
 import pytest
 
+import model_choices
+
 from .conftest import load_active_workers
 
 OLLAMA_PORT = int(os.environ.get("OLLAMA_PORT", "11434"))
@@ -79,21 +81,24 @@ def test_ollama_liveness(node: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# T-501 — Node models list matches configs/nodes/<alias>.json declaration
+# T-501 — Models declared for the node in testing/models.json are present
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("node", _worker_params)
 def test_ollama_declared_models_present(node: dict) -> None:
-    """T-501+: Each model declared in the node file appears in Ollama's model list."""
+    """T-501+: Each model testing/models.json declares for the node appears in Ollama's model list."""
     if not node:
         pytest.skip("No active worker nodes configured")
 
     alias = node["alias"]
     address = node.get("address") or node.get("address_fallback", "")
-    declared_models: list[str] = node.get("models", [])
+    declared_models = model_choices.worker_models(alias)
 
     if not declared_models:
-        pytest.skip(f"Node '{alias}' has no models declared — nothing to verify")
+        pytest.fail(
+            f"Worker '{alias}' has no models in testing/models.json \"workers\" -- "
+            f"declare what it serves (from scripts/model-inventory.sh on the controller)"
+        )
 
     if not address:
         pytest.fail(f"Node '{alias}' has no address set")

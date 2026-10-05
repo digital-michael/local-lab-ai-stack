@@ -1,0 +1,12 @@
+{
+  "_comment": "Single place to change which models the test suite uses. Read via testing/model_choices.py. Model ids must match LiteLLM route ids in configs/models.json (checked offline by testing/test_model_choices.py). TEST_MODEL / TEST_TOOL_MODEL env vars override for one run. T-056 (pull default models) deliberately tests the stack's whole configured set in configs/models.json, not a choice made here.",
+
+  "default_chat": "bit-sync-dev/nexus1:3b",
+  "_default_chat": "Reasoning, multi-turn and routing tests (layer 3). Was: TEST_MODEL, else configs/models.json default_models[0], else a hard-coded 'llama3.1-8b'. Set to the same first model so behavior is unchanged; pick a faster or more capable one if preferred.",
+
+  "tool_calling": null,
+  "_tool_calling": "Model for T-072 tool calling. null = use default_chat (the old behavior: the test skips if that model cannot call tools). Set to a tools-capable model id so T-072 actually runs.",
+
+  "workers": {},
+  "_workers": "Worker alias (configs/nodes/<alias>.json) -> models that worker serves in Ollama, first one used for routing (T-510). Replaces each node file's \"models\" list, which was emptied 2026-10-01 (3742dc7). Fill from `bash scripts/model-inventory.sh` run ON THE CONTROLLER. Layer 5 fails, not skips, while an active worker has no entry here."
+}

@@ -1,4 +1,9 @@
 # testing/README.md
+
+> **Models used by tests:** change them in one place, `testing/models.json` (read via
+> `testing/model_choices.py`). `testing/test_model_choices.py` checks offline that every
+> model there is still a route in `configs/models.json` and every worker named is an
+> active worker node. `TEST_MODEL` / `TEST_TOOL_MODEL` override for a single run.
 # AI Stack — Integration Test Suite
 
 This directory contains the integration tests for the AI stack, organized by layer from fastest/cheapest to most comprehensive.
