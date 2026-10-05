@@ -1,5 +1,5 @@
 # Project Decisions — local-lab-ai-stack
-**Last Updated:** 2026-09-30 UTC (D-045 added)
+**Last Updated:** 2026-10-05 UTC (D-044, D-046 added)
 **Target Audience:** LLM Agents
 
 ---
@@ -562,6 +562,7 @@ Concrete protocol specification for the **WAN** discovery profile.
 
 | Field | Value |
 |---|---|
+| **Superseded** | In part, 2026-10-05 by D-044 — in-stack MCP is now in scope, served per bundle through LiteLLM with per-user grants. The developer-tool scope recorded here is history. |
 | **Decision** | The MCP server in `knowledge-index/app.py` is scoped exclusively to external developer tools (Claude Desktop, Cursor, VS Code Copilot). In-stack RAG is handled by the LiteLLM `pre_call_hook` (D-030); in-stack web research and write-back are handled by Flowise REST calls (D-031). MCP is not an inter-service integration pattern within this stack. |
 | **Context** | D-015 specified MCP with HTTP/SSE transport. The original intent was developer tool access to `search_knowledge` and `ingest_document`. A design question was raised about making MCP available to all users and nodes. Architecture analysis (D-029 through D-032) showed that in-stack workflows are better served by LiteLLM hooks (ambient RAG) and Flowise REST (research orchestration) — MCP adds no value for the in-stack case and introduces M2M auth complexity. |
 | **API_KEY gap** | `API_KEY` must be set as a Podman secret in the knowledge-index container. Absence makes the MCP endpoint unauthenticated if port 8100 is reachable on the container network. Add `knowledge_index_api_key` to the `secrets[]` block in config.json knowledge-index service definition. |
@@ -754,6 +755,25 @@ Concrete protocol specification for the **WAN** discovery profile.
 
 ---
 
+### D-044 — Cortex MCP in the Stack: Bundles, Plans and Licensing (Default Deny)
+
+| Field | Value |
+|---|---|
+| **Status** | Accepted 2026-10-05 (operator). Implementation tracked in ledger project `membership` and the mcp-local cortex-mcp epic (3c672541). |
+| **Decision** | Cortex MCP tools are served in-stack to Open WebUI chats through LiteLLM's MCP gateway (partially superseding D-033). Tools are shipped and authorized **per bundle** (one MCP server per bundle), never per tool, and nothing is exposed until it is assigned to a bundle (default deny). Access is layered so a licence never names tools: **licence (plan + add-ons) → Authentik roles → `cap-mcp-*` capability groups (= bundles) → per-user LiteLLM server grants → MCP server → tools.** LiteLLM enforces which bundles a caller may reach (an ungranted server is invisible and returns 403 -- proven 2026-09-30 in the D-041 trust-boundary test); the MCP server enforces only that the caller's licence covers the bundle as a whole. |
+| **Bundles** | `cortex-core` (common, non-proprietary tools) · `cortex-adventure` (placeholder: a free-tier showcase of unique features, content TBD) · `cortex-knowledge` (Knowledge Index / RAG, when the Go KI ships) · `cortex-consult` (consultancy work: docs, spreadsheets) · `cortex-dev` (developer tools) · `cortex-workstation` (local workstation tools, remote-enabled; premium developer feature) · `cortex-admin` (local-lab-ai-stack platform administration: m2m, identity, stack operations) · later `cortex-agent` (delegation/agent runs) and `cortex-team` (team chat, sharing, shared ledger). Every tool belongs to exactly one bundle; tool names are bundle-namespaced. Backend services/repos keep domain names (`cortex-sheets`, `cortex-docs`, `cortex-content`); bundles are the shipped, licensed servers. The shared Go library keeps the name `cortex-common`, which is why the common bundle is `cortex-core`. |
+| **Plans and add-ons (licensable)** | Plans: **guest** → core · **free** → core, adventure · **paid** → core + what the licence carries (not a superset of free). Add-ons, standalone or on a plan: **consultant** → consult · **developer** → dev, workstation. Each plan/add-on is an Authentik role (`role-guest`, `role-member-free`, `role-member-paid`, `role-consultant`, `role-developer`) whose group parents are the `cap-mcp-*` bundles (D-046 hierarchy). Entitlement names are stable product names; which bundles a plan includes is configuration (group parents) and changes without reissuing any licence. |
+| **Staff and admin (not licensable)** | **Staff** (`role-operator`): granted by an admin from employment, never purchased; carries `cortex-admin` plus what the job needs. **Admin** (`cap-superadmin`): its own rule set, outside plans and bundles -- named people only, MFA, no inheritance from any plan, ideally separate accounts. |
+| **Exposure** | Served through LiteLLM: core, adventure, knowledge, consult, dev, admin (operators/admin only), agent, team. `cortex-workstation` is **not** a shared LiteLLM server: it runs on the member's own machine and is reachable only for members whose machines are registered in the tailnet (Headscale); calls still need a per-call ownership check (D-041 Stage 2 token) and a routing design (spike). |
+| **Licence and account lifecycle** | Account states: `active`, `grace` (unfunded paid, before downgrade), `free` (downgraded), `suspended`, `closed`. Licence state (plan, add-ons, licence id, issue, expiry) is recorded at provisioning on the Authentik user (role groups + attributes); Authentik is the source of truth for **access**. With payments, the payment provider becomes the source of truth for **purchases** (hosted checkout; PCI scope stays external) and one sync job projects purchase state into Authentik roles -- webhooks plus a periodic reconcile, and expiry enforcement. Unfunded paid memberships revert to free after a grace period. Suspension (abuse) revokes access in all four systems: Authentik (deactivate, sessions/tokens), Open WebUI (user disabled), LiteLLM (keys blocked), Headscale (nodes and pre-auth keys expired), with reason and actor recorded; unsuspend reverses it. The lifecycle starts in `scripts/provision-user.sh`, moves into cortex-admin identity tools, and is driven later by the photondatum.space member portal -- one lifecycle, three front ends. Portal and billing write plans and add-ons, never tools or bundles. |
+| **Prerequisites** | Per-user LiteLLM keys tied to Authentik users (replaces `allow_all_keys`); the Authentik identity adapter in cortex-admin; Headscale sign-in through Authentik and D-041 Stage 2 (both for `cortex-workstation`); payment gateway selection. |
+| **Supersedes** | D-033 in part: in-stack MCP is now in scope (its reasons -- RAG-only value, M2M auth complexity, no Open WebUI MCP -- no longer hold). The shared single-credential `allow_all_keys` model is replaced by per-user grants. |
+| **Driver** | Operator decisions, 2026-10-05 (bundles, plans/add-ons, staff/admin separation, workstation over the tailnet, provisioning, unfunded → free, suspension). |
+| **Trigger** | Licensing question: what a client sees when licensed for some MCP features but not all. Answer: unlicensed bundles are simply not listed (MCP has no "disabled" tool state), so licensing is done per bundle. |
+| **Commit** | *(this entry)* |
+
+---
+
 ### D-045 — Retire the Python M2M Gateway and Python Knowledge Index
 
 | Field | Value |
@@ -767,3 +787,16 @@ Concrete protocol specification for the **WAN** discovery profile.
 | **Driver** | Operator decision |
 | **Trigger** | Planning the M2M workflow and D-041 Stage 1 surfaced that the remaining plan kept assuming the Python services as a baseline. |
 | **Commit** | *(this change set)* |
+
+---
+
+### D-046 — Authentik Capability / Role / Team Group Hierarchy
+
+| Field | Value |
+|---|---|
+| **Status** | Accepted and implemented 2026-10-02. (Record written 2026-10-05 from the implementation notes; the decision itself was made and applied on 2026-10-02.) |
+| **Decision** | Replace flat, name-checked `bundle-*` groups with a three-level hierarchy using Authentik group parents (membership is transitive): `cap-*` groups are atomic grants (`cap-agent`, `cap-agent-mcp`, `cap-forgejo-dev`, `cap-forgejo-admin`, `cap-forgejo-guest`, `cap-grafana`, `cap-knowledge-index`, `cap-superadmin`, ...); `role-*` groups compose capabilities (`role-member-free`, `role-member-paid`, `role-developer`, `role-guest`); `team-*` groups are what people join (`team-default`, `team-guest`, `team-family`, `team-alpha`, `team-cts`). Every `access-<slug>` policy reads `request.user.is_superuser or ak_is_group_member(request.user, name="cap-X")`. `cap-superadmin` carries `is_superuser=True`. All `bundle-*` groups and `forgejo-guest` were retired the same day. |
+| **Rationale** | Renaming or recombining access no longer means editing every policy that names a group; new teams compose existing capabilities. |
+| **Used by** | D-044 adds `cap-mcp-*` capability groups (one per MCP bundle) and plan/add-on roles on this hierarchy. |
+| **Detail** | `docs/library/framework_components/authentik/access-control.md` (Groups section, dated 2026-10-02 notes); `output/CENTAURI-playbook.md` §13 L-44. |
+| **Commit** | Documentation commits of 2026-10-02 (access-control.md); this record 2026-10-05. |
