@@ -54,7 +54,7 @@
         "api_base": "http://ollama.ai-stack:11434",
         "api_key": "none",
         "max_tokens": 4096,
-        "num_ctx": 131072
+        "num_ctx": 65536
       },
       "model_info": {
         "mode": "chat",

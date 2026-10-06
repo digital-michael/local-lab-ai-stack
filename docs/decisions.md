@@ -1,5 +1,5 @@
 # Project Decisions — local-lab-ai-stack
-**Last Updated:** 2026-10-05 UTC (D-044, D-046 added)
+**Last Updated:** 2026-10-06 UTC (D-047 added)
 **Target Audience:** LLM Agents
 
 ---
@@ -800,3 +800,14 @@ Concrete protocol specification for the **WAN** discovery profile.
 | **Used by** | D-044 adds `cap-mcp-*` capability groups (one per MCP bundle) and plan/add-on roles on this hierarchy. |
 | **Detail** | `docs/library/framework_components/authentik/access-control.md` (Groups section, dated 2026-10-02 notes); `output/CENTAURI-playbook.md` §13 L-44. |
 | **Commit** | Documentation commits of 2026-10-02 (access-control.md); this record 2026-10-05. |
+
+### D-047 — Per-Model Ollama KV-Cache Ceiling (16GB, Conservative Tier)
+
+| Field | Value |
+|---|---|
+| **Status** | Accepted and implemented 2026-10-06. |
+| **Decision** | No Ollama-backed model's `num_ctx` — whether from `pull-models.sh`'s size-scaled heuristic or an explicit `config.json` override — may push that model's own KV cache past 16GB (f16). Enforced in `scripts/pull-models.sh`'s `_kv_ceiling_tokens_for_model()`, computed per model from its real `/api/show` architecture (block count, KV head count — scalar or per-layer array for hybrid/linear-attention models, head dim via `key_length`/`value_length` or `embedding_length÷head_count`), not a flat token cap. KV bytes/token varies ~13x across the current fleet (`qwen3-coder-next` ~0.023 MiB/token hybrid linear-attention vs `llama3.3` ~0.313 MiB/token dense 70B), so a flat token ceiling would over-restrict cheap models and under-protect expensive ones; this is a true per-model memory ceiling instead. `MAX_KV_CACHE_MIB` (default 16384) is overridable via env var. Assumes f16 KV (`OLLAMA_KV_CACHE_TYPE` default) — if that default ever changes to a quantized type, this ceiling becomes more conservative than strictly necessary, never less. |
+| **Rationale** | Directly provoked by `granite4.2:30b` being deliberately bumped to its native 131072 context (D-pending-granite-fix, same session) at an accepted CPU-latency/memory cost — the user then asked for a hard ceiling so a future one-off "set to native max" can't silently blow the host's memory budget the way an unconstrained override could. 16GB (conservative tier) was chosen over 24/32/40GB alternatives discussed the same session, prioritizing headroom under concurrent `OLLAMA_MAX_LOADED_MODELS` loads over maximum context per model. |
+| **Effect on existing models** | Only `granite4.2:30b` was out of compliance (131072 → clamped/rolled back to 65536, the exact 16GB-equivalent for its architecture). All others were already under their own computed ceiling and are unaffected: `llama3.3` ceiling ~52K tokens (registered at 8192), `qwen3.8:27b` ~64K (registered at 16384, conservatively under-computed since the ceiling function doesn't yet account for its `full_attention_interval` hybrid pattern — safe direction, not a correctness bug), `phi4`/`nexus1` models/`qwen3-coder-next` ceilings all exceed their native context anyway. |
+| **Detail** | `scripts/pull-models.sh` (`_kv_ceiling_tokens_for_model`, wired into the per-model registration loop right after the existing `_num_ctx_for_model` heuristic fill). |
+| **Commit** | 2026-10-06. |

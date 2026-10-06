@@ -205,6 +205,52 @@ _num_ctx_for_model() {
     '
 }
 
+# Hard KV-cache ceiling (D-047): no model's num_ctx, whether from the
+# heuristic above OR an explicit config.json override, may push its KV cache
+# past MAX_KV_CACHE_MIB. Unlike a flat token cap, this is memory-accurate
+# per model — KV bytes/token varies up to ~13x across this fleet (qwen3-coder-
+# next's hybrid linear-attention layers cost ~0.023 MiB/token; llama3.3's
+# dense 70B attention costs ~0.313 MiB/token), so the same token count means
+# wildly different real memory depending on architecture. Computed from the
+# model's own /api/show (block_count, head_count_kv, key_length/embedding),
+# not a guess:
+#   KV MiB/token = 2(K+V) * (sum of per-layer KV head counts) * head_dim * 2 bytes(f16)
+# head_count_kv is a scalar for uniform-attention models (every layer has KV)
+# or a per-layer array for hybrid models (zero on non-attention layers, e.g.
+# Qwen3's linear-attention blocks) — summed either way to get total KV-bearing
+# layers. head_dim prefers the explicit key_length/value_length field (GQA
+# models often fix this independent of head_count) over embedding_length/
+# head_count. Assumes f16 KV (OLLAMA_KV_CACHE_TYPE default) -- if that's ever
+# changed to a quantized type, this ceiling becomes more conservative than
+# strictly necessary, never less, which is the safe direction to be wrong in.
+# Returns empty (caller treats as "can't determine, don't clamp") if the
+# model's architecture fields aren't present.
+MAX_KV_CACHE_MIB="${MAX_KV_CACHE_MIB:-16384}"  # 16GB, conservative tier (D-047)
+
+_kv_ceiling_tokens_for_model() {
+    local show_json="$1"
+    local max_kv_mib="$2"
+    echo "$show_json" | jq -r --argjson max_mib "$max_kv_mib" '
+      (.model_info // {}) as $mi |
+      ($mi | to_entries | map(select(.key | endswith(".block_count"))) | .[0].value // null) as $block_count |
+      ($mi | to_entries | map(select(.key | endswith(".attention.head_count_kv"))) | .[0].value // null) as $kv_heads_raw |
+      ($mi | to_entries | map(select(.key | endswith(".attention.key_length"))) | .[0].value // null) as $key_length |
+      ($mi | to_entries | map(select(.key | endswith(".attention.head_count"))) | .[0].value // null) as $head_count |
+      ($mi | to_entries | map(select(.key | endswith(".embedding_length"))) | .[0].value // null) as $embedding_length |
+      (if $key_length != null then $key_length
+       elif ($head_count != null and $embedding_length != null and $head_count > 0) then ($embedding_length / $head_count)
+       else null end) as $head_dim |
+      (if ($kv_heads_raw | type) == "array" then ($kv_heads_raw | add)
+       elif ($kv_heads_raw != null and $block_count != null) then ($kv_heads_raw * $block_count)
+       else null end) as $total_kv_head_layers |
+      if ($total_kv_head_layers == null or $head_dim == null or $total_kv_head_layers == 0 or $head_dim == 0) then empty
+      else
+        (2 * $total_kv_head_layers * $head_dim * 2) as $bytes_per_token |
+        (($max_mib * 1048576) / $bytes_per_token | floor)
+      end
+    '
+}
+
 # This script runs on the bare host, not inside the ai-stack podman network —
 # "ollama.ai-stack" (used in litellm_params.api_base, resolvable only from
 # other containers on that network) doesn't resolve here at all. Translate
@@ -255,6 +301,19 @@ for i in $(seq 0 $((model_count - 1))); do
         if ! echo "$litellm_params" | jq -e 'has("num_ctx")' >/dev/null 2>&1; then
             num_ctx="$(_num_ctx_for_model "$show_json")"
             litellm_params="$(echo "$litellm_params" | jq --argjson n "$num_ctx" '. + {num_ctx: $n}')"
+        fi
+
+        # Hard KV ceiling (D-047): applies regardless of whether num_ctx came
+        # from the heuristic above or an explicit config.json override —
+        # nothing gets to exceed MAX_KV_CACHE_MIB of KV cache for its own
+        # architecture (see _kv_ceiling_tokens_for_model above).
+        kv_ceiling="$(_kv_ceiling_tokens_for_model "$show_json" "$MAX_KV_CACHE_MIB")"
+        if [[ -n "$kv_ceiling" ]]; then
+            current_num_ctx="$(echo "$litellm_params" | jq -r '.num_ctx // empty')"
+            if [[ -n "$current_num_ctx" && "$current_num_ctx" -gt "$kv_ceiling" ]]; then
+                echo "  NOTE: '${model_id}' num_ctx ${current_num_ctx} exceeds the ${MAX_KV_CACHE_MIB}MiB KV ceiling (~${kv_ceiling} tokens for this model's architecture) -- clamping." >&2
+                litellm_params="$(echo "$litellm_params" | jq --argjson n "$kv_ceiling" '. + {num_ctx: $n}')"
+            fi
         fi
     fi
 
