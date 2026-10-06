@@ -53,7 +53,8 @@
         "model": "ollama_chat/granite4.2:30b",
         "api_base": "http://ollama.ai-stack:11434",
         "api_key": "none",
-        "max_tokens": 4096
+        "max_tokens": 4096,
+        "num_ctx": 131072
       },
       "model_info": {
         "mode": "chat",

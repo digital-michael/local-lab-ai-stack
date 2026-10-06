@@ -37,6 +37,7 @@ def chat_completion(
     max_tokens: int = 100,
     temperature: float = 0.0,
     tools: list | None = None,
+    reasoning_effort: str | None = None,
 ) -> dict:
     """Post a chat completion request and return the full response body."""
     payload: dict = {
@@ -48,6 +49,12 @@ def chat_completion(
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
+    if reasoning_effort:
+        # LiteLLM's standardized cross-provider param. Reasoning/"thinking" models
+        # (e.g. granite4.2 on Ollama) can otherwise spend the whole max_tokens
+        # budget on hidden chain-of-thought and return empty content — harmless
+        # no-op on models without a reasoning mode.
+        payload["reasoning_effort"] = reasoning_effort
 
     response = http_client.post(
         "/chat/completions", json=payload, headers=litellm_headers

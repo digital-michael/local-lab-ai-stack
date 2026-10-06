@@ -3,7 +3,7 @@
         test-authentik test-flowise test-grafana test-litellm test-loki \
         test-postgres test-prometheus test-promtail test-qdrant test-traefik \
         test-lifecycle test-localhost \
-        test-model test-baseline test-higher-order test-availability test-security \
+        test-model test-baseline test-higher-order test-availability test-model-smoke test-security \
         license-check
 
 BATS := bats
@@ -42,6 +42,7 @@ help:
 	@echo "  test-baseline     Baseline reasoning (echo, arithmetic, classification, JSON)"
 	@echo "  test-higher-order Multi-turn context, model routing, failover, tool-calling"
 	@echo "  test-availability Model list, pull, structured error on missing model"
+	@echo "  test-model-smoke  On-demand: every registered model answers 'Hello.' + 2+2 (T-098/T-099)"
 	@echo "  test-security     Auth enforcement: forwardAuth, port binding, secret leakage"
 	@echo ""
 	@echo "Layer coverage summary"
@@ -111,6 +112,10 @@ test-higher-order:
 # Model availability (list, pull, error handling)
 test-availability:
 	$(PYTEST) -v testing/layer3_model/test_model_availability.py
+
+# On-demand smoke test: every registered model answers "Hello." then 2+2 (T-098/T-099)
+test-model-smoke:
+	$(PYTEST) -v testing/layer3_model/test_model_smoke.py
 
 # Security & auth enforcement
 test-security:
