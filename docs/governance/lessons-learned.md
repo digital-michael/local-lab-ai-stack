@@ -134,3 +134,31 @@ One long session: evaluated readiness of Cortex MCP tools for LiteLLM behind age
 - ledger-core timestamps are RFC3339Nano strings: **never compare them as strings** — parse first (`stampTime` in ledger-server `internal/api/browse.go`).
 - LiteLLM's MCP gateway already fronts stdio mcp-local on the Mac (`POST /mcp/`, trailing slash required, `Accept: application/json, text/event-stream`); it is the reusable path for CENTAURI too, recorded in epic `3c672541`.
 - MCP has no toolset concept: feature-set selection is server-side (start flags, several registrations); clients (LiteLLM, Open WebUI) attach a whole registration.
+
+---
+
+## Retrospective — 2026-10-05: remote ledger planning (workflows), ledger-server "Last updated", ledger-core workflow timestamps
+
+One session: mapped the remote-ledger work (photondatum.space/services/ledger: VPS, single Postgres, Authentik) into five ledger workflows instead of a new epic; added a Last updated column to ledger-server's `/workflows` (ledger-server `a06ab1f`); made every change to a workflow move its `updated_at` (ledger-core `9afae11`, defect `d3b827d6`); fixed UI string-sorted timestamps (ledger-server `10a763c`, defect `b5f9e004`); backfilled today's workflows from the audit log.
+
+### LLM Agent — missteps
+
+- **Skipped the session-start protocol again — the third time** (space_sim 2026-09-22, this file's 2026-09-29 entry, today). The request looked like a quick ledger lookup, so work started before the framework load; the user asked mid-turn whether the rules were loaded. Writing the lesson down twice has not installed the check. **Needs a mechanism, not another note** — e.g. a Claude Code SessionStart hook that injects the load order and the Locked-In requirement. Proposed to the operator; not built.
+- **Repeated a recorded verification mistake.** `cmd && ... ./server &` then `kill $(cat pid)` killed the command chain, not the server — exactly item 2 in memory `feedback_verification-harness-pitfalls`. Only the MEMORY.md index is loaded at session start, and its hook named "pkill vs env-var servers", not `$!`. Fixed the index wording; read a pitfalls memory's body before any verification run.
+- **A one-off data fix was not idempotent on its first draft.** The backfill counted its own audit rows as workflow changes, so each rerun would have moved `updated_at` again. Caught only because it was run twice on a copy before the live ledger. Rule: run any data fix twice on a copy; the second run must report zero changes.
+- **Workflow details were written above the confidence they had.** Workflows B–D carried agent-chosen behaviour (not-found for private projects, fail-closed start, profile sharing, 401/403) as if decided. Listed for the operator afterwards; four were corrected or refined (e.g. the DB-down page went from "offer a profile switch" to "no options at all"). Mark agent-chosen details as assumptions in the artifact itself, not only in chat.
+
+### LLM Agent — what worked
+
+- **Checking repo config before answering a hosting question.** "Is Postgres on the VPS?" was answered from the Caddyfile and `docs/instances/photondatum.md` (Authentik + `ai-stack-iam-postgres` on the VPS), and the check surfaced a stale row in `stack-overview.md` and an unticketed VPS RAM constraint.
+- **Negative control for the new test.** Reverting the ledger-core fix from a saved patch made all 8 change types fail; re-applying passed. Proves the test can see the defect.
+- **Headless screenshot of the real page** (Chrome Dev, `--headless=new --screenshot`, a fresh `--user-data-dir` per run — a second run on a held profile exits 21) against a scratch server on a backup copy caught a clipped Progress column that tests and typecheck could not.
+- **One ticket per missing feature, not per gap.** The new-project form covered six workflow gaps in one ticket; the bulk gap-ticket tool would have created six.
+- **A workflow as the umbrella instead of an epic** (operator's call) worked: a project workflow referencing four epic/story workflows gives progress and gaps across three projects without re-parenting tickets.
+
+### Technical
+
+- Timestamp string-sorting is a **defect class**, not a bug: it was fixed in Go on 2026-09-29 while three TypeScript sorts and ~20 SQL `ORDER BY created_at/updated_at` in ledger-core kept it. When fixing a class, grep every consumer (Go, TS, SQL). Root fix ticketed: fixed-width timestamps plus a migration (`ebef5bb7`).
+- `cortex/go.work` builds ledger-server and mcp-local against the local ledger-core, so a ledger-core fix is live after `make install` without a tag; publishing still needs a tag (v0.2.1) and a go.mod bump, which needs a push.
+- mcp-local fails to compile without a scope build tag (`undefined: BuildScope`) by design; use `make test` or `go test -tags local|membership|all`.
+- Installing mcp-local does not reach an already-running MCP session (e.g. this Claude Code session); it keeps the old binary until it reconnects. LiteLLM spawns per call and picks up the new one immediately.
