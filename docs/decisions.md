@@ -1,5 +1,5 @@
 # Project Decisions — local-lab-ai-stack
-**Last Updated:** 2026-10-06 UTC (D-047 added)
+**Last Updated:** 2026-10-06 UTC (D-047 added; D-044 updated — Ollama direct-access lockdown)
 **Target Audience:** LLM Agents
 
 ---
@@ -770,6 +770,7 @@ Concrete protocol specification for the **WAN** discovery profile.
 | **Supersedes** | D-033 in part: in-stack MCP is now in scope (its reasons -- RAG-only value, M2M auth complexity, no Open WebUI MCP -- no longer hold). The shared single-credential `allow_all_keys` model is replaced by per-user grants. |
 | **Driver** | Operator decisions, 2026-10-05 (bundles, plans/add-ons, staff/admin separation, workstation over the tailnet, provisioning, unfunded → free, suspension). |
 | **Trigger** | Licensing question: what a client sees when licensed for some MCP features but not all. Answer: unlicensed bundles are simply not listed (MCP has no "disabled" tool state), so licensing is done per bundle. |
+| **Related hardening (2026-10-06)** | The single-chokepoint principle this decision relies on for MCP tools (an ungranted server is invisible, 403) was found to have a gap on the plain chat-completion side: OpenWebUI also had a direct, ungoverned Ollama connection (`ollama.enable: true`) alongside its governed LiteLLM connection, both exposing identically-named models — silently bypassing LiteLLM's budgets, rpm/tpm limits, model allowlists, and per-model `num_ctx` for anyone whose request resolved to the direct entry. Closed via OpenWebUI's admin API (`ENABLE_OLLAMA_API: false`); confirmed LiteLLM is now the only path to any local model. Detail: `docs/library/framework_components/authentik/access-control.md` (`litellm` row note, 2026-10-06). |
 | **Commit** | *(this entry)* |
 
 ---
