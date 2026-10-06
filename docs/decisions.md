@@ -1,5 +1,5 @@
 # Project Decisions — local-lab-ai-stack
-**Last Updated:** 2026-10-06 UTC (D-047 added; D-044 updated — Ollama direct-access lockdown)
+**Last Updated:** 2026-10-06 UTC (D-048 added; D-047 added; D-044 updated — Ollama direct-access lockdown)
 **Target Audience:** LLM Agents
 
 ---
@@ -811,4 +811,15 @@ Concrete protocol specification for the **WAN** discovery profile.
 | **Rationale** | Directly provoked by `granite4.2:30b` being deliberately bumped to its native 131072 context (D-pending-granite-fix, same session) at an accepted CPU-latency/memory cost — the user then asked for a hard ceiling so a future one-off "set to native max" can't silently blow the host's memory budget the way an unconstrained override could. 16GB (conservative tier) was chosen over 24/32/40GB alternatives discussed the same session, prioritizing headroom under concurrent `OLLAMA_MAX_LOADED_MODELS` loads over maximum context per model. |
 | **Effect on existing models** | Only `granite4.2:30b` was out of compliance (131072 → clamped/rolled back to 65536, the exact 16GB-equivalent for its architecture). All others were already under their own computed ceiling and are unaffected: `llama3.3` ceiling ~52K tokens (registered at 8192), `qwen3.8:27b` ~64K (registered at 16384, conservatively under-computed since the ceiling function doesn't yet account for its `full_attention_interval` hybrid pattern — safe direction, not a correctness bug), `phi4`/`nexus1` models/`qwen3-coder-next` ceilings all exceed their native context anyway. |
 | **Detail** | `scripts/pull-models.sh` (`_kv_ceiling_tokens_for_model`, wired into the per-model registration loop right after the existing `_num_ctx_for_model` heuristic fill). |
+| **Commit** | 2026-10-06. |
+
+### D-048 — Default `reasoning_effort: disable` for Thinking-Capable Models
+
+| Field | Value |
+|---|---|
+| **Status** | Accepted and implemented 2026-10-06. |
+| **Decision** | Any Ollama-backed model tagged `thinking` (via Ollama's own `/api/show` capabilities — currently `granite4.2:30b`, `qwen3.8:27b`) gets `reasoning_effort: "disable"` baked into its LiteLLM route by default in `scripts/pull-models.sh`, unless `config.json` already pins an explicit `.reasoning_effort` (new optional per-model field, passed through by `configure.sh`) — same "heuristic fills in what nothing else specified" precedence as the existing `num_ctx` sizing. A caller's own explicit per-request `reasoning_effort` still overrides the route default, same as it does for `max_tokens`/`num_ctx`. |
+| **Rationale** | `granite4.2:30b`'s chat template defaults `enable_thinking=True` whenever a caller doesn't set it — confirmed directly: an ungoverned real request ran ~4.5 minutes and 900+ generated tokens of invisible `<think>` content before any visible answer, for what should have been a brief response. Combined with CPU-only throughput (~3.8 tokens/sec measured), this made the model look hung/broken on every normal chat request through OpenWebUI, which never set this param itself. |
+| **Verified** | A plain request with no override now answers directly (confirmed via live token-generation logs: no `<think>` phase) in time proportional only to visible output length. Tool-calling confirmed unaffected by the default (`granite4.2:30b` returns a correct, well-formed `tool_calls` block with `reasoning_effort: disable` in effect). |
+| **Detail** | `scripts/pull-models.sh` (registration loop, right after the D-047 KV-ceiling clamp); `scripts/configure.sh` (`.reasoning_effort` passthrough field). |
 | **Commit** | 2026-10-06. |
