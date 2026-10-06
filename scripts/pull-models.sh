@@ -315,6 +315,22 @@ for i in $(seq 0 $((model_count - 1))); do
                 litellm_params="$(echo "$litellm_params" | jq --argjson n "$kv_ceiling" '. + {num_ctx: $n}')"
             fi
         fi
+
+        # Default reasoning_effort=disable for "thinking"-capable models (D-048):
+        # these can otherwise spend an unbounded, invisible <think> phase before
+        # ever emitting visible content -- confirmed directly on granite4.2:30b
+        # (a single ungoverned request ran ~4.5 minutes / 900+ tokens of hidden
+        # reasoning for a "brief, high-level" question). A caller that explicitly
+        # wants deep reasoning still can -- this only fills in the default when
+        # config.json didn't already pin a reasoning_effort (same "heuristic
+        # fills in what nothing else specified" pattern as num_ctx above), and
+        # LiteLLM lets a per-request reasoning_effort override this route-level
+        # default same as it does for max_tokens/num_ctx.
+        if ! echo "$litellm_params" | jq -e 'has("reasoning_effort")' >/dev/null 2>&1; then
+            if echo "$modes_json" | jq -e 'index("thinking") != null' >/dev/null 2>&1; then
+                litellm_params="$(echo "$litellm_params" | jq '. + {reasoning_effort: "disable"}')"
+            fi
+        fi
     fi
 
     # Modes are sorted alphabetically so the merged tags list (and OpenWebUI's

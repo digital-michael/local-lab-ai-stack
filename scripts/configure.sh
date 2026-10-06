@@ -551,7 +551,8 @@ cmd_generate_litellm_config() {
           api_base: "OLLAMA_URL",
           api_key: "none",
           max_tokens: 4096
-        } + (if .num_ctx then {num_ctx: .num_ctx} else {} end)),
+        } + (if .num_ctx then {num_ctx: .num_ctx} else {} end)
+          + (if .reasoning_effort then {reasoning_effort: .reasoning_effort} else {} end)),
         model_info: { mode: "chat", input_cost_per_token: 0, output_cost_per_token: 0 }
       }
       elif .backend == "vllm" then {
