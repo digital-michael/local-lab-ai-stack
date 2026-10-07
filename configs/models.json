@@ -32,21 +32,6 @@
       }
     },
     {
-      "id": "phi4:14b-q8_0",
-      "description": "phi4:14b-q8_0 \u2014 CPU inference via Ollama",
-      "litellm_params": {
-        "model": "ollama_chat/phi4:14b-q8_0",
-        "api_base": "http://ollama.ai-stack:11434",
-        "api_key": "none",
-        "max_tokens": 4096
-      },
-      "model_info": {
-        "mode": "chat",
-        "input_cost_per_token": 0,
-        "output_cost_per_token": 0
-      }
-    },
-    {
       "id": "granite4.2:30b",
       "description": "granite4.2:30b \u2014 CPU inference via Ollama",
       "litellm_params": {
