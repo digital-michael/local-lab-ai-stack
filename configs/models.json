@@ -78,6 +78,21 @@
       }
     },
     {
+      "id": "llama4:16x17b",
+      "description": "llama4:16x17b \u2014 CPU inference via Ollama",
+      "litellm_params": {
+        "model": "ollama_chat/llama4:16x17b",
+        "api_base": "http://ollama.ai-stack:11434",
+        "api_key": "none",
+        "max_tokens": 4096
+      },
+      "model_info": {
+        "mode": "chat",
+        "input_cost_per_token": 0,
+        "output_cost_per_token": 0
+      }
+    },
+    {
       "id": "claude-sonnet-4-5",
       "description": "claude-sonnet-4-5 \u2014 hosted via Anthropic",
       "litellm_params": {
