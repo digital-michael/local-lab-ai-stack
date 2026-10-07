@@ -190,6 +190,34 @@ One long session: fixed a model smoke test's empty-response failure on `granite4
 
 ---
 
+## Retrospective — 2026-10-06: cortex MCP tool result sizes, terse-by-default ledger tools
+
+One session: measured cortex MCP tool use from ~4 weeks of Claude Code transcripts (859 calls), found the four largest result producers, and made ledger results terse by default with `detail: verbose` to opt in (mcp-local `bcdc209`, ledger-core `d465ebd` / v0.3.0 adds the project to search hits; story `90dd3875`). Replaying the historical calls: 76% less output from those four tools, 39% less cortex tool output, 2.5% of all tool output.
+
+### LLM Agent — missteps
+
+- **Described a tool's output from impression, not source.** The first answer said the workflow write tools returned "the whole workflow" as if it were the JSON document; reading `renderWorkflow` before building the follow-up table showed rendered text (JSON only from `workflow_get`). Corrected openly. Check the handler before characterising what a tool returns.
+- **Targeted a test edit by the failing assertion's neighbourhood, not the call it checks.** Marked the wrong `ledger_create_item` call verbose in `TestRun_ledger_hierarchyUnconstrained` (the assertion checks a call 13 lines earlier). One extra test run; trace the asserted variable to its call site first.
+
+### LLM Agent — what worked
+
+- **The SessionStart hook (installed 2026-10-05) worked on first use:** the framework load and Locked-In declaration came before any work, on a request that looked like a quick lookup — the exact case that failed three times before. A mechanism succeeded where three notes had not.
+- **Measured before proposing.** Transcripts gave per-tool calls and result sizes; the proposal then targeted the four tools that mattered and explicitly excluded short write tools.
+- **Grepped every consumer of the output text before designing the change:** found mcp-console's `id=<uuid>` regex scrape (script back-references), so both modes keep that token.
+- **Least-churn refactor:** tests that checked full output now pass `detail: verbose` instead of being rewritten; new tests cover terse; negative controls in both repos (ProjectID unset; verbose forced) fail the new tests.
+- **Release ordering:** mcp-local stayed uncommitted until ledger-core v0.3.0 was pushed, so no commit exists that only builds inside `go.work`; verified with `GOWORK=off` under all three build tags.
+- **Reported the saving at three scales** (tool, cortex, all tools) rather than the flattering one.
+
+### Technical
+
+- **An MCP tool's cost is set by its data contract, not by who runs it.** A private, local tool is not cheap by default: its parameter schema is paid in every session, and every result is re-read on each later turn. Treat tool input and output as an API — terse by default, detail on request, sized by measurement, with consumers known before the format changes.
+- **Text output that something parses is an API.** `id=<uuid>` in ledger results is a de facto protocol (mcp-console scrapes it). Any output change starts with a grep for consumers.
+- **A field's name is a claim to verify.** `SearchResult.Snippet` carried the entire note body — the source of 46K-character search results. Same shape as the 2026-09-22 "comment asserting behaviour" lesson.
+- **Local wins can be globally small.** Cortex tools are ~6% of tool output (524K of 8.2M chars); file reads and command output dominate. The next real saving is in how files and command output are read, not in more cortex tools.
+- Each optional parameter costs schema tokens in every session; add one only where the tool has something to trim (rule recorded in `cortex/docs/mcp-local.md`, Tool Result Conventions).
+
+---
+
 ## Retrospective — 2026-10-07: `NUM_PARALLEL`/`MAX_LOADED_MODELS` retuning, distributed multi-model benchmarking, phi4 suspension
 
 Direct continuation of 2026-10-06's session. Suspended `phi4:14b-q8_0` pending a D-050 fix; experimented with `OLLAMA_MAX_LOADED_MODELS=4`/`OLLAMA_NUM_PARALLEL=2` and `=4` against the established baseline (`3`/`1`); extended `scripts/bench-parallel-load.py` to distribute requests across *multiple* concurrently-loaded models, not just repeat one; found a second model-specific constraint (`qwen3.8:27b`, D-051) and a genuine cross-model cold-load serialization behavior.
