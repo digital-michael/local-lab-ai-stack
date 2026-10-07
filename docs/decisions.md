@@ -1,5 +1,5 @@
 # Project Decisions — local-lab-ai-stack
-**Last Updated:** 2026-10-06 UTC (D-050 added; D-049 added; D-048 added; D-047 added; D-044 updated — Ollama direct-access lockdown)
+**Last Updated:** 2026-10-07 UTC (D-051 added; D-050 updated — phi4 suspended; D-049 added; D-048 added; D-047 added; D-044 updated — Ollama direct-access lockdown)
 **Target Audience:** LLM Agents
 
 ---
@@ -853,3 +853,15 @@ Concrete protocol specification for the **WAN** discovery profile.
 | **Verified workaround (for phi4 specifically)** | `KV_CACHE_TYPE=f16` instead of `q8_0`, same `-np 3`. Not adopted as the default (see D-049's own tradeoff) since nothing currently needs the concurrency. |
 | **Detail** | `bench-results/20261006-201251_phi4_14b-q8_0_parallel-load.md` (crash), `bench-results/20261006-202645_phi4_14b-q8_0_parallel-load.md` (`f16` workaround, working); `scripts/bench-parallel-load.py`; cross-model check done via `make test-model-smoke`-style single-model invocations, not re-run through the bench script. |
 | **Commit** | No repo file changed (defect isolation + host-config experiments only, all reverted). This record: 2026-10-06. |
+
+### D-051 — Known Model Constraint: `qwen3.8:27b` Is Structurally Capped at Effective `NUM_PARALLEL=1`
+
+| Field | Value |
+|---|---|
+| **Status** | Confirmed constraint (not a bug), 2026-10-06/07. Relevant to any future concurrency planning or model selection for a distributed/multi-model load. |
+| **Finding** | `qwen3.8:27b` silently runs at `-np 1` in its `llama-server` launch command regardless of the global `OLLAMA_NUM_PARALLEL` setting — confirmed directly in launch-arg logs at both `NUM_PARALLEL=3` and `NUM_PARALLEL=4`, same result both times. Cause: this model is configured with speculative decoding (`--spec-type draft-mtp`) and a vision projector (`--mmproj`); Ollama's scheduler does not support multi-sequence parallel batching for either, so it overrides the model's own slot count down to 1 independent of the server-wide setting. |
+| **Practical implication** | Any benchmark or production traffic pattern that sends multiple simultaneous requests to `qwen3.8:27b` specifically will see `NUM_PARALLEL=1`-style serial queueing for that model's own requests, no matter how high the global setting is raised. This makes it a poor choice as one leg of a "distribute load across multiple concurrently-loaded models" strategy — confirmed by a distributed-concurrency benchmark pairing it with `granite4.2:30b`, where `qwen3.8`'s two requests queued behind each other while `granite`'s ran genuinely in parallel. Swapping in `llama3.3:latest` (no speculative decoding/vision projector; confirmed plain `completion`+`tools` capabilities only) produced the clean, expected result instead — matched TTFT and total time across both of its concurrent requests. |
+| **How to check a model before relying on it for concurrency** | Inspect `/api/show`'s `.capabilities` for anything beyond `completion`/`tools`/`thinking` (e.g. `vision`), and if present, verify the actual launch command in `ollama.service` logs after a fresh load rather than assuming `-np` matches the global setting. |
+| **Related** | Separate finding, same testing session: Ollama does not load two *different* cold models concurrently even when both are permitted under `OLLAMA_MAX_LOADED_MODELS` — the first model to reach Ollama starts loading and serving immediately; a second, different model's requests wait out the first model's *entire* load before their own load even begins. This is a one-time cold-start cost (subsequent requests to either model, once loaded, proceed normally per their own `NUM_PARALLEL` slots) but is worth knowing when interpreting a distributed-concurrency benchmark's TTFT numbers — a large TTFT on the "second" model in a from-cold test reflects load-queueing, not a per-request scheduling defect. |
+| **Detail** | `bench-results/20261006-213527_granite4.2_30b_qwen3.8_27b_parallel-load.md` (NUM_PARALLEL=2), `bench-results/20261007-071958_granite4.2_30b_qwen3.8_27b_parallel-load.md` (NUM_PARALLEL=4, same constraint reproduced), `bench-results/20261007-073724_granite4.2_30b_llama3.3_latest_parallel-load.md` (clean pairing, confirmed via blob-file-size-verified launch logs). |
+| **Commit** | No repo file changed (benchmark results only, gitignored). This record: 2026-10-07. |
