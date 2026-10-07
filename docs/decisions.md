@@ -1,5 +1,5 @@
 # Project Decisions — local-lab-ai-stack
-**Last Updated:** 2026-10-07 UTC (D-049 updated — MAX_LOADED_MODELS=4/NUM_PARALLEL=4 adopted as CENTAURI default; D-051 added; D-050 updated — phi4 suspended; D-048 added; D-047 added; D-044 updated — Ollama direct-access lockdown)
+**Last Updated:** 2026-10-07 UTC (D-052 added — model storage doubled to 400GB; D-049 updated — MAX_LOADED_MODELS=4/NUM_PARALLEL=4 adopted as CENTAURI default; D-051 added; D-050 updated — phi4 suspended; D-048 added; D-047 added; D-044 updated — Ollama direct-access lockdown)
 **Target Audience:** LLM Agents
 
 ---
@@ -866,3 +866,16 @@ Concrete protocol specification for the **WAN** discovery profile.
 | **Related** | Separate finding, same testing session: Ollama does not load two *different* cold models concurrently even when both are permitted under `OLLAMA_MAX_LOADED_MODELS` — the first model to reach Ollama starts loading and serving immediately; a second, different model's requests wait out the first model's *entire* load before their own load even begins. This is a one-time cold-start cost (subsequent requests to either model, once loaded, proceed normally per their own `NUM_PARALLEL` slots) but is worth knowing when interpreting a distributed-concurrency benchmark's TTFT numbers — a large TTFT on the "second" model in a from-cold test reflects load-queueing, not a per-request scheduling defect. |
 | **Detail** | `bench-results/20261006-213527_granite4.2_30b_qwen3.8_27b_parallel-load.md` (NUM_PARALLEL=2), `bench-results/20261007-071958_granite4.2_30b_qwen3.8_27b_parallel-load.md` (NUM_PARALLEL=4, same constraint reproduced), `bench-results/20261007-073724_granite4.2_30b_llama3.3_latest_parallel-load.md` (clean pairing, confirmed via blob-file-size-verified launch logs). |
 | **Commit** | No repo file changed (benchmark results only, gitignored). This record: 2026-10-07. |
+
+### D-052 — CENTAURI Model Storage Doubled to 400GB (LVM, Online Resize)
+
+| Field | Value |
+|---|---|
+| **Status** | Done 2026-10-07, CENTAURI (controller) only. |
+| **Context — previously undocumented storage layout** | `~/ai-stack/ollama` (model weights) is `/dev/mapper/aistack-models`, an XFS filesystem on an LVM logical volume `models` in volume group `aistack`. That VG lives entirely on one physical volume, `/dev/nvme0n1p3` (NVMe SSD — not the host's SATA SSD or spinning HDD). The VG also hosts two sibling LVs: `containers` (60G) and `db` (50G). Before this change: `models` was 200G (143G used, 58G free, 72% full — prompted this resize before it became a real constraint); VG had 3.33TB free out of 3.64TB total (only 310G allocated across all three LVs combined), so there was no capacity risk in principle — this record exists because the layout itself had never been written down before, not because the resize was risky. |
+| **Decision** | Grow `models` from 200G to **400G**, confirmed first that the VG had far more than enough free space (3.33TB free vs. 200G needed) so growing it wouldn't approach exhausting the volume group. XFS supports online growth — no unmount, no service stop required. |
+| **Commands used** | `sudo lvextend -L +200G /dev/aistack/models` then `sudo xfs_growfs /home/3pdx7/ai-stack/ollama`. Both run live, Ollama left running throughout. |
+| **Verified** | `df -h ~/ai-stack/ollama`: `400G` total, `147G` used, `254G` avail, `37%` used (down from `72%`) — confirmed via `lsblk -f` and `findmnt` after the resize. |
+| **Note for a future resize** | XFS can only grow, never shrink — if `models` ever needs to come back down, that requires a new, smaller LV and a data copy, not a simple reverse of this operation. Headroom remains very large (VG still has ~3.1TB free after this change), so another doubling is straightforward if ever needed. |
+| **Detail** | Host-local LVM/filesystem change; no repo file affected. |
+| **Commit** | No repo file changed (host storage only). This record: 2026-10-07. |
