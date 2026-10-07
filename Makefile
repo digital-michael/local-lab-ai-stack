@@ -4,6 +4,7 @@
         test-postgres test-prometheus test-promtail test-qdrant test-traefik \
         test-lifecycle test-localhost \
         test-model test-baseline test-higher-order test-availability test-model-smoke test-security \
+        bench-parallel-load \
         license-check
 
 BATS := bats
@@ -44,6 +45,10 @@ help:
 	@echo "  test-availability Model list, pull, structured error on missing model"
 	@echo "  test-model-smoke  On-demand: every registered model answers 'Hello.' + 2+2 (T-098/T-099)"
 	@echo "  test-security     Auth enforcement: forwardAuth, port binding, secret leakage"
+	@echo ""
+	@echo "Benchmarks (NOT part of test/test-all) — see scripts/bench-parallel-load.py"
+	@echo "  bench-parallel-load  Concurrent-request load test across OLLAMA_NUM_PARALLEL values"
+	@echo "                       vars: MODEL= NUM_PARALLEL_VALUES= CONCURRENCY="
 	@echo ""
 	@echo "Layer coverage summary"
 	@echo "  BATS layer0   Host preflight — quadlet files, secrets, network, TLS"
@@ -120,6 +125,22 @@ test-model-smoke:
 # Security & auth enforcement
 test-security:
 	$(PYTEST) -v testing/security/
+
+# ── Benchmarks (NOT part of test/test-all/test-pytest) ──────────────────────
+
+# On-demand load/performance benchmark: fires concurrent requests at one model
+# under each requested OLLAMA_NUM_PARALLEL value, in turn, measuring TTFT,
+# total time and host load. Mutates and restores live Ollama server settings;
+# restarts the service (evicts everything loaded stack-wide) -- run when
+# nothing else needs Ollama. See scripts/bench-parallel-load.py's header.
+MODEL ?= phi4:14b-q8_0
+NUM_PARALLEL_VALUES ?= 1,3
+CONCURRENCY ?= 4
+bench-parallel-load:
+	.venv/bin/python scripts/bench-parallel-load.py \
+	    --model "$(MODEL)" \
+	    --num-parallel-values "$(NUM_PARALLEL_VALUES)" \
+	    --concurrency "$(CONCURRENCY)"
 
 # ── License check ────────────────────────────────────────────────────────────
 
