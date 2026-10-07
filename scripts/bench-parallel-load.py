@@ -219,6 +219,8 @@ def run_single_request(litellm_url, headers, model, prompt, max_tokens, tools, b
         "max_tokens": max_tokens, "temperature": 0.0, "stream": True,
         "stream_options": {"include_usage": True},
     }
+    # tools, if any, were already resolved per-model by the caller (a stub tool
+    # offered to a model untagged "tools" would error, not just no-op)
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
@@ -236,7 +238,7 @@ def run_single_request(litellm_url, headers, model, prompt, max_tokens, tools, b
             with client.stream("POST", f"{litellm_url}/chat/completions", json=payload, headers=headers) as resp:
                 if resp.status_code != 200:
                     body = resp.read().decode(errors="replace")
-                    return {"idx": idx, "prompt": prompt, "error": f"HTTP {resp.status_code}: {body[:300]}"}
+                    return {"idx": idx, "model": model, "prompt": prompt, "error": f"HTTP {resp.status_code}: {body[:300]}"}
                 for line in resp.iter_lines():
                     if not line or not line.startswith("data:"):
                         continue
@@ -262,11 +264,11 @@ def run_single_request(litellm_url, headers, model, prompt, max_tokens, tools, b
                     if chunk.get("usage"):
                         usage = chunk["usage"]
     except Exception as exc:
-        return {"idx": idx, "prompt": prompt, "error": str(exc)}
+        return {"idx": idx, "model": model, "prompt": prompt, "error": str(exc)}
 
     end_ts = time.time()
     return {
-        "idx": idx, "prompt": prompt, "error": None,
+        "idx": idx, "model": model, "prompt": prompt, "error": None,
         "send_ts": send_ts, "first_token_ts": first_token_ts, "end_ts": end_ts,
         "ttft_s": (first_token_ts - send_ts) if first_token_ts else None,
         "total_s": end_ts - send_ts,
@@ -275,9 +277,11 @@ def run_single_request(litellm_url, headers, model, prompt, max_tokens, tools, b
     }
 
 
-def run_scenario(num_parallel, model, prompts, max_tokens, tools, litellm_url, headers, concurrency):
-    print(f"\n=== Scenario: NUM_PARALLEL={num_parallel} ===", file=sys.stderr)
-    unload_model(model)
+def run_scenario(num_parallel, models, prompts, max_tokens, tools_by_model, litellm_url, headers, concurrency):
+    label = models[0] if len(models) == 1 else "+".join(models)
+    print(f"\n=== Scenario: NUM_PARALLEL={num_parallel}, models={label} ===", file=sys.stderr)
+    for m in set(models):
+        unload_model(m)
 
     stop_event = threading.Event()
     samples = []
@@ -287,11 +291,12 @@ def run_scenario(num_parallel, model, prompts, max_tokens, tools, litellm_url, h
     batch_start = time.time()
     barrier = threading.Barrier(concurrency)
     request_prompts = [prompts[i % len(prompts)] for i in range(concurrency)]
+    request_models = [models[i % len(models)] for i in range(concurrency)]
 
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         futures = [
-            pool.submit(run_single_request, litellm_url, headers, model, request_prompts[i],
-                        max_tokens, tools, barrier, i)
+            pool.submit(run_single_request, litellm_url, headers, request_models[i], request_prompts[i],
+                        max_tokens, tools_by_model.get(request_models[i]), barrier, i)
             for i in range(concurrency)
         ]
         results = [f.result() for f in futures]
@@ -300,24 +305,28 @@ def run_scenario(num_parallel, model, prompts, max_tokens, tools, litellm_url, h
     stop_event.set()
     sampler.join(timeout=5)
 
-    unload_model(model)
+    for m in set(models):
+        unload_model(m)
 
     return {
         "num_parallel": num_parallel,
+        "models": models,
         "batch_wall_s": batch_end - batch_start,
         "results": results,
         "load_samples": samples,
     }
 
 
-def render_report(model, max_tokens, concurrency, scenarios) -> str:
+def render_report(models, max_tokens, concurrency, scenarios) -> str:
+    title = models[0] if len(models) == 1 else " + ".join(models) + " (distributed)"
     lines = [
-        f"# Parallel-load benchmark — `{model}`",
+        f"# Parallel-load benchmark — `{title}`",
         "",
         f"Generated: {datetime.now().isoformat(timespec='seconds')}",
         f"Concurrency: {concurrency} simultaneous requests per scenario · max_tokens={max_tokens}",
         "",
     ]
+    multi = len(models) > 1
     for sc in scenarios:
         np_val = sc["num_parallel"]
         ok = [r for r in sc["results"] if not r.get("error")]
@@ -338,16 +347,20 @@ def render_report(model, max_tokens, concurrency, scenarios) -> str:
             )
             lines.append("")
 
-        lines.append("| # | TTFT (s) | Total (s) | Gen tokens | Tool called | Finish reason |")
-        lines.append("|---|---|---|---|---|---|")
+        model_col = "| Model " if multi else ""
+        model_sep = "|---" if multi else ""
+        lines.append(f"| # {model_col}| TTFT (s) | Total (s) | Gen tokens | Tool called | Finish reason |")
+        lines.append(f"|---{model_sep}|---|---|---|---|---|")
         for r in sorted(ok, key=lambda x: x["idx"]):
             gen_tok = r["usage"].get("completion_tokens", "n/a") if r.get("usage") else "n/a"
+            model_cell = f"| `{r['model']}` " if multi else ""
             lines.append(
-                f"| {r['idx']} | {r['ttft_s']:.2f} | {r['total_s']:.2f} | {gen_tok} | "
+                f"| {r['idx']} {model_cell}| {r['ttft_s']:.2f} | {r['total_s']:.2f} | {gen_tok} | "
                 f"{r['tool_called']} | {r['finish_reason']} |"
             )
         for r in errs:
-            lines.append(f"| {r['idx']} | ERROR | ERROR | - | - | {r['error']} |")
+            model_cell = f"| `{r['model']}` " if multi else ""
+            lines.append(f"| {r['idx']} {model_cell}| ERROR | ERROR | - | - | {r['error']} |")
         lines.append("")
 
         if ok:
@@ -357,13 +370,20 @@ def render_report(model, max_tokens, concurrency, scenarios) -> str:
                 lines.append(f"Avg TTFT: {sum(ttfts)/len(ttfts):.2f}s · Avg total: {sum(totals)/len(totals):.2f}s · "
                               f"Max total: {max(totals):.2f}s")
                 lines.append("")
+            if multi:
+                for m in models:
+                    m_totals = [r["total_s"] for r in ok if r["model"] == m]
+                    if m_totals:
+                        lines.append(f"  - `{m}`: {len(m_totals)} request(s), avg total {sum(m_totals)/len(m_totals):.2f}s")
+                lines.append("")
 
     lines.append("## Full transcripts")
     lines.append("")
     for sc in scenarios:
         lines.append(f"### NUM_PARALLEL={sc['num_parallel']}")
         for r in sorted(sc["results"], key=lambda x: x["idx"]):
-            lines.append(f"\n**Request {r['idx']}** — prompt: _{r['prompt']}_\n")
+            model_note = f" (`{r['model']}`)" if multi else ""
+            lines.append(f"\n**Request {r['idx']}**{model_note} — prompt: _{r['prompt']}_\n")
             if r.get("error"):
                 lines.append(f"ERROR: {r['error']}\n")
             else:
@@ -375,6 +395,9 @@ def render_report(model, max_tokens, concurrency, scenarios) -> str:
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--model", default="phi4:14b-q8_0")
+    ap.add_argument("--models", default="",
+                     help="Comma list of models to distribute requests round-robin across "
+                          "(overrides --model; use for a multi-model concurrency test)")
     ap.add_argument("--num-parallel-values", default="1,3")
     ap.add_argument("--concurrency", type=int, default=4)
     ap.add_argument("--max-tokens", type=int, default=400)
@@ -395,38 +418,46 @@ def main():
     else:
         prompts = DEFAULT_PROMPTS
 
+    models = [m.strip() for m in args.models.split(",") if m.strip()] or [args.model]
+
     master_key = _read_secret("litellm_master_key")
     if not master_key:
         print("ERROR: litellm_master_key not available", file=sys.stderr)
         sys.exit(1)
     headers = {"Authorization": f"Bearer {master_key}", "Content-Type": "application/json"}
 
-    tools = None
+    tools_by_model = {m: None for m in models}
     if args.with_tools:
         info = httpx.get(f"{args.litellm_url}/model/info", headers=headers, timeout=15.0).json()
-        tags = next((e.get("model_info", {}).get("tags", []) for e in info.get("data", [])
-                     if e.get("model_name") == args.model), [])
-        if "tools" in tags:
-            tools = STUB_TOOL
-        else:
-            print(f"NOTE: '{args.model}' not tagged 'tools' in LiteLLM — skipping --with-tools.", file=sys.stderr)
+        tags_by_model = {e.get("model_name"): e.get("model_info", {}).get("tags", []) for e in info.get("data", [])}
+        for m in models:
+            if "tools" in tags_by_model.get(m, []):
+                tools_by_model[m] = STUB_TOOL
+            else:
+                print(f"NOTE: '{m}' not tagged 'tools' in LiteLLM — skipping --with-tools for it.", file=sys.stderr)
 
     requested_values = [int(v) for v in args.num_parallel_values.split(",")]
     original_env = _live_ollama_env()
     original_num_parallel = int(original_env.get("OLLAMA_NUM_PARALLEL", "1"))
     original_max_loaded = int(original_env.get("OLLAMA_MAX_LOADED_MODELS", "2"))
+    # If this scenario run needs to switch settings, pin MAX_LOADED_MODELS to at
+    # least as many as the distinct models actually being exercised, not a flat
+    # 1 -- a single-model scenario still gets the tightest safe pin, a
+    # multi-model distributed one needs all of them resident simultaneously.
+    scenario_max_loaded = max(len(set(models)), 1)
 
     scenarios = []
     changed_env = False
     try:
         for np_val in requested_values:
-            if np_val != int(_live_ollama_env().get("OLLAMA_NUM_PARALLEL", "1")):
+            live = _live_ollama_env()
+            if np_val != int(live.get("OLLAMA_NUM_PARALLEL", "1")) or scenario_max_loaded > int(live.get("OLLAMA_MAX_LOADED_MODELS", "2")):
                 print(f"Switching OLLAMA_NUM_PARALLEL -> {np_val} "
-                      f"(pinning MAX_LOADED_MODELS=1 for this scenario) ...", file=sys.stderr)
-                set_ollama_env(num_parallel=np_val, max_loaded_models=1)
+                      f"(pinning MAX_LOADED_MODELS={scenario_max_loaded} for this scenario) ...", file=sys.stderr)
+                set_ollama_env(num_parallel=np_val, max_loaded_models=scenario_max_loaded)
                 changed_env = True
             scenarios.append(
-                run_scenario(np_val, args.model, prompts, args.max_tokens, tools,
+                run_scenario(np_val, models, prompts, args.max_tokens, tools_by_model,
                              args.litellm_url, headers, args.concurrency)
             )
     finally:
@@ -435,9 +466,9 @@ def main():
                   f"OLLAMA_MAX_LOADED_MODELS={original_max_loaded} ...", file=sys.stderr)
             set_ollama_env(num_parallel=original_num_parallel, max_loaded_models=original_max_loaded)
 
-    report = render_report(args.model, args.max_tokens, args.concurrency, scenarios)
+    report = render_report(models, args.max_tokens, args.concurrency, scenarios)
     os.makedirs(args.results_dir, exist_ok=True)
-    safe_model = args.model.replace("/", "_").replace(":", "_")
+    safe_model = "_".join(m.replace("/", "_").replace(":", "_") for m in models)
     out_path = os.path.join(args.results_dir, f"{datetime.now():%Y%m%d-%H%M%S}_{safe_model}_parallel-load.md")
     with open(out_path, "w") as f:
         f.write(report)

@@ -136,9 +136,13 @@ test-security:
 MODEL ?= phi4:14b-q8_0
 NUM_PARALLEL_VALUES ?= 1,3
 CONCURRENCY ?= 4
+MODELS ?=
+PROMPTS_FILE ?=
 bench-parallel-load:
 	.venv/bin/python scripts/bench-parallel-load.py \
 	    --model "$(MODEL)" \
+	    $(if $(MODELS),--models "$(MODELS)") \
+	    $(if $(PROMPTS_FILE),--prompts-file "$(PROMPTS_FILE)") \
 	    --num-parallel-values "$(NUM_PARALLEL_VALUES)" \
 	    --concurrency "$(CONCURRENCY)"
 
