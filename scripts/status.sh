@@ -68,8 +68,20 @@ Options:
                 own architecture/KV_CACHE_TYPE, same formula as the D-047
                 ceiling check, times its *actual* total allocated context
                 (per-slot context_length * -np slots)
-  -vv           Add PORT and URL columns (full http://localhost:PORT URL),
-                plus the same ollama tuning / loaded-models summary as -v
+  -vv           Add a URL column (replaces PORT; full http://localhost:PORT
+                URL) plus a CPU PRESSURE column -- each service's own
+                cgroup PSI "some avg10/avg60/avg300" (% of time something in
+                that service wanted CPU and had to wait; the nearest real
+                per-service multi-window load metric the kernel tracks
+                natively, not a literal load1/5/15). Also adds, after the
+                Summary line, an "Under Load:" tag (idle/light/moderate/
+                heavy/struggling) folding together host-wide CPU load (vs.
+                physical core count), memory %, GPU utilization (if an
+                NVIDIA GPU is present), and network utilization (busiest
+                real-link-speed interface) -- the worst of these, not an
+                average, since one saturated resource is a bottleneck
+                regardless of the others' headroom. Same ollama tuning /
+                loaded-models summary as -v.
   -h, --help    Show this message
 
 Exit codes:
@@ -172,6 +184,40 @@ _svc_category() {
 # Empty categories (no services in scope for this node profile) are skipped
 # automatically at print time.
 CATEGORY_ORDER=("Edge & Routing" "Applications" "Model Serving" "Knowledge / RAG" "Storage & Data" "Observability & Metrics" "Other")
+
+# Returns a service's CPU PSI (Pressure Stall Information) -- "some avg10/
+# avg60/avg300" from its own systemd-managed cgroup, as "avg10|avg60|avg300".
+# This is the closest real per-service multi-window load metric the kernel
+# tracks natively (cgroup v2, CONFIG_PSI), continuously, with no extra
+# sampling infrastructure needed on our part. Its windows are 10s/60s/300s
+# -- not the traditional 1/5/15-minute loadavg windows, which the kernel
+# does not track per-cgroup (there is no persistent avg900) -- so this is
+# the nearest available equivalent, not a literal load1/5/15.
+# PSI's "some" value is the % of time *something* in the cgroup wanted CPU
+# and had to wait (contention), not raw CPU utilization -- arguably a more
+# direct "is this service struggling" signal than %CPU would be.
+# Empty on Darwin, bare-metal services, or any service whose cgroup can't
+# be resolved (inactive, or no quadlet unit for it).
+_svc_cpu_pressure() {
+    local svc="$1"
+    [[ "$(uname -s)" == "Darwin" ]] && return 0
+    local cg
+    cg=$(systemctl --user show -p ControlGroup "${svc}.service" 2>/dev/null | cut -d= -f2-)
+    [[ -z "$cg" ]] && return 0
+    local psi_file="/sys/fs/cgroup${cg}/cpu.pressure"
+    [[ -r "$psi_file" ]] || return 0
+    awk '
+        /^some/ {
+            for (i = 1; i <= NF; i++) {
+                split($i, a, "=")
+                if (a[1] == "avg10")  a10  = a[2]
+                if (a[1] == "avg60")  a60  = a[2]
+                if (a[1] == "avg300") a300 = a[2]
+            }
+            print a10 "|" a60 "|" a300
+        }
+    ' "$psi_file" 2>/dev/null
+}
 
 # Returns container health (only for quadlet-managed active containers)
 _svc_health() {
@@ -419,6 +465,135 @@ _tailnet_status() {
     fi
 }
 
+# Buckets a numeric value against four ascending thresholds into a
+# five-level qualitative scale. $1=value $2..$5=light/moderate/heavy/
+# struggling cutoffs (below $2 is "idle").
+_classify_level() {
+    awk -v v="$1" -v t1="$2" -v t2="$3" -v t3="$4" -v t4="$5" 'BEGIN{
+        if (v < t1)      print "idle";
+        else if (v < t2) print "light";
+        else if (v < t3) print "moderate";
+        else if (v < t4) print "heavy";
+        else             print "struggling";
+    }'
+}
+
+# Returns this host's physical (non-hyperthread) core count, falling back
+# to the logical count (nproc) if lscpu's fields aren't parseable. Matters
+# because llama.cpp defaults its own thread count to the physical core
+# count, not logical (see docs/governance/lessons-learned.md, 2026-10-06) --
+# a load1 figure only makes sense measured against the count the workload
+# actually schedules against.
+_physical_cores() {
+    local per_socket sockets phys
+    per_socket=$(lscpu 2>/dev/null | awk -F: '/^Core\(s\) per socket/{gsub(/ /,"",$2); print $2}')
+    sockets=$(lscpu 2>/dev/null | awk -F: '/^Socket\(s\)/{gsub(/ /,"",$2); print $2}')
+    if [[ -n "$per_socket" && -n "$sockets" ]]; then
+        phys=$((per_socket * sockets))
+    fi
+    if [[ -z "$phys" || "$phys" -le 0 ]]; then
+        phys=$(nproc 2>/dev/null || echo 1)
+    fi
+    echo "$phys"
+}
+
+# Returns "gpu_util_pct|mem_used_mib|mem_total_mib" for GPU 0, or empty if
+# no NVIDIA GPU/driver is present (this fleet is CPU-inference-only today,
+# but the controller host does have a GPU available for other uses).
+_gpu_status() {
+    command -v nvidia-smi &>/dev/null || return 0
+    nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total \
+        --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ' | tr ',' '|'
+}
+
+# Auto-picks the busiest network interface that has a known physical link
+# speed (excludes loopback and container/VPN virtual interfaces, which
+# report no fixed speed), samples its rx/tx byte counters 1s apart, and
+# returns "pct_of_link|iface|rx_mbps|tx_mbps". Empty if no such interface
+# exists (e.g. only virtual interfaces up). The 1s sample is deliberate --
+# only run at -vv, the already-heaviest/most-diagnostic verbosity tier.
+_net_util() {
+    local iface="" best_bytes=0 name speed bytes
+    while read -r name _; do
+        name="${name%:}"
+        case "$name" in lo|veth*|cni*|podman*|docker*|br-*|tailscale*) continue ;; esac
+        speed=$(cat "/sys/class/net/${name}/speed" 2>/dev/null)
+        [[ -z "$speed" ]] && continue
+        (( speed <= 0 )) 2>/dev/null && continue
+        bytes=$(awk -v n="${name}:" '$1 == n {print $2 + $10}' /proc/net/dev 2>/dev/null)
+        [[ -z "$bytes" ]] && continue
+        if (( bytes > best_bytes )); then
+            best_bytes=$bytes
+            iface="$name"
+        fi
+    done < <(awk -F: 'NR>2{print $1}' /proc/net/dev)
+    [[ -z "$iface" ]] && return 0
+
+    local speed_mbit rx1 tx1 rx2 tx2
+    speed_mbit=$(cat "/sys/class/net/${iface}/speed" 2>/dev/null)
+    read -r rx1 tx1 <<< "$(awk -v n="${iface}:" '$1 == n {print $2, $10}' /proc/net/dev)"
+    sleep 1
+    read -r rx2 tx2 <<< "$(awk -v n="${iface}:" '$1 == n {print $2, $10}' /proc/net/dev)"
+
+    awk -v rx1="$rx1" -v rx2="$rx2" -v tx1="$tx1" -v tx2="$tx2" -v s="$speed_mbit" -v iface="$iface" 'BEGIN{
+        rx_mbps = (rx2-rx1)*8/1000000
+        tx_mbps = (tx2-tx1)*8/1000000
+        peak = (rx_mbps > tx_mbps) ? rx_mbps : tx_mbps
+        pct = (s > 0) ? (peak/s*100) : 0
+        printf "%.1f|%s|%.2f|%.2f\n", pct, iface, rx_mbps, tx_mbps
+    }'
+}
+
+# Composite "Under Load:" read on the whole host, folding together CPU
+# (load1 vs. physical core count), memory (% used), GPU utilization (if an
+# NVIDIA GPU is present), and network utilization (if a real link-speed
+# interface is active) into one idle/light/moderate/heavy/struggling tag.
+# The overall tag is the WORST (highest-severity) of whichever dimensions
+# could be computed, not an average -- one saturated resource is a real
+# bottleneck regardless of the others having headroom. Thresholds are a
+# judgment call (documented inline below), not a precise SLO; the raw
+# figures are always printed alongside the tag so they can be re-judged.
+_system_under_load() {
+    local load1 load5 load15 phys cpu_ratio cpu_level
+    read -r load1 load5 load15 _ < /proc/loadavg
+    phys=$(_physical_cores)
+    cpu_ratio=$(awk -v l="$load1" -v p="$phys" 'BEGIN{printf "%.2f", (p>0)? l/p : 0}')
+    cpu_level=$(_classify_level "$cpu_ratio" 0.3 0.7 1.2 2.0)
+
+    local mem_total mem_used mem_pct mem_level
+    read -r mem_total mem_used <<< "$(free -m | awk '/^Mem:/{print $2, $3}')"
+    mem_pct=$(awk -v u="$mem_used" -v t="$mem_total" 'BEGIN{printf "%.1f", (t>0)? u/t*100 : 0}')
+    mem_level=$(_classify_level "$mem_pct" 30 50 75 90)
+
+    local gpu_raw gpu_util gpu_mem_used gpu_mem_total gpu_level="" gpu_note=""
+    gpu_raw=$(_gpu_status)
+    if [[ -n "$gpu_raw" ]]; then
+        IFS='|' read -r gpu_util gpu_mem_used gpu_mem_total <<< "$gpu_raw"
+        gpu_level=$(_classify_level "$gpu_util" 10 30 60 85)
+        gpu_note=", gpu ${gpu_util}% (${gpu_mem_used}/${gpu_mem_total}MiB) [${gpu_level}]"
+    fi
+
+    local net_raw net_pct net_iface net_level="" net_note=""
+    net_raw=$(_net_util)
+    if [[ -n "$net_raw" ]]; then
+        IFS='|' read -r net_pct net_iface _ _ <<< "$net_raw"
+        net_level=$(_classify_level "$net_pct" 5 20 50 80)
+        net_note=", net ${net_pct}% of ${net_iface} link [${net_level}]"
+    fi
+
+    local -A rank=([idle]=0 [light]=1 [moderate]=2 [heavy]=3 [struggling]=4)
+    local overall="idle" overall_rank=0 lvl r
+    for lvl in "$cpu_level" "$mem_level" "$gpu_level" "$net_level"; do
+        [[ -z "$lvl" ]] && continue
+        r=${rank[$lvl]}
+        if (( r > overall_rank )); then overall_rank=$r; overall="$lvl"; fi
+    done
+
+    printf "%s  (cpu load %s/%s/%s, %sc [%s], mem %s%% [%s]%s%s)\n" \
+        "${overall^^}" "$load1" "$load5" "$load15" "$phys" "$cpu_level" \
+        "$mem_pct" "$mem_level" "$gpu_note" "$net_note"
+}
+
 # ── Deployment check ──────────────────────────────────────────────────────────
 
 quadlet_count=0
@@ -607,8 +782,8 @@ if ! $QUIET; then
     # to match the nested service rows printed under each category below)
     sep_width=0
     if [[ $VERBOSE -ge 2 ]]; then
-        sep_width=$((col + 46))
-        printf "    %-${col}s %-10s %-12s %s\n" "SERVICE" "STATE" "HEALTH" "URL"
+        sep_width=$((col + 68))
+        printf "    %-${col}s %-10s %-12s %-36s %s\n" "SERVICE" "STATE" "HEALTH" "URL" "CPU PRESSURE (10s/60s/300s)"
     elif [[ $VERBOSE -eq 1 ]]; then
         sep_width=$((col + 32))
         printf "    %-${col}s %-10s %-12s %s\n" "SERVICE" "STATE" "HEALTH" "PORT"
@@ -636,7 +811,14 @@ if ! $QUIET; then
             [[ -z "$health_display" ]] && health_display="-"
             if [[ $VERBOSE -ge 2 ]]; then
                 _url_val=$(_svc_url "$svc")
-                printf "    %-${col}s %-10s %-12s %s\n" "$svc" "$display" "$health_display" "${_url_val:--}"
+                _psi_val=$(_svc_cpu_pressure "$svc")
+                if [[ -n "$_psi_val" ]]; then
+                    IFS='|' read -r _psi_10 _psi_60 _psi_300 <<< "$_psi_val"
+                    _psi_display="${_psi_10}/${_psi_60}/${_psi_300}"
+                else
+                    _psi_display="-"
+                fi
+                printf "    %-${col}s %-10s %-12s %-36s %s\n" "$svc" "$display" "$health_display" "${_url_val:--}" "$_psi_display"
             elif [[ $VERBOSE -eq 1 ]]; then
                 _port_val=$(_svc_port "$svc")
                 printf "    %-${col}s %-10s %-12s %s\n" "$svc" "$display" "$health_display" "${_port_val:--}"
@@ -655,6 +837,10 @@ if ! $QUIET; then
         echo "  Summary: ${active}/${total} active, ${unhealthy_count} unhealthy  [DEGRADED]"
     else
         echo "  Summary: ${active}/${total} active  [DEGRADED]"
+    fi
+
+    if [[ $VERBOSE -ge 2 ]]; then
+        echo "  Under Load: $(_system_under_load)"
     fi
     echo ""
 fi
