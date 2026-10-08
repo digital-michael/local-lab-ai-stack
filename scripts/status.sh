@@ -54,8 +54,12 @@ Purpose:
 Options:
   --quiet       Suppress all output; rely on exit code only
   --check       Only check if stack is deployed (skips service state queries)
-  -v            Add PORT column showing expected host port from config.json
-  -vv           Add PORT and URL columns (full http://localhost:PORT URL)
+  -v            Add PORT column (expected host port from config.json), and
+                an "ollama tuning" summary in the top stanza showing the live
+                NUM_PARALLEL/MAX_LOADED_MODELS/KEEP_ALIVE/CONTEXT_LENGTH/
+                KV_CACHE_TYPE settings (see docs/decisions.md D-049/D-050/D-051)
+  -vv           Add PORT and URL columns (full http://localhost:PORT URL),
+                plus the same ollama tuning summary as -v
   -h, --help    Show this message
 
 Exit codes:
@@ -164,6 +168,33 @@ _svc_health() {
     local svc="$1" state="$2"
     if [[ "$state" == "active" && -f "$QUADLET_DIR/${svc}.container" ]]; then
         podman inspect --format '{{.State.Health.Status}}' "$svc" 2>/dev/null || true
+    fi
+}
+
+# Returns the live Ollama tuning parameters under active testing/tracked in
+# docs/decisions.md (D-049/D-050/D-051): NUM_PARALLEL, MAX_LOADED_MODELS,
+# KEEP_ALIVE, CONTEXT_LENGTH, KV_CACHE_TYPE. One "key=value" pair per line.
+# Prefers the live running container's actual environment (reflects reality,
+# catches any drift from config.json); falls back to config.json's configured
+# values, clearly marked, if the container isn't reachable.
+_ollama_tuning() {
+    local keys=(OLLAMA_NUM_PARALLEL OLLAMA_MAX_LOADED_MODELS OLLAMA_KEEP_ALIVE OLLAMA_CONTEXT_LENGTH OLLAMA_KV_CACHE_TYPE)
+    local live=""
+    if command -v podman &>/dev/null; then
+        live=$(podman exec ollama env 2>/dev/null | grep '^OLLAMA_' || true)
+    fi
+    if [[ -n "$live" ]]; then
+        local k v
+        for k in "${keys[@]}"; do
+            v=$(grep "^${k}=" <<< "$live" | cut -d= -f2-)
+            echo "${k}=${v:-unset}|live"
+        done
+    else
+        local k v
+        for k in "${keys[@]}"; do
+            v=$(jq -r --arg k "$k" '.services.ollama.environment[$k] // empty' "$CONFIG_FILE" 2>/dev/null)
+            echo "${k}=${v:-unset}|configured"
+        done
     fi
 }
 
@@ -334,6 +365,24 @@ if ! $QUIET; then
     # Tailnet connectivity (headscale)
     _ts_out=$(_tailnet_status 2>/dev/null || echo "unavailable")
     printf "  %-${col}s %s\n" "tailnet" "$_ts_out"
+
+    # Ollama tuning parameters under active testing (D-049/D-050/D-051) — -v+
+    # only, since this is diagnostic detail rather than default-glance status.
+    if [[ $VERBOSE -ge 1 ]] && printf '%s\n' "${services[@]}" | grep -qx ollama; then
+        echo ""
+        printf "  %s\n" "ollama tuning (D-049)"
+        while IFS='|' read -r _pair _source; do
+            _tkey="${_pair%%=*}"
+            _tval="${_pair#*=}"
+            _tlabel="${_tkey#OLLAMA_}"
+            _tlabel="${_tlabel,,}"
+            if [[ "$_source" == "configured" ]]; then
+                printf "    %-20s %s %s\n" "$_tlabel" "$_tval" "(configured, ollama not running to confirm)"
+            else
+                printf "    %-20s %s\n" "$_tlabel" "$_tval"
+            fi
+        done < <(_ollama_tuning)
+    fi
 
     echo ""
     # sep_width tracks the visual width of the separator line (excludes 4-space indent,
