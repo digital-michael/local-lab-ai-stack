@@ -55,11 +55,14 @@ Options:
   --quiet       Suppress all output; rely on exit code only
   --check       Only check if stack is deployed (skips service state queries)
   -v            Add PORT column (expected host port from config.json), and
-                an "ollama tuning" summary in the top stanza showing the live
+                in the top stanza: an "ollama tuning" summary showing the live
                 NUM_PARALLEL/MAX_LOADED_MODELS/KEEP_ALIVE/CONTEXT_LENGTH/
-                KV_CACHE_TYPE settings (see docs/decisions.md D-049/D-050/D-051)
+                KV_CACHE_TYPE settings, plus an "ollama loaded models" list of
+                every currently-resident model and its own actual NUM_PARALLEL
+                (-np) and context size -- these can differ per model even
+                under one global setting (see docs/decisions.md D-049/D-051)
   -vv           Add PORT and URL columns (full http://localhost:PORT URL),
-                plus the same ollama tuning summary as -v
+                plus the same ollama tuning / loaded-models summary as -v
   -h, --help    Show this message
 
 Exit codes:
@@ -196,6 +199,86 @@ _ollama_tuning() {
             echo "${k}=${v:-unset}|configured"
         done
     fi
+}
+
+# Returns every currently-resident (loaded-in-memory) Ollama model together
+# with its own actual parallel-slot count (-np), read straight out of the
+# live llama-server launch command. NUM_PARALLEL is baked in at each model's
+# own load time (D-049), so different resident models can run at different
+# effective concurrency under the same global setting -- e.g. qwen3.8's
+# static MTP classification forces -np 1 regardless (D-051).
+#
+# A runner subprocess is matched to its /api/ps entry by weights-blob digest,
+# resolved from Ollama's own manifest file on disk: /api/ps's own "digest"
+# field is the *manifest's* digest, a different hash that never matches the
+# blob path a runner is invoked with (first worked out in scripts/loads.sh).
+#
+# Takes the already-fetched /api/ps JSON as $1. One "name|np|ctx" line per
+# resident model; np is "?" if the matching runner process couldn't be found.
+_ollama_loaded_models() {
+    local ps_json="$1"
+    local names
+    mapfile -t names < <(jq -r '.models[]?.name // empty' <<< "$ps_json" 2>/dev/null)
+    [[ ${#names[@]} -eq 0 ]] && return 0
+
+    local in_podman=false
+    if command -v podman &>/dev/null && podman inspect ollama &>/dev/null 2>&1; then
+        in_podman=true
+    fi
+
+    local procs=""
+    if $in_podman; then
+        procs=$(podman exec ollama ps aux 2>/dev/null | grep 'llama-server' || true)
+    else
+        procs=$(ps aux 2>/dev/null | grep 'llama-server' | grep -v grep || true)
+    fi
+
+    local models_dir=""
+    if ! $in_podman; then
+        for _c in "${OLLAMA_MODELS:-}" "$AI_STACK_DIR/ollama/models" "$HOME/.ollama/models"; do
+            [[ -n "$_c" && -d "$_c" ]] && { models_dir="$_c"; break; }
+        done
+    fi
+
+    local name base_part namespace model tag manifest_path manifest_json digest np ctx line
+    for name in "${names[@]}"; do
+        ctx=$(jq -r --arg n "$name" '.models[] | select(.name==$n) | .context_length // empty' <<< "$ps_json" 2>/dev/null)
+
+        base_part="${name%%:*}"
+        tag="${name#*:}"
+        [[ "$tag" == "$name" ]] && tag="latest"
+        if [[ "$base_part" == */* ]]; then
+            namespace="${base_part%%/*}"
+            model="${base_part#*/}"
+        else
+            namespace="library"
+            model="$base_part"
+        fi
+        manifest_path="manifests/registry.ollama.ai/${namespace}/${model}/${tag}"
+
+        manifest_json=""
+        if $in_podman; then
+            manifest_json=$(podman exec ollama cat "/root/.ollama/models/${manifest_path}" 2>/dev/null || true)
+        elif [[ -n "$models_dir" ]]; then
+            manifest_json=$(cat "${models_dir}/${manifest_path}" 2>/dev/null || true)
+        fi
+
+        digest=""
+        if [[ -n "$manifest_json" ]]; then
+            digest=$(jq -r '.layers[]? | select(.mediaType=="application/vnd.ollama.image.model") | .digest' \
+                <<< "$manifest_json" 2>/dev/null | sed 's/^sha256://')
+        fi
+
+        np="?"
+        if [[ -n "$digest" && -n "$procs" ]]; then
+            line=$(grep -- "sha256-${digest}" <<< "$procs" | head -1 || true)
+            if [[ -n "$line" ]]; then
+                np=$(awk '{for(i=1;i<=NF;i++) if($i=="-np"){print $(i+1); exit}}' <<< "$line")
+                [[ -z "$np" ]] && np="?"
+            fi
+        fi
+        echo "${name}|${np}|${ctx:-?}"
+    done
 }
 
 # Returns a one-line tailnet connectivity summary using tailscale status --json.
@@ -382,6 +465,24 @@ if ! $QUIET; then
                 printf "    %-20s %s\n" "$_tlabel" "$_tval"
             fi
         done < <(_ollama_tuning)
+
+        echo ""
+        printf "  %s\n" "ollama loaded models"
+        _ps_json=$(curl -sf --max-time 3 http://localhost:11434/api/ps 2>/dev/null || true)
+        if [[ -z "$_ps_json" ]]; then
+            printf "    %s\n" "(ollama unreachable)"
+        else
+            mapfile -t _loaded_lines < <(_ollama_loaded_models "$_ps_json")
+            if [[ ${#_loaded_lines[@]} -eq 0 ]]; then
+                printf "    %s\n" "(none resident)"
+            else
+                printf "    %-28s %-14s %s\n" "MODEL" "NUM_PARALLEL" "CONTEXT"
+                for _lline in "${_loaded_lines[@]}"; do
+                    IFS='|' read -r _lname _lnp _lctx <<< "$_lline"
+                    printf "    %-28s %-14s %s\n" "$_lname" "$_lnp" "$_lctx"
+                done
+            fi
+        fi
     fi
 
     echo ""
