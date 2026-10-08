@@ -58,9 +58,16 @@ Options:
                 in the top stanza: an "ollama tuning" summary showing the live
                 NUM_PARALLEL/MAX_LOADED_MODELS/KEEP_ALIVE/CONTEXT_LENGTH/
                 KV_CACHE_TYPE settings, plus an "ollama loaded models" list of
-                every currently-resident model and its own actual NUM_PARALLEL
-                (-np) and context size -- these can differ per model even
-                under one global setting (see docs/decisions.md D-049/D-051)
+                every currently-resident model with ACTIVE/MAX request slots
+                -- MAX is that model's own -np ceiling (can differ per model
+                even under one global setting, e.g. qwen3.8's D-051 cap of 1)
+                and ACTIVE is the true, instantaneous in-flight count queried
+                live from that model's own llama-server /slots endpoint, not
+                inferred (see docs/decisions.md D-049/D-051). CONTEXT also
+                shows that model's real total KV-cache memory in GiB -- its
+                own architecture/KV_CACHE_TYPE, same formula as the D-047
+                ceiling check, times its *actual* total allocated context
+                (per-slot context_length * -np slots)
   -vv           Add PORT and URL columns (full http://localhost:PORT URL),
                 plus the same ollama tuning / loaded-models summary as -v
   -h, --help    Show this message
@@ -201,20 +208,106 @@ _ollama_tuning() {
     fi
 }
 
+# Performs a minimal raw HTTP GET over bash's /dev/tcp and prints only the
+# response body -- the ollama container image ships neither curl nor wget,
+# so this is the only way to reach a loaded model's own llama-server runner
+# on its private, container-internal 127.0.0.1:<port> (not reachable from
+# the host; confirmed by a direct curl attempt timing out).
+# $1=host $2=port $3=path $4=podman|bare (where to run the raw request from)
+_raw_http_get() {
+    local host="$1" port="$2" path="$3" mode="$4" raw script
+    script="exec 3<>/dev/tcp/${host}/${port} || exit 1
+printf 'GET %s HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' '${path}' >&3
+cat <&3"
+    if [[ "$mode" == "podman" ]]; then
+        raw=$(podman exec ollama bash -c "$script" 2>/dev/null || true)
+    else
+        raw=$(bash -c "$script" 2>/dev/null || true)
+    fi
+    awk 'body{print} /^\r?$/{body=1}' <<< "$raw"
+}
+
+# Bytes per KV cache element for a given --cache-type-k/-v value. Mirrors
+# Ollama's own supported OLLAMA_KV_CACHE_TYPE values; unrecognized/unknown
+# types fall back to f16 (2 bytes), the conservative direction (same
+# fallback convention as pull-models.sh's D-047 ceiling check).
+_kv_bytes_per_element() {
+    case "$1" in
+        q4_0) echo 0.5 ;;
+        q8_0) echo 1 ;;
+        f32)  echo 4 ;;
+        *)    echo 2 ;;  # f16 or unknown
+    esac
+}
+
+# Returns the actual total KV-cache memory (GiB) a loaded model's current
+# launch has reserved. Same per-token-bytes formula as pull-models.sh's
+# D-047 ceiling check (model's own /api/show: block_count, head_count_kv,
+# key_length/embedding_length), but computing a real figure instead of a
+# conservative ceiling: uses the KV_CACHE_TYPE actually baked into this
+# model's own launch command (not assumed to be f16), and multiplies by the
+# *total* allocated context -- per-slot context_length * -np slots, since
+# Ollama reserves KV cache for every slot up front at load time, not just
+# the one slot in use (confirmed directly: mistral's launch command showed
+# "-c 65536 -np 4" for a configured 16384 context_length -- 16384*4=65536).
+# $1=model name  $2=per-slot context_length  $3=np slots  $4=cache_type
+# Prints "?" if the model's architecture fields aren't present or inputs
+# are unresolved.
+_model_kv_gib() {
+    local name="$1" ctx="$2" np="$3" cache_type="$4"
+    if [[ "$ctx" == "?" || "$np" == "?" || -z "$ctx" || -z "$np" ]]; then
+        echo "?"; return
+    fi
+
+    local show_json
+    show_json=$(curl -sf --max-time 3 http://localhost:11434/api/show \
+        -d "$(jq -n --arg m "$name" '{model:$m}')" 2>/dev/null) || { echo "?"; return; }
+
+    local bytes_per_elem; bytes_per_elem=$(_kv_bytes_per_element "$cache_type")
+
+    jq -r --argjson ctx "$ctx" --argjson np "$np" --argjson bpe "$bytes_per_elem" '
+      (.model_info // {}) as $mi |
+      ($mi | to_entries | map(select(.key | endswith(".block_count"))) | .[0].value // null) as $block_count |
+      ($mi | to_entries | map(select(.key | endswith(".attention.head_count_kv"))) | .[0].value // null) as $kv_heads_raw |
+      ($mi | to_entries | map(select(.key | endswith(".attention.key_length"))) | .[0].value // null) as $key_length |
+      ($mi | to_entries | map(select(.key | endswith(".attention.head_count"))) | .[0].value // null) as $head_count |
+      ($mi | to_entries | map(select(.key | endswith(".embedding_length"))) | .[0].value // null) as $embedding_length |
+      (if $key_length != null then $key_length
+       elif ($head_count != null and $embedding_length != null and $head_count > 0) then ($embedding_length / $head_count)
+       else null end) as $head_dim |
+      (if ($kv_heads_raw | type) == "array" then ($kv_heads_raw | add)
+       elif ($kv_heads_raw != null and $block_count != null) then ($kv_heads_raw * $block_count)
+       else null end) as $total_kv_head_layers |
+      if ($total_kv_head_layers == null or $head_dim == null or $total_kv_head_layers == 0 or $head_dim == 0) then "?"
+      else
+        (2 * $total_kv_head_layers * $head_dim * $bpe) as $bytes_per_token |
+        (($bytes_per_token * $ctx * $np) / 1073741824)
+      end
+    ' <<< "$show_json" 2>/dev/null | { read -r _g; [[ "$_g" == "?" || -z "$_g" ]] && echo "?" || printf '%.2f\n' "$_g"; }
+}
+
 # Returns every currently-resident (loaded-in-memory) Ollama model together
-# with its own actual parallel-slot count (-np), read straight out of the
-# live llama-server launch command. NUM_PARALLEL is baked in at each model's
-# own load time (D-049), so different resident models can run at different
-# effective concurrency under the same global setting -- e.g. qwen3.8's
-# static MTP classification forces -np 1 regardless (D-051).
+# with its real-time active request count and its max parallel-slot count
+# (-np). The max is read straight out of the live llama-server launch
+# command; NUM_PARALLEL is baked in at each model's own load time (D-049),
+# so different resident models can have different ceilings under the same
+# global setting -- e.g. qwen3.8's static MTP classification forces -np 1
+# regardless (D-051). The *active* count is the true instantaneous instance
+# count: queried live from that runner's own /slots endpoint (llama.cpp's
+# own concurrency scheduler -- each slot reports is_processing true/false),
+# not inferred or assumed from the max.
 #
 # A runner subprocess is matched to its /api/ps entry by weights-blob digest,
 # resolved from Ollama's own manifest file on disk: /api/ps's own "digest"
 # field is the *manifest's* digest, a different hash that never matches the
 # blob path a runner is invoked with (first worked out in scripts/loads.sh).
 #
-# Takes the already-fetched /api/ps JSON as $1. One "name|np|ctx" line per
-# resident model; np is "?" if the matching runner process couldn't be found.
+# Also computes the real total KV-cache memory that model's launch has
+# reserved (see _model_kv_gib above) -- the max expected memory a context of
+# that size takes up for this specific model's architecture and KV_CACHE_TYPE.
+#
+# Takes the already-fetched /api/ps JSON as $1. One "name|active|max|ctx|kv_gib"
+# line per resident model; any field is "?" if it couldn't be resolved.
 _ollama_loaded_models() {
     local ps_json="$1"
     local names
@@ -240,7 +333,8 @@ _ollama_loaded_models() {
         done
     fi
 
-    local name base_part namespace model tag manifest_path manifest_json digest np ctx line
+    local name base_part namespace model tag manifest_path manifest_json digest np ctx line port
+    local slots_json active cache_type kv_gib
     for name in "${names[@]}"; do
         ctx=$(jq -r --arg n "$name" '.models[] | select(.name==$n) | .context_length // empty' <<< "$ps_json" 2>/dev/null)
 
@@ -270,14 +364,33 @@ _ollama_loaded_models() {
         fi
 
         np="?"
+        port=""
+        cache_type="f16"
         if [[ -n "$digest" && -n "$procs" ]]; then
             line=$(grep -- "sha256-${digest}" <<< "$procs" | head -1 || true)
             if [[ -n "$line" ]]; then
                 np=$(awk '{for(i=1;i<=NF;i++) if($i=="-np"){print $(i+1); exit}}' <<< "$line")
                 [[ -z "$np" ]] && np="?"
+                port=$(awk '{for(i=1;i<=NF;i++) if($i=="--port"){print $(i+1); exit}}' <<< "$line")
+                cache_type=$(awk '{for(i=1;i<=NF;i++) if($i=="--cache-type-k"){print $(i+1); exit}}' <<< "$line")
+                [[ -z "$cache_type" ]] && cache_type="f16"
             fi
         fi
-        echo "${name}|${np}|${ctx:-?}"
+
+        active="?"
+        if [[ -n "$port" ]]; then
+            if $in_podman; then
+                slots_json=$(_raw_http_get "127.0.0.1" "$port" "/slots" "podman")
+            else
+                slots_json=$(_raw_http_get "127.0.0.1" "$port" "/slots" "bare")
+            fi
+            if [[ -n "$slots_json" ]]; then
+                active=$(jq '[.[] | select(.is_processing==true)] | length' <<< "$slots_json" 2>/dev/null)
+                [[ -z "$active" ]] && active="?"
+            fi
+        fi
+        kv_gib=$(_model_kv_gib "$name" "${ctx:-?}" "$np" "$cache_type")
+        echo "${name}|${active}|${np}|${ctx:-?}|${kv_gib:-?}"
     done
 }
 
@@ -476,10 +589,14 @@ if ! $QUIET; then
             if [[ ${#_loaded_lines[@]} -eq 0 ]]; then
                 printf "    %s\n" "(none resident)"
             else
-                printf "    %-28s %-14s %s\n" "MODEL" "NUM_PARALLEL" "CONTEXT"
+                printf "    %-28s %-14s %s\n" "MODEL" "ACTIVE/MAX" "CONTEXT (KV mem)"
                 for _lline in "${_loaded_lines[@]}"; do
-                    IFS='|' read -r _lname _lnp _lctx <<< "$_lline"
-                    printf "    %-28s %-14s %s\n" "$_lname" "$_lnp" "$_lctx"
+                    IFS='|' read -r _lname _lactive _lnp _lctx _lkvgib <<< "$_lline"
+                    if [[ "$_lkvgib" == "?" ]]; then
+                        printf "    %-28s %-14s %s\n" "$_lname" "${_lactive}/${_lnp}" "$_lctx"
+                    else
+                        printf "    %-28s %-14s %s\n" "$_lname" "${_lactive}/${_lnp}" "${_lctx} (${_lkvgib}G)"
+                    fi
                 done
             fi
         fi
