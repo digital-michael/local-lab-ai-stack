@@ -126,7 +126,7 @@ http:
       service: openwebui
       middlewares:
         - authentik
-        - secure-headers
+        - secure-headers-embeddable
         - nocache
       tls: {}
 
@@ -138,7 +138,7 @@ http:
       service: homepage
       middlewares:
         - authentik
-        - secure-headers
+        - secure-headers-embeddable
       tls: {}
 
     # Public entry — grafana.photondatum.space proxied via Caddy on photondatum.space.

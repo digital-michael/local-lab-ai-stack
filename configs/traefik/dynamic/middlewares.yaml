@@ -22,6 +22,28 @@ http:
         stsSeconds: 31536000
         stsIncludeSubdomains: true
 
+    # Same as secure-headers, but allows framing from the portal
+    # (portal.photondatum.space) instead of a blanket frameDeny. Uses CSP
+    # frame-ancestors (modern, respected by Firefox) rather than the
+    # deprecated X-Frame-Options ALLOW-FROM, which Firefox never supported.
+    # Applied only to routers meant to be embedded in the portal's iframe.
+    secure-headers-embeddable:
+      headers:
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: strict-origin-when-cross-origin
+        forceSTSHeader: true
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        contentSecurityPolicy: "frame-ancestors 'self' https://portal.photondatum.space"
+
+    # Redirect bare / to /admin/v1/nodes (used by ki-public-root router)
+    redirect-to-admin:
+      redirectRegex:
+        regex: "^(https?://[^/]+)/?$"
+        replacement: "${1}/admin/v1/nodes"
+        permanent: false
+
     # Authentik forward-auth middleware
     # Authentik runs on photondatum.space (always-on VPS edge node).
     # CENTAURI services degrade gracefully when the VPS is unreachable —
