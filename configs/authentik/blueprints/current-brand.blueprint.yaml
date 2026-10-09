@@ -1,0 +1,32 @@
+version: 1
+metadata:
+  name: auth.photondatum.space current state (exported 2026-10-09)
+# Faithful blueprint reconstruction of the live, single Brand row on
+# auth.photondatum.space (Authentik 2026.5.7), via:
+#   podman exec ai-stack-iam-authentik ak dumpdata authentik_brands --indent 2
+# This is the UNMODIFIED stock default brand that ships with Authentik —
+# nothing has been customized here yet. Flow pk's were resolved to their
+# slugs below (!Find) so this stays portable instead of hardcoding this
+# install's generated UUIDs.
+entries:
+  - model: authentik_brands.brand
+    identifiers:
+      domain: authentik-default
+    attrs:
+      default: true
+      branding_title: authentik
+      branding_logo: /static/dist/assets/icons/icon_left_brand.svg
+      branding_favicon: /static/dist/assets/icons/icon.png
+      branding_custom_css: ""
+      branding_default_flow_background: /static/dist/assets/images/flow_background.jpg
+      flow_authentication: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+      flow_invalidation: !Find [authentik_flows.flow, [slug, default-invalidation-flow]]
+      flow_user_settings: !Find [authentik_flows.flow, [slug, default-user-settings-flow]]
+      flow_recovery: null
+      flow_unenrollment: null
+      flow_device_code: null
+      flow_lockdown: null
+      default_application: null
+      web_certificate: null
+      attributes: {}
+      client_certificates: []

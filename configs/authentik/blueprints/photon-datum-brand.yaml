@@ -1,0 +1,45 @@
+version: 1
+metadata:
+  name: photon-datum-brand
+# Adds the Photon Datum brand for auth.photondatum.space and makes it the
+# default, demoting Authentik's stock "authentik-default" brand (confirmed
+# unmodified on this instance via `ak dumpdata authentik_brands` — see
+# configs/authentik/blueprints/current-brand.blueprint.yaml for the as-found
+# snapshot this is diffed against). Both entries are in one file so the
+# default flag flips atomically on apply — never a moment with zero or two
+# default brands.
+#
+# Logo/favicon/CSS are plain URLs served by the website (Hugo `static/`
+# passthrough) at https://photondatum.space/branding/authentik/ — no media
+# upload, no Authentik-side storage backend involved. branding_custom_css is
+# a literal-text field (not a URL field); it holds a one-line @import so the
+# actual styling stays tracked and editable in the website repo.
+#
+# Flow bindings are copied as-is from the stock default brand (same three
+# bound: authentication, invalidation, user_settings; recovery/unenrollment/
+# device_code/lockdown stay unbound, matching current behavior exactly).
+entries:
+  - model: authentik_brands.brand
+    identifiers:
+      domain: authentik-default
+    attrs:
+      default: false
+
+  - model: authentik_brands.brand
+    identifiers:
+      name: photon-datum-blue
+    attrs:
+      domain: auth.photondatum.space
+      default: true
+      branding_title: Photon Datum
+      branding_logo: https://photondatum.space/branding/authentik/logo.png
+      branding_favicon: https://photondatum.space/branding/authentik/favicon.ico
+      branding_custom_css: '@import url("https://photondatum.space/branding/authentik/theme.css");'
+      flow_authentication: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+      flow_invalidation: !Find [authentik_flows.flow, [slug, default-invalidation-flow]]
+      flow_user_settings: !Find [authentik_flows.flow, [slug, default-user-settings-flow]]
+      flow_recovery: null
+      flow_unenrollment: null
+      flow_device_code: null
+      flow_lockdown: null
+      attributes: {}
