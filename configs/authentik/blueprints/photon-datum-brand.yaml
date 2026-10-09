@@ -18,6 +18,14 @@ metadata:
 # Flow bindings are copied as-is from the stock default brand (same three
 # bound: authentication, invalidation, user_settings; recovery/unenrollment/
 # device_code/lockdown stay unbound, matching current behavior exactly).
+#
+# Applied live on 2026-10-09 via `ak shell` (Brand has no `name` field —
+# confirmed by Django's own FieldError listing its real fields — so the
+# identifier below is `domain`, not `name`; an earlier version of this file
+# used `name` and would fail the same way). Live state: brand_uuid
+# b7a28a94-853f-4bed-9c07-6de1f7584b7b, domain auth.photondatum.space,
+# default=true; authentik-default now default=false. This file should still
+# match that live state if ever applied as an actual blueprint.
 entries:
   - model: authentik_brands.brand
     identifiers:
@@ -27,9 +35,8 @@ entries:
 
   - model: authentik_brands.brand
     identifiers:
-      name: photon-datum-blue
-    attrs:
       domain: auth.photondatum.space
+    attrs:
       default: true
       branding_title: Photon Datum
       branding_logo: https://photondatum.space/branding/authentik/logo.png
