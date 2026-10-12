@@ -185,13 +185,45 @@ _show_for_model() {
 # "num_ctx" already present in models.json's litellm_params — set via
 # config.json's optional per-model num_ctx field — always wins over this; the
 # heuristic only fills in what nothing else specified.
+#
+# MoE-aware (found via qwen3.8-flash-next): bucketing on .details.parameter_size
+# alone is a dense-model assumption — it's the TOTAL parameter count, but a
+# sparse MoE model's actual per-token compute (and thus CPU latency) tracks its
+# ACTIVE parameter count, which can be 10-20x smaller. Using total params put
+# every MoE model already in this fleet (llama4:16x17b, qwen3-coder-next,
+# qwen3.8-flash-next) in the harshest >50B/8192 bucket purely because of inert
+# expert weights that never fire on a given token. Two sourced (never guessed)
+# ways to recover the active count, tried in order:
+#   1. Parse "<total>b-a<active>b" straight out of the model's own tag, e.g.
+#      "125b-a6b" -> 6B active. This is Ollama's own published naming
+#      convention for these tags, not an external guess.
+#   2. Else, if the live /api/show reports expert_count/expert_used_count
+#      (any MoE architecture, tag-naming convention or not), approximate
+#      active_b = total_params_b * expert_used_count / expert_count. This
+#      undercounts real active params somewhat (it ignores always-active
+#      shared/attention layers), but it's a strict improvement over total
+#      params for bucketing purposes and never requires vendor-doc lookups.
+# A dense model (no "-aNb" tag and no expert fields) falls through to total
+# parameter_size exactly as before — this only changes MoE models.
 _num_ctx_for_model() {
     local show_json="$1"
-    echo "$show_json" | jq -r '
+    local model_id="$2"
+    echo "$show_json" | jq -r --arg model_id "$model_id" '
       (.details.parameter_size // "" |
         if test("[0-9.]+B"; "i") then (capture("(?<n>[0-9.]+)B"; "i").n | tonumber)
         elif test("[0-9.]+M"; "i") then (capture("(?<n>[0-9.]+)M"; "i").n | tonumber / 1000)
         else null end
+      ) as $total_params_b |
+      ((.model_info // {}) | to_entries | map(select(.key | endswith(".expert_count"))) | .[0].value) as $expert_count |
+      ((.model_info // {}) | to_entries | map(select(.key | endswith(".expert_used_count"))) | .[0].value) as $expert_used |
+      ( ($model_id | capture("(?<n>[0-9.]+)b-a(?<a>[0-9.]+)b"; "i")) // null ) as $tag_cap |
+      ($tag_cap.a) as $tag_active_b |
+      (
+        if $tag_active_b != null then ($tag_active_b | tonumber)
+        elif ($expert_count != null and $expert_used != null and ($expert_count | tonumber) > 0) then
+          ($total_params_b * ($expert_used | tonumber) / ($expert_count | tonumber))
+        else $total_params_b
+        end
       ) as $params_b |
       ((.model_info // {}) | to_entries | map(select(.key | endswith(".context_length"))) | .[0].value) as $native |
       if ($params_b == null or $native == null) then 4096
@@ -299,7 +331,7 @@ for i in $(seq 0 $((model_count - 1))); do
         # already pin an explicit one through configure.sh (see the big
         # comment on _num_ctx_for_model above for the sizing rationale).
         if ! echo "$litellm_params" | jq -e 'has("num_ctx")' >/dev/null 2>&1; then
-            num_ctx="$(_num_ctx_for_model "$show_json")"
+            num_ctx="$(_num_ctx_for_model "$show_json" "$model_id")"
             litellm_params="$(echo "$litellm_params" | jq --argjson n "$num_ctx" '. + {num_ctx: $n}')"
         fi
 
