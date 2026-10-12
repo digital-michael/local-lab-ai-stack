@@ -41,7 +41,6 @@ The stack is designed to grow: new inference nodes can be added to increase capa
 | **Knowledge** | knowledge-index | Document ingestion pipeline; chunks, embeds, and indexes content into Qdrant |
 | **Storage** | PostgreSQL ([ref](https://www.postgresql.org/)) | Relational database; persistent state for Authentik, Flowise, and LiteLLM |
 | **Storage** | Qdrant ([ref](https://qdrant.tech/)) | Vector database; stores and queries document embeddings for RAG |
-| **Storage** | MinIO ([ref](https://min.io/)) | Object storage; model artifacts, log archives, and backup snapshots |
 | **Observability** | Grafana ([ref](https://grafana.com/grafana/)) | Dashboards and alerting; visualizes metrics and health signals |
 | **Observability** | Prometheus ([ref](https://prometheus.io/)) | Metrics scraping and time-series storage across all stack services |
 | **Observability** | Loki ([ref](https://grafana.com/oss/loki/)) | Log aggregation backend; stores structured logs from all containers |

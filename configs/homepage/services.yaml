@@ -83,10 +83,6 @@
             - field: result.collections
               label: Collections
               format: size
-    - MinIO:
-        icon: mdi-package-variant-closed
-        href: https://minio.stack.localhost/
-        description: S3-Compatible Object Storage
 
 - Observability:
     - Grafana:

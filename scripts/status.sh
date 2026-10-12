@@ -151,7 +151,6 @@ _svc_url() {
         prometheus)      echo "https://prometheus.stack.localhost" ;;
         litellm)         echo "https://litellm.stack.localhost" ;;
         qdrant)          echo "https://qdrant.stack.localhost" ;;
-        minio)           echo "https://minio.stack.localhost" ;;
         homepage)        echo "https://dashboard.stack.localhost" ;;
         traefik)         echo "http://localhost:8080" ;;
         postgres)        echo "localhost:5432" ;;
@@ -170,7 +169,7 @@ _svc_category() {
         openwebui|flowise|homepage)       echo "Applications" ;;
         traefik)                          echo "Edge & Routing" ;;
         litellm|ollama|vllm)              echo "Model Serving" ;;
-        postgres|qdrant|minio)            echo "Storage & Data" ;;
+        postgres|qdrant)                  echo "Storage & Data" ;;
         grafana|prometheus|loki|promtail) echo "Observability & Metrics" ;;
         *)                                echo "Other" ;;
     esac

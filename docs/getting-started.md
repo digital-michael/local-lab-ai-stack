@@ -119,8 +119,6 @@ Prompts you to enter values for each required secret and stores them in the Podm
 | `qdrant_api_key` | Qdrant API authentication |
 | `openwebui_api_key` | OpenWebUI → LiteLLM auth (must match `litellm_master_key`) |
 | `flowise_password` | Flowise admin password |
-| `minio_root_user` | MinIO root username |
-| `minio_root_password` | MinIO root password |
 
 > **Important:** `openwebui_api_key` must be set to the same value as `litellm_master_key`. The `generate-secrets` script derives it automatically if you leave it blank.
 

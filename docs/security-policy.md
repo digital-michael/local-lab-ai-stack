@@ -37,7 +37,6 @@ Services with built-in authentication keep it enabled as a second gate:
 | Flowise | Enterprise auth (email/password) |
 | LiteLLM | API key (`LITELLM_MASTER_KEY`) |
 | Qdrant | API key (`QDRANT__SERVICE__API_KEY`) |
-| MinIO | Root user/password |
 | Grafana | Admin user/password (or SSO passthrough) |
 | Knowledge Index | API key (`API_KEY` secret) |
 

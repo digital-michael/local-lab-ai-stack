@@ -42,8 +42,6 @@ mappings = [
     ("PROMETHEUS_PORT",      "prometheus",       0),
     ("GRAFANA_PORT",         "grafana",          0),
     ("LOKI_PORT",            "loki",             0),
-    ("MINIO_PORT",           "minio",            0),
-    ("MINIO_CONSOLE_PORT",   "minio",            1),
 ]
 for var, svc, idx in mappings:
     try:
@@ -67,24 +65,22 @@ export OPENWEBUI_PORT="${OPENWEBUI_PORT:-9090}"
 export PROMETHEUS_PORT="${PROMETHEUS_PORT:-9091}"
 export GRAFANA_PORT="${GRAFANA_PORT:-3000}"
 export LOKI_PORT="${LOKI_PORT:-3100}"
-export MINIO_PORT="${MINIO_PORT:-9100}"
-export MINIO_CONSOLE_PORT="${MINIO_CONSOLE_PORT:-9101}"
 
 # ---------------------------------------------------------------------------
 # Service lists
 # ---------------------------------------------------------------------------
 
-# All 14 services defined in configs/config.json
+# All services defined in configs/config.json
 SERVICES_ALL=(
     authentik flowise grafana litellm
-    loki minio ollama openwebui postgres prometheus promtail qdrant traefik vllm
+    loki ollama openwebui postgres prometheus promtail qdrant traefik vllm
 )
 export SERVICES_ALL
 
 # Controller-profile services expected to be active (non-GPU, non-worker-only)
 SERVICES_DEPLOYED=(
     authentik flowise grafana litellm loki
-    minio openwebui postgres prometheus promtail qdrant traefik
+    openwebui postgres prometheus promtail qdrant traefik
 )
 export SERVICES_DEPLOYED
 
@@ -98,7 +94,7 @@ export SERVICES_DEFERRED
 
 SECRETS=(
     authentik_secret_key flowise_password
-    litellm_master_key minio_root_password minio_root_user
+    litellm_master_key
     openwebui_api_key postgres_password qdrant_api_key
 )
 export SECRETS

@@ -80,16 +80,6 @@ http:
         - secure-headers
       tls: {}
 
-    minio-console:
-      rule: "Host(`minio.stack.localhost`)"
-      entryPoints:
-        - websecure
-      service: minio-console
-      middlewares:
-        - authentik
-        - secure-headers
-      tls: {}
-
     # Public entry — flowise.photondatum.space proxied via Caddy on photondatum.space.
     flowise-public:
       rule: "Host(`flowise.photondatum.space`)"
@@ -198,11 +188,6 @@ http:
       loadBalancer:
         servers:
           - url: "http://qdrant.ai-stack:6333"
-
-    minio-console:
-      loadBalancer:
-        servers:
-          - url: "http://minio.ai-stack:9001"
 
     homepage:
       loadBalancer:

@@ -15,7 +15,6 @@ This repo contains the architecture, configuration, tooling, and reference docum
 - **Authentik** — identity provider and SSO; enforces authentication on every service
 - **Prometheus + Grafana** — metrics and dashboards
 - **Loki + Promtail** — log aggregation and shipping
-- **MinIO** — object storage for documents, models, and backups
 - **Homepage** — operator dashboard with live service health widgets
 
 All services run as rootless Podman containers managed by systemd quadlets on a single node.

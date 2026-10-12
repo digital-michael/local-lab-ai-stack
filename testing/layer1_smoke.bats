@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # testing/layer1_smoke.bats
 #
-# Layer 1 — Smoke Tests (T-009 through T-020, T-021a)
+# Layer 1 — Smoke Tests (T-009 through T-020)
 # Port-level HTTP/TCP reachability for all services with host-exposed ports.
 # These tests verify that each service is up and responding before any
 # functional testing begins. No authentication is required.
@@ -148,10 +148,3 @@ setup_file() {
     fi
 }
 
-# ---------------------------------------------------------------------------
-# T-021 — MinIO: S3 API health check
-# ---------------------------------------------------------------------------
-
-@test "T-021a: minio S3 API /minio/health/live returns 200" {
-    assert_http_status "200" "http://localhost:${MINIO_PORT}/minio/health/live"
-}

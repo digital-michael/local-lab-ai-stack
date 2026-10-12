@@ -168,7 +168,6 @@ if [[ "$DEPLOY_MODE" == "podman" ]]; then
     mkdir -p "$AI_STACK_DIR/flowise"
     mkdir -p "$AI_STACK_DIR/openwebui"
     mkdir -p "$AI_STACK_DIR/grafana"
-    mkdir -p "$AI_STACK_DIR/minio"
     mkdir -p "$AI_STACK_DIR/test-tmp"
 
     cp -r "$PROJECT_ROOT/configs/traefik/."    "$AI_STACK_CONFIGS/traefik/"

@@ -292,7 +292,7 @@ CATEGORY = {
     "traefik": "Edge & Routing",
     "litellm": "Model Serving", "ollama": "Model Serving", "vllm": "Model Serving",
     "knowledge-index": "Knowledge / RAG",
-    "postgres": "Storage & Data", "qdrant": "Storage & Data", "minio": "Storage & Data",
+    "postgres": "Storage & Data", "qdrant": "Storage & Data",
     "redis": "Storage & Data",
     "grafana": "Observability & Metrics", "prometheus": "Observability & Metrics",
     "loki": "Observability & Metrics", "promtail": "Observability & Metrics",

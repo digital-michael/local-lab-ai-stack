@@ -5,6 +5,8 @@
 **Audience:** Operators and implementation agents
 
 > **Python implementation retired (2026-09-30, D-045).** `services/m2m-gateway/` was removed and will not be integrated. This document is kept as **design reference** for the Go M2M gateway (ledger epic e66a0ecd) and the M2M lifecycle workflow (ledger workflow 3c54b1b8). Ports, env var names and endpoints below describe the retired Python service, not a contract.
+>
+> **MinIO retired (2026-10-12, D-058).** References to MinIO below describe the retired file-repository design, not a current or planned dependency — any object-storage need for the Go rewrite requires a fresh choice.
 
 ---
 

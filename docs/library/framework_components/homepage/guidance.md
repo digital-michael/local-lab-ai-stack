@@ -35,8 +35,8 @@ being viewed via `dashboard.photondatum.space`. Only add a service to
 `custom.js`'s `HOST_MAP` once it has a genuine live public route (DNS + Caddy +
 Traefik `*-public` router + Authentik `external_host`) — see
 [lessons learned §2](lessons_learned.md#2-toggling-lan-vs-public-service-links-requires-client-side-customjs).
-Services with no public route (Traefik dashboard, Ollama, Qdrant UI, MinIO
-console) stay LAN-only; do not add them to the map.
+Services with no public route (Traefik dashboard, Ollama, Qdrant UI)
+stay LAN-only; do not add them to the map.
 
 ## Known gap
 

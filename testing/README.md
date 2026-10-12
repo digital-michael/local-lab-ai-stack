@@ -55,7 +55,7 @@ testing/
   layer0_preflight.bats        ← T-001–T-008: quadlets, service states, secrets, TLS
 
   # Layer 1 — Smoke
-  layer1_smoke.bats            ← T-009–T-020, T-021a: port-level HTTP/TCP reachability (T-021a = MinIO)
+  layer1_smoke.bats            ← T-009–T-020: port-level HTTP/TCP reachability
 
   # Layer 2 — Component Integration   (planned)
   layer2_traefik.bats          ← T-021–T-024: routing, TLS, forward-auth middleware

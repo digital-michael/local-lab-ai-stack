@@ -65,10 +65,6 @@ capture() {
     _header "OpenWebUI"
     echo "OPENWEBUI_API_KEY=$(_read_secret openwebui_api_key)"
 
-    _header "MinIO"
-    echo "MINIO_ROOT_USER=$(_read_secret minio_root_user)"
-    echo "MINIO_ROOT_PASSWORD=$(_read_secret minio_root_password)"
-
     _header "Grafana"
     echo "# Default credentials — rotate before non-localhost exposure"
     echo "GRAFANA_USER=admin"

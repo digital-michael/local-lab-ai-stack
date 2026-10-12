@@ -167,7 +167,6 @@ No PostgreSQL instance is shared across these boundaries.
 | --- | --- |
 | Authentik migration to edge VPS | External SSO for all services; `openwebui-public` Authentik bypass removal |
 | Remove stale Traefik router `openwebui-public-com` | Cleanup — references `chat.photondatum.com` (not owned) |
-| Garage replaces MinIO | Object storage for knowledge pipeline |
 | Social login source config in Authentik | Google, GitHub, Microsoft, GitLab, BitBucket, Atlassian, Apple |
 | VPS RAM upgrade (1 GB → 2 GB) | Required before deploying `ai-stack-iam` to photondatum.space |
 | Expose remaining CENTAURI services externally | Caddy routes + DNS for flowise, grafana, etc. on `*.photondatum.space` |

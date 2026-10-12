@@ -8,7 +8,7 @@ Run `make license-check` to refresh the Python-package section.
 
 ## Notices
 
-- **AGPLv3 components** (Grafana, Loki, Promtail, MinIO) require that source code modifications be made available to users if the software is provided as a network service. Internal self-hosted deployment with no external user access is unaffected.
+- **AGPLv3 components** (Grafana, Loki, Promtail) require that source code modifications be made available to users if the software is provided as a network service. Internal self-hosted deployment with no external user access is unaffected.
 - **Meta Llama 3.x Community License** permits commercial use for products/services with fewer than 700 million monthly active users. Review required above that threshold.
 - **Hosted API providers** (OpenAI, Groq, Anthropic, Mistral) are governed by their respective Terms of Service — no source-code license applies to API usage.
 
@@ -31,7 +31,6 @@ Run `make license-check` to refresh the Python-package section.
 | grafana | `docker.io/grafana/grafana` | 12.4.0 | AGPLv3 | https://github.com/grafana/grafana |
 | loki | `docker.io/grafana/loki` | 3.6.7 | AGPLv3 | https://github.com/grafana/loki |
 | promtail | `docker.io/grafana/promtail` | 3.6.7 | AGPLv3 | https://github.com/grafana/loki |
-| minio | `docker.io/minio/minio` | RELEASE.2025-04-22T22-12-26Z | AGPLv3 | https://github.com/minio/minio |
 
 ---
 

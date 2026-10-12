@@ -228,26 +228,6 @@
       "deploy": "quadlet"
     },
     {
-      "id": "minio",
-      "name": "MinIO",
-      "roles": ["backplane"],
-      "custom_built": false,
-      "image": "docker.io/minio/minio",
-      "config_path": "services.minio.tag",
-      "registry": "dockerhub",
-      "registry_repo": "minio/minio",
-      "release_repo": "minio/minio",
-      "workflow_deps": [],
-      "known_issues": [
-        {
-          "severity": "medium",
-          "summary": "A leaked MinIO access/secret key pair was found in this repo's git history (keys.txt, commit 57b4ad5, redacted in b2afa4c but still present in history). Any credential rotation triggered by an update should also prompt rotating the original leaked pair if that hasn't already happened.",
-          "source": "security review 2026-07-21 — flagged during MCP work, unrelated to this script but recorded here since MinIO is the affected component"
-        }
-      ],
-      "deploy": "quadlet"
-    },
-    {
       "id": "homepage",
       "name": "Homepage dashboard",
       "roles": ["backplane"],

@@ -738,8 +738,8 @@ Alphabetical index of all named entities in the document.  Format:
 
 Include at minimum:
 
-- All 14 service names (traefik, postgres, qdrant, authentik,
-  litellm, vllm, ollama, flowise, openwebui, prometheus, grafana, loki, promtail, minio)
+- All 13 service names (traefik, postgres, qdrant, authentik,
+  litellm, vllm, ollama, flowise, openwebui, prometheus, grafana, loki, promtail)
 - All Podman secret names (from §4.2)
 - All script names (configure.sh, deploy.sh, start.sh, stop.sh, status.sh,
   diagnose.sh, backup.sh, pull-models.sh, register-node.sh, node.sh,
