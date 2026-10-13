@@ -213,11 +213,40 @@ def _http_json(url, headers=None, timeout=TIMEOUT):
 def _version_key(tag: str):
     """Best-effort semver-ish sort key. Falls back to raw string comparison
     for non-semver tags (date-based, calendar-versioned, etc.) — those are
-    flagged as 'unparseable, compare manually' rather than guessed at."""
-    m = re.search(r"(\d+)\.(\d+)\.(\d+)", tag or "")
-    if m:
-        return tuple(int(x) for x in m.groups())
+    flagged as 'unparseable, compare manually' rather than guessed at.
+
+    Anchored at the *start* of the tag (optionally after a 'v'), not
+    searched anywhere in it — a plain `re.search` previously let an unrelated
+    embedded number (e.g. a CUDA toolkit version inside a nightly build tag
+    like "nightly-dev-arm64-cu13.0.1-20ebb28") get misread as the component's
+    own version. Accepts two to four dot-separated numeric groups so
+    two-part version schemes (PostgreSQL's "17.11", not "17.11.0") parse
+    too, not just three-part semver — confirmed necessary after this parser
+    previously failed on every real Postgres tag and fell back to picking
+    the bare Debian codename tag "trixie" as the only lexical survivor."""
+    if not tag:
+        return None
+    key = _version_key_from_prefix(tag)
+    if key is not None:
+        return key
+    # Some projects' GitHub release tags carry a path-style prefix instead of
+    # a bare 'v' (Authentik: "version/2026.8.3", not "v2026.8.3" or "2026.8.3")
+    # — confirmed necessary, this previously left Authentik's real latest
+    # release unparseable and silently un-cross-checked. Only tried as a
+    # fallback, and only takes the segment after the *last* slash, so this
+    # doesn't reopen the embedded-unrelated-number risk the start-anchor
+    # above exists to prevent for ordinary registry tags (which don't
+    # normally contain a slash at all).
+    if "/" in tag:
+        return _version_key_from_prefix(tag.rsplit("/", 1)[-1])
     return None
+
+
+def _version_key_from_prefix(tag: str):
+    m = re.match(r"^v?(\d+)\.(\d+)(?:\.(\d+))?(?:\.(\d+))?", tag)
+    if not m:
+        return None
+    return tuple(int(g) for g in m.groups() if g is not None)
 
 
 def _bump_size(current_tag, available_tag):
@@ -234,16 +263,31 @@ def _bump_size(current_tag, available_tag):
 
 
 # Tags that are never a meaningful "available version" to surface: mutable
-# rolling tags, prerelease/dev channels, and CI artifacts (commit-hash or
-# sha-prefixed tags). Excluding these is necessary because registries return
-# tags in push-recency or lexical order, neither of which tracks "newest
-# stable release" — the most-recently-pushed tag is very often a dev/nightly
-# build, not the one worth upgrading to.
+# rolling tags, prerelease/dev channels, CI artifacts (commit-hash or
+# sha-prefixed tags), and build-variant markers (CPU architecture, GPU
+# vendor/toolkit, OS base image, Windows base). Excluding these is necessary
+# because registries return tags in push-recency or lexical order, neither
+# of which tracks "newest stable release" — the most-recently-pushed tag is
+# very often a dev/nightly/variant build, not the one worth upgrading to.
+#
+# Matched as whole-string equality (plain `latest`, `rc2`, a bare commit
+# hash, ...) AND as a dash-delimited segment anywhere in the tag (`main-`,
+# `-rc1-`, `-rocm`, `-arm64`, ...) — confirmed necessary: whole-string-only
+# matching let tags like `main-v1.23.9`, `0.40.4-rc1-rocm`, and
+# `nightly-dev-arm64-cu13.0.1-20ebb28` all survive filtering and get picked
+# as "best available" ahead of the real latest stable release.
 _NOISE_TAG_RE = re.compile(
-    r"^(latest|main|master|nightly|dev|edge|test|canary|unstable|unprivileged)$"
+    r"^(latest|main|master|nightly|dev|edge|test|canary|unstable|unprivileged"
+    r"|insider|preview|snapshot)$"
     r"|^(alpha|beta|rc)\d*$"
     r"|^(git|sha|commit)-?[0-9a-f]{6,}$"
-    r"|^[0-9a-f]{7,40}$",
+    r"|^[0-9a-f]{7,40}$"
+    r"|(^|-)(main|master|nightly|dev|edge|canary|unstable|insider|preview|snapshot)(-|$)"
+    r"|(^|-)(alpha|beta|rc)\d*(-|$)"
+    r"|(^|-)(rocm|cuda\d*)(-|$)"
+    r"|(^|-)(arm64(v[5-8])?|armv[5-8]|arm32v[5-8]|aarch64|amd64|x86(_64)?|i386|mips64le|ppc64le|s390x|riscv64)(-|$)"
+    r"|(^|-)(windows|nanoserver|servercore)(-|$)"
+    r"|(^|-)[0-9a-f]{7,40}(-|$)",
     re.IGNORECASE,
 )
 
@@ -253,14 +297,22 @@ def _pick_best_tag(tags: list[str]):
     semver-parseable tag. Returns (tag, parseable: bool) or (None, False) if
     nothing usable remains. When nothing is semver-parseable, falls back to
     the lexically-last surviving tag with parseable=False so callers can
-    flag it as 'compare manually' rather than presenting it as authoritative."""
-    candidates = [t for t in tags if t and not _NOISE_TAG_RE.match(t)]
+    flag it as 'compare manually' rather than presenting it as authoritative.
+
+    When several surviving tags share the same highest version (e.g. an
+    image that ships both "v1.19.2" and "v1.19.2-unprivileged" for the same
+    release), prefers the shortest/cleanest one as a tiebreak — still
+    correctly surfaces a suffixed tag alone if that's the only one at that
+    version."""
+    candidates = [t for t in tags if t and not _NOISE_TAG_RE.search(t)]
     if not candidates:
         return None, False
     with_keys = [(t, _version_key(t)) for t in candidates]
     parseable = [t for t in with_keys if t[1] is not None]
     if parseable:
-        return max(parseable, key=lambda x: x[1])[0], True
+        best_key = max(k for _, k in parseable)
+        best_tags = [t for t, k in parseable if k == best_key]
+        return min(best_tags, key=len), True
     return sorted(candidates)[-1], False
 
 
@@ -297,16 +349,12 @@ def _fetch_github_release_notes_url(release_repo: str):
     return f"https://github.com/{release_repo}/releases", None
 
 
-def _read_quadlet_image_tag(component_id: str):
-    """Detects whether <component_id>.container exists in QUADLET_DIR and, if
-    so, parses its Image=repo:tag line directly — no config.json involved.
-    This is what makes 'installed' detection host-agnostic: it works
-    identically for CENTAURI's own quadlets and for photondatum.space's
-    ai-stack-iam-* stack, and requires nothing beyond the quadlet file itself.
-    Returns (installed: bool, tag: str|None)."""
-    path = os.path.join(QUADLET_DIR, f"{component_id}.container")
-    if not os.path.isfile(path):
-        return False, None
+_SYSTEM_QUADLET_DIR = "/etc/containers/systemd"
+
+
+def _parse_quadlet_image_tag(path):
+    """Parses a single quadlet file's Image=repo:tag line.
+    Returns (installed=True, tag: str|None)."""
     with open(path) as f:
         contents = f.read()
     m = re.search(r"^Image=(\S+)$", contents, re.MULTILINE)
@@ -317,6 +365,49 @@ def _read_quadlet_image_tag(component_id: str):
     if ":" in last_segment:
         return True, image.rsplit(":", 1)[1]
     return True, None
+
+
+def _read_quadlet_image_tag(component_id: str):
+    """Detects whether a quadlet for component_id exists and, if so, parses
+    its Image=repo:tag line directly — no config.json involved. This is what
+    makes 'installed' detection host-agnostic: it works identically for
+    CENTAURI's own quadlets and for photondatum.space's ai-stack-iam-* stack,
+    and requires nothing beyond the quadlet file itself.
+
+    Checks two things per search directory: the exact "<id>.container" name
+    (CENTAURI's flat naming), then — if that's absent — any
+    "*-<id>.container" file (a *group*-prefixed name, e.g. photondatum.space's
+    "ai-stack-iam-postgres.container" for id="postgres"; confirmed necessary,
+    this previously made Postgres/Redis/Authentik on that host invisible to
+    this script despite being genuinely installed and quadlet-managed there).
+    Searches QUADLET_DIR (user-level, the common case) and the system-level
+    quadlet directory (/etc/containers/systemd — root-managed components
+    like Headplane on photondatum.space live there instead).
+
+    Returns (installed: bool, tag: str|None)."""
+    search_dirs = [QUADLET_DIR]
+    if _SYSTEM_QUADLET_DIR not in search_dirs:
+        search_dirs.append(_SYSTEM_QUADLET_DIR)
+
+    for qdir in search_dirs:
+        exact = os.path.join(qdir, f"{component_id}.container")
+        if os.path.isfile(exact):
+            return _parse_quadlet_image_tag(exact)
+
+    for qdir in search_dirs:
+        if not os.path.isdir(qdir):
+            continue
+        try:
+            matches = sorted(
+                f for f in os.listdir(qdir)
+                if f.endswith(f"-{component_id}.container")
+            )
+        except OSError:
+            continue
+        if matches:
+            return _parse_quadlet_image_tag(os.path.join(qdir, matches[0]))
+
+    return False, None
 
 
 def _run(cmd, timeout=LOCAL_CMD_TIMEOUT):
@@ -490,6 +581,34 @@ def _detect_installed(component: dict):
     return False, None, f"unrecognized deploy type: {deploy!r}"
 
 
+def _maybe_prefer_github_release(top, release_repo):
+    """Docker Hub and GHCR tag listings are not guaranteed to include every
+    real release (this script doesn't paginate either, and neither registry
+    promises recency ordering) — confirmed empirically: Homepage's GHCR tag
+    list surfaced "v1.4.5" as the best candidate while its real latest
+    release was "v2.5.0", with no indication anything had gone wrong. When a
+    release_repo is configured, always cross-check GitHub's releases API too
+    and prefer whichever version is actually higher, rather than only
+    falling back to it when the registry tag list came back completely
+    empty. Returns (chosen_tag, github_html_url_or_None, note_or_None)."""
+    if not release_repo:
+        return top, None, None
+    try:
+        gh_data = _http_json(f"https://api.github.com/repos/{release_repo}/releases/latest")
+        gh_tag = gh_data.get("tag_name") or None
+        gh_url = gh_data.get("html_url")
+    except Exception:
+        return top, None, None
+    if not gh_tag:
+        return top, None, None
+    if not top:
+        return gh_tag, gh_url, "registry tag list had no clean release tag — fell back to the GitHub release"
+    gh_key, top_key = _version_key(gh_tag), _version_key(top)
+    if gh_key is not None and (top_key is None or gh_key > top_key):
+        return gh_tag, gh_url, "registry tag list's best match was stale/incomplete — GitHub release is newer, using that instead"
+    return top, None, None
+
+
 def _fetch_available(component: dict):
     """Returns (available_version, download_link, release_notes_url, note)."""
     registry = component.get("registry")
@@ -505,12 +624,13 @@ def _fetch_available(component: dict):
             data = _http_json(url)
             all_tags = [t.get("name", "") for t in data.get("results", [])]
             top, parseable = _pick_best_tag(all_tags)
+            top, gh_url, cross_note = _maybe_prefer_github_release(top, release_repo)
             if not top:
                 return None, None, None, "no usable (non-dev/prerelease/CI) tags found"
-            note = None if parseable else "no cleanly-parseable release tag found — showing the closest candidate; verify manually"
-            download_link = f"https://hub.docker.com/r/{repo}/tags?name={top}"
-            release_notes_url = None
-            if release_repo:
+            note = cross_note or (None if parseable else "no cleanly-parseable release tag found — showing the closest candidate; verify manually")
+            download_link = gh_url or f"https://hub.docker.com/r/{repo}/tags?name={top}"
+            release_notes_url = gh_url
+            if release_repo and release_notes_url is None:
                 release_notes_url, rn_note = _fetch_github_release_notes_url(release_repo)
                 note = note or rn_note
             return top, download_link, release_notes_url, note
@@ -522,27 +642,17 @@ def _fetch_available(component: dict):
             list_url = f"https://ghcr.io/v2/{repo}/tags/list"
             data = _http_json(list_url, headers={"Authorization": f"Bearer {token}"})
             top, parseable = _pick_best_tag(data.get("tags", []))
-            if not top and release_repo:
-                # High-traffic GHCR images are often dominated by CI/commit-hash
-                # tags in the most recent page with no clean release tag visible.
-                # Fall back to the upstream GitHub release, which is authoritative
-                # for "latest stable" regardless of what GHCR's tag list shows.
-                try:
-                    gh_data = _http_json(f"https://api.github.com/repos/{release_repo}/releases/latest")
-                    gh_tag = gh_data.get("tag_name", "")
-                    if gh_tag:
-                        html_url = gh_data.get("html_url")
-                        # Same page serves as both: it's a real GitHub release,
-                        # not just a container-registry tag list.
-                        return gh_tag, html_url, html_url, "GHCR tag list had no clean release tag — fell back to the GitHub release"
-                except Exception:
-                    pass
+            # High-traffic GHCR images are often dominated by CI/commit-hash tags,
+            # and this endpoint isn't paginated here, so the real latest release
+            # can be missing from what comes back even when `top` looks clean —
+            # always cross-check GitHub, not just when the tag list is empty.
+            top, gh_url, cross_note = _maybe_prefer_github_release(top, release_repo)
             if not top:
                 return None, None, None, "no usable (non-dev/prerelease/CI) tags found"
-            download_link = f"https://github.com/{release_repo}/releases" if release_repo else f"https://ghcr.io/{repo}"
-            note = None if parseable else "no cleanly-parseable release tag found — showing the closest candidate; verify manually"
-            release_notes_url = None
-            if release_repo:
+            download_link = gh_url or (f"https://github.com/{release_repo}/releases" if release_repo else f"https://ghcr.io/{repo}")
+            note = cross_note or (None if parseable else "no cleanly-parseable release tag found — showing the closest candidate; verify manually")
+            release_notes_url = gh_url
+            if release_repo and release_notes_url is None:
                 release_notes_url, rn_note = _fetch_github_release_notes_url(release_repo)
                 note = note or rn_note
             return top, download_link, release_notes_url, note

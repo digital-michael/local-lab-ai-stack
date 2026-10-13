@@ -216,13 +216,18 @@
       "config_path": "services.promtail.tag",
       "registry": "dockerhub",
       "registry_repo": "grafana/promtail",
-      "release_repo": "grafana/loki",
+      "release_repo": null,
       "workflow_deps": ["loki"],
       "known_issues": [
         {
           "severity": "info",
           "summary": "Promtail is in maintenance mode upstream (Grafana Labs recommends Grafana Alloy for new deployments). Not an immediate break risk, but worth planning a migration rather than expecting indefinite Promtail updates.",
           "source": "general upstream project status — flagged proactively, verify current status before acting"
+        },
+        {
+          "severity": "info",
+          "summary": "release_repo deliberately left unset (not \"grafana/loki\") even though Promtail ships from the Loki monorepo — check-updates.sh's GitHub-release cross-check previously misreported Loki's own newer release (e.g. v3.7.8) as Promtail's \"available\" version, when Promtail does not publish an image for every Loki release and its real latest stays on the 3.6.x line. Promtail's own Docker Hub tag list (registry_repo) is sufficient and accurate on its own — found 3.6.11 correctly once tag-noise filtering was fixed, with no GitHub fallback needed.",
+          "source": "check-updates.sh fix, 2026-10-13 (docs/decisions.md D-060)"
         }
       ],
       "deploy": "quadlet"
@@ -337,6 +342,71 @@
       "workflow_deps": ["headscale"],
       "known_issues": [],
       "deploy": "native"
+    },
+    {
+      "id": "authentik",
+      "name": "Authentik",
+      "roles": ["edge"],
+      "custom_built": false,
+      "image": "ghcr.io/goauthentik/server",
+      "config_path": null,
+      "registry": "ghcr",
+      "registry_repo": "goauthentik/server",
+      "release_repo": "goauthentik/authentik",
+      "workflow_deps": ["traefik", "caddy", "forgejo"],
+      "known_issues": [
+        {
+          "severity": "critical",
+          "summary": "The SSO gate for every service in this stack (forwardAuth on Traefik, OIDC for Forgejo, its own OAuth for LiteLLM) — was not tracked in this manifest at all until 2026-10-13. Two instances (ai-stack-iam-authentik, ai-stack-iam-authentik-worker on photondatum.space) run the same image/tag and should always be bumped together. Always check GitHub Security Advisories for goauthentik/authentik against the exact running version's range before treating 'no advisory listed' as 'safe' — a dedicated review on 2026-10-13 found two then-unpatched high-severity advisories (SAML malformed-message DoS, MFA bypass via email-authenticator recipient override) against the then-running 2026.5.7.",
+          "source": "docs/decisions.md D-060 (upgrade survey, 2026-10-13)"
+        }
+      ],
+      "deploy": "quadlet"
+    },
+    {
+      "id": "redis",
+      "name": "Redis",
+      "roles": ["edge"],
+      "custom_built": false,
+      "image": "docker.io/library/redis",
+      "config_path": null,
+      "registry": "dockerhub",
+      "registry_repo": "library/redis",
+      "release_repo": "redis/redis",
+      "workflow_deps": ["authentik"],
+      "known_issues": [
+        {
+          "severity": "info",
+          "summary": "Fronts Authentik's session/cache store on photondatum.space (ai-stack-iam-redis) — was not tracked in this manifest at all until 2026-10-13. No outstanding issues found as of that review.",
+          "source": "docs/decisions.md D-060 (upgrade survey, 2026-10-13)"
+        },
+        {
+          "severity": "info",
+          "summary": "A major 8.x line exists alongside the 7.4.x line this instance runs. Prefer a same-major patch catch-up (7.4.x) over jumping to 8.x — the major bump hasn't been evaluated for breaking changes and there's no pressing reason to take it just for currency.",
+          "source": "docs/decisions.md D-060 (upgrade survey, 2026-10-13)"
+        }
+      ],
+      "deploy": "quadlet"
+    },
+    {
+      "id": "headplane",
+      "name": "Headplane",
+      "roles": ["edge"],
+      "custom_built": false,
+      "image": "ghcr.io/tale/headplane",
+      "config_path": null,
+      "registry": "ghcr",
+      "registry_repo": "tale/headplane",
+      "release_repo": "tale/headplane",
+      "workflow_deps": ["headscale"],
+      "known_issues": [
+        {
+          "severity": "info",
+          "summary": "Headscale's admin web UI only — not in the auth/mesh critical path. Runs under photondatum.space's system-level quadlet directory (/etc/containers/systemd/), not the usual user-level one — was not tracked in this manifest at all until 2026-10-13.",
+          "source": "docs/decisions.md D-060 (upgrade survey, 2026-10-13)"
+        }
+      ],
+      "deploy": "quadlet"
     }
   ]
 }
