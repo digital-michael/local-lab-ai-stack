@@ -19,3 +19,14 @@ litellm_settings:
     - prometheus
 
 general_settings: {}
+
+# D-061: lets models offload experiment artifacts to real files + a zip
+# archive via a tool call, instead of re-generating everything as text on
+# every "save a checkpoint" request. See configs/litellm/mcp_zip_offload.py.
+mcp_servers:
+  zip_offload:
+    transport: stdio
+    command: python3
+    args: ["/app/mcp_zip_offload.py"]
+    description: "Write files and create zip archives of experiment artifacts under a real, host-visible directory."
+    allow_all_keys: true
