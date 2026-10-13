@@ -431,14 +431,14 @@ Recorded in the operator's personal profile (`llm-agent-personal`: `collaboratio
 - **UI handed over with what was and was not checked.** Headless checks passed twice while real use found the defect; say which states were covered (empty, populated, long, narrow).
 - **Answer first**, because the operator is often rushed: status and what is needed in the first two lines, detail below. Message length for end-of-unit reports versus answers is **still open** with the operator.
 
-**Suggestions offered for the first point, in addition to more instrumentation (not yet decided):**
+**Suggestions for terse reports, decided by the operator 2026-10-13:**
 
-1. A diagnostics bundle (one command): recent turn records, the error-log tail, build ids, ledger counts, and a **layout snapshot of the chat page**. The layout snapshot is the missing instrumentation: the 8-pixel squeeze would have been visible at once.
-2. `/flag <note>`: writes the operator's one-line note into the turn log against that turn, so "model confuse" points at the exact turn, model and time.
-3. A ledger health check for pollution: warn when empty projects were created in the last day, or the project count jumps (the 52 junk projects would have been flagged the same day).
-4. A `hurry:` prefix: smallest fix inside the stated scope, extras become tickets, a three-line report (done, checked, needs you), no optional questions.
-5. A first candidate scope for autonomous processing: *a defect in something shipped this session* is reproduced from evidence, fixed, tested with a negative control, installed and committed locally, reported in three lines. Out of scope: any push, a change to tool or data behaviour beyond the defect, deleting data.
-6. Answer-first messages: the first two lines carry the status and what is needed from the operator; detail follows. No change needed on the operator's side.
+1. **A diagnostics bundle with a layout snapshot: yes ("nicely spotted").** Built as `/diagnostics` and **Cortex: Copy Diagnostics**. The chat page measures its own log; with the old CSS restored the bundle raises `1 chat element is shorter than its content (.turn.note.report)`, with the fixed CSS nothing.
+2. **`/flag <note>`: agreed.** Built: the note is kept against the last finished turn, shown by `/metrics`, and logged as `turn.flag`.
+3. **A ledger pollution check: agreed.** Finding on the way: the check already existed and flagged all 52 junk projects the day they appeared; nothing showed it. Built the visibility: a count of repairable findings beside the Health link and as one line in `ledger_list_projects` (silent at 0, so advice-only findings never make wallpaper), plus a `project_burst` check.
+4. **A prefix for the rushed case: agreed, named `quickly:`** ("feels a little less rude" than `hurry:`). Smallest fix inside the stated scope, extras become tickets, three-line report (done, checked, needs you), no optional questions.
+5. **A candidate scope for autonomous processing: agreed, and every use is called out for permission.** Scope A is a defect in something shipped in the current session (reproduce from evidence, fix, test with a negative control, install, commit locally, three-line report); a push, tag, pin bump, data change or behaviour change is always outside it. The operator will widen it as the process, scope and guardrails are refined, so each use should record when it was the right call and when not. Tracked in the ledger (story "Autonomous processing: scopes, guardrails and when to use them").
+6. **Answer-first messages: agreed.** Message length: **leave as is and adjust to need**: explain when a decision needs context, say very little about small obvious finished work (the ledger has the detail).
 
 ### Technical
 
