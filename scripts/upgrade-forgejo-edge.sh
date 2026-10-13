@@ -91,6 +91,8 @@ NEW_BINARY="$1"
 SIG_FILE="${2:-}"
 
 [[ -f "$NEW_BINARY" ]] || { echo "ERROR: $NEW_BINARY not found." >&2; exit 1; }
+NEW_BINARY="$(realpath "$NEW_BINARY")"
+[[ -n "$SIG_FILE" ]] && SIG_FILE="$(realpath "$SIG_FILE")"
 
 # ---- Pre-flight: confirm current installed state matches what we expect ----
 INSTALLED_VERSION="$("$BINARY_PATH" --version | awk '{print $3}')"
