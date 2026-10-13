@@ -135,10 +135,11 @@ echo "New binary reports: $NEW_VERSION_STRING"
 echo "Taking a pre-upgrade Forgejo DB dump..."
 DUMP_TMP="/tmp/forgejo-dump-$TS"
 mkdir -p "$DUMP_TMP"
+sudo chown "$FORGEJO_USER:$FORGEJO_USER" "$DUMP_TMP"
 sudo -u "$FORGEJO_USER" bash -c "cd '$DUMP_TMP' && '$BINARY_PATH' dump -c /etc/forgejo/app.ini --type tar.gz --file forgejo-dump-pre-${TARGET_VERSION}-${TS}.tar.gz"
 sudo mv "$DUMP_TMP/forgejo-dump-pre-${TARGET_VERSION}-${TS}.tar.gz" "$BACKUP_DIR/"
 sudo chown "$(id -u):$(id -g)" "$BACKUP_DIR/forgejo-dump-pre-${TARGET_VERSION}-${TS}.tar.gz"
-rmdir "$DUMP_TMP" 2>/dev/null || true
+sudo rmdir "$DUMP_TMP" 2>/dev/null || true
 echo "DB dump saved: $BACKUP_DIR/forgejo-dump-pre-${TARGET_VERSION}-${TS}.tar.gz"
 
 echo "Backing up current binary..."
