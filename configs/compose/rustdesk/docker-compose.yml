@@ -21,7 +21,7 @@
 services:
   hbbs:
     container_name: rustdesk-hbbs
-    image: docker.io/rustdesk/rustdesk-server:1.1.15
+    image: docker.io/rustdesk/rustdesk-server:1.1.16
     command: hbbs -r photondatum.space:21117 -k _
     volumes:
       - ./data:/root:Z
@@ -31,7 +31,7 @@ services:
 
   hbbr:
     container_name: rustdesk-hbbr
-    image: docker.io/rustdesk/rustdesk-server:1.1.15
+    image: docker.io/rustdesk/rustdesk-server:1.1.16
     command: hbbr
     volumes:
       - ./data:/root:Z
