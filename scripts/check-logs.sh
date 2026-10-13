@@ -139,12 +139,19 @@ PYEOF
 
 section "Open WebUI: tool-call-shaped text with no real tool registered (hallucinated tool use)"
 podman exec -i "$OPENWEBUI_CONTAINER" python3 -c "
-import sqlite3
+import sqlite3, json
 conn = sqlite3.connect('/app/backend/data/webui.db')
 c = conn.cursor()
-n_tools = c.execute('SELECT count(*) FROM tool').fetchone()[0]
-print(f'Registered tools in this Open WebUI instance: {n_tools}')
-if n_tools == 0:
+n_custom_tools = c.execute('SELECT count(*) FROM tool').fetchone()[0]
+row = c.execute(\"SELECT value FROM config WHERE key='tool_server.connections'\").fetchone()
+connections = json.loads(row[0]) if row and row[0] else []
+print(f'Registered custom (Python) tools: {n_custom_tools}')
+print(f'Registered tool-server connections (OpenAPI/MCP): {len(connections)}')
+for conn_entry in connections:
+    info = conn_entry.get('info', {})
+    enabled = conn_entry.get('config', {}).get('enable')
+    print(f\"  - {info.get('name', '?')} ({conn_entry.get('url')}) enabled={enabled}\")
+if n_custom_tools == 0 and not connections:
     print('No tools exist at all — any message containing \"Executing <name>...\" or similar')
     print('tool-call narration is the model generating that as plain text, not a real')
     print('tool execution. Check the message content directly for this pattern.')
