@@ -9,11 +9,16 @@
 #   Qdrant      — snapshot via REST API
 #   Libraries   — tar of $AI_STACK_DIR/libraries/
 #   Config      — tar of $AI_STACK_DIR/configs/ (excluding tls/ private keys)
+#   Open WebUI  — tar of $AI_STACK_DIR/openwebui/ (chats/users/uploads/SQLite
+#                 DB) — large, so it is opt-in only: pass --full to include it.
+#                 Restore picks it up automatically whenever a backup set
+#                 contains it, regardless of whether --full is passed.
 #
 # Retention: by default the 7 most recent backup sets are kept.
 #
 # Usage:
 #   backup.sh                        # run backup with default retention (7)
+#   backup.sh --full                 # also back up Open WebUI's data directory
 #   backup.sh --dry-run              # show what would be done, no writes
 #   BACKUP_KEEP=14 backup.sh         # keep 14 backup sets
 #   backup.sh --restore <timestamp>  # restore from a specific backup
@@ -31,6 +36,7 @@ BACKUP_KEEP="${BACKUP_KEEP:-7}"
 QDRANT_PORT="${QDRANT_PORT:-6333}"
 DRY_RUN=false
 RESTORE_TIMESTAMP=""
+FULL_BACKUP=false
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -41,6 +47,10 @@ usage() {
 Usage: $(basename "$0") [options]
 
 Options:
+  --full                 Also back up Open WebUI's data directory (chats/
+                          users/uploads/SQLite DB) — large, so it is left out
+                          of the default backup; a restore includes it
+                          automatically whenever the backup set has it
   --dry-run              Print actions without executing them
   --restore <timestamp>  Restore from backup set (e.g. 20260308T120000)
   --help                 Show this message
@@ -54,6 +64,7 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --full)      FULL_BACKUP=true; shift ;;
         --dry-run)   DRY_RUN=true; shift ;;
         --restore)   RESTORE_TIMESTAMP="${2:?--restore requires a timestamp}"; shift 2 ;;
         --help|-h)   usage; exit 0 ;;
@@ -155,6 +166,20 @@ do_backup() {
         --exclude='configs/run/' \
         -C "$AI_STACK_DIR" configs/
     log "Config: archived (${dest}/configs.tar.gz)"
+
+    # --- Open WebUI data (opt-in: large, contains chats/users/uploads/SQLite DB) ---
+    if [[ "$FULL_BACKUP" == "true" ]]; then
+        if [[ -d "$AI_STACK_DIR/openwebui" ]]; then
+            log "Open WebUI: archiving $AI_STACK_DIR/openwebui/ (--full) ..."
+            run tar -czf "${dest}/openwebui.tar.gz" \
+                -C "$AI_STACK_DIR" openwebui/
+            log "Open WebUI: archived (${dest}/openwebui.tar.gz)"
+        else
+            log "Open WebUI: directory not found — skipping"
+        fi
+    else
+        log "Open WebUI: skipped (pass --full to include; large, contains chats/users/uploads)"
+    fi
 
     # --- Backup manifest ---
     if [[ "$DRY_RUN" == "false" ]]; then
@@ -275,6 +300,15 @@ do_restore() {
         log "Config: restored"
     else
         log "Config: no archive in backup set — skipping"
+    fi
+
+    # --- Open WebUI data restore (present only if the backup was taken with --full) ---
+    if [[ -f "${src}/openwebui.tar.gz" ]]; then
+        log "Open WebUI: restoring data directory..."
+        run tar -xzf "${src}/openwebui.tar.gz" -C "$AI_STACK_DIR"
+        log "Open WebUI: restored"
+    else
+        log "Open WebUI: no archive in backup set — skipping (not included unless --full was used)"
     fi
 
     log ""
