@@ -418,6 +418,28 @@ One long multi-day session across `cortex` (ledger-core v0.4.0 to v0.6.0, mcp-lo
 - **Explicit flags on dangerous operations** (`with_children`, `detach_parent`, a move that never creates a project) stopped the one real structural surprise, a story sitting under an unrelated epic, before it happened.
 - Numbered question lists answered one line per item; "recommend, then ask" kept decisions moving.
 
+### Collaboration (confirmed by the operator, 2026-10-13)
+
+Recorded in the operator's personal profile (`llm-agent-personal`: `collaboration-preferences.md` and patterns P-9 to P-12; the agent's own failure modes from this session are in its "Where I Tend to Fail"); summarised here because they shaped how this session should have gone.
+
+- **Evidence over interrogation.** A defect often arrives as one line. The operator expects the agent to have logs and metrics (being added: `/metrics`, the per-turn log) or to ask for the instrumentation that gives specific, accurate detail. Order: read the evidence, reproduce, state a one-line read, ask only what blocks.
+- **The operator is often rushed by external considerations.** Get on task sooner: answer first, defaults over questions, no scope growth on a quick fix.
+- **List style carries meaning.** Numbered means order matters (matching answers back, or processing order for dependencies and discoveries); the agent may reshuffle if it says so. Unordered means no order preference; reorder freely for efficiency and quality.
+- **Push stays in the operator's loop.** Every `git push` needs its own explicit "push" unless the unit of work is specifically scoped for autonomous processing, which for now covers only certain, very well-known units. A sequence that lists "pushed" as a step is not permission.
+- **"Before we fix anything: <question>" means answer only.** The operator tests an explanation with a pointed question before approving a change; the useful answer is evidence from the code or real output, then the options, with nothing changed.
+- **"Done" is a sequence, and loops close before the next item starts:** documented, committed, pushed (when told to), backed up and checked, then a lessons-learned break.
+- **UI handed over with what was and was not checked.** Headless checks passed twice while real use found the defect; say which states were covered (empty, populated, long, narrow).
+- **Answer first**, because the operator is often rushed: status and what is needed in the first two lines, detail below. Message length for end-of-unit reports versus answers is **still open** with the operator.
+
+**Suggestions offered for the first point, in addition to more instrumentation (not yet decided):**
+
+1. A diagnostics bundle (one command): recent turn records, the error-log tail, build ids, ledger counts, and a **layout snapshot of the chat page**. The layout snapshot is the missing instrumentation: the 8-pixel squeeze would have been visible at once.
+2. `/flag <note>`: writes the operator's one-line note into the turn log against that turn, so "model confuse" points at the exact turn, model and time.
+3. A ledger health check for pollution: warn when empty projects were created in the last day, or the project count jumps (the 52 junk projects would have been flagged the same day).
+4. A `hurry:` prefix: smallest fix inside the stated scope, extras become tickets, a three-line report (done, checked, needs you), no optional questions.
+5. A first candidate scope for autonomous processing: *a defect in something shipped this session* is reproduced from evidence, fixed, tested with a negative control, installed and committed locally, reported in three lines. Out of scope: any push, a change to tool or data behaviour beyond the defect, deleting data.
+6. Answer-first messages: the first two lines carry the status and what is needed from the operator; detail follows. No change needed on the operator's side.
+
 ### Technical
 
 - **A flex-column container shrinks any child that has `overflow` set** (its automatic minimum height is 0). Give such children `flex: none`. A test now fails if any chat bubble rule sets an overflow without it.
@@ -428,4 +450,3 @@ One long multi-day session across `cortex` (ledger-core v0.4.0 to v0.6.0, mcp-lo
 - Small-model tool use is steerable: one sentence in the tool note plus an opt-in lighter format took 22 calls to 1. The remaining failure is leaving out `limit`.
 - **A published library with pinned consumers means new API needs tag, push, then pin bump;** `go.work` hides a missing pin.
 - A model-driven test through the gateway reaches live data: the gateway's `mcp-local` opens the live ledger.
-
