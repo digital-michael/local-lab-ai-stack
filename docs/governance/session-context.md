@@ -85,16 +85,20 @@ Outstanding: reconcile the `docs/decisions.md` / `docs/meta_local/decisions.md` 
 
 ## Handoff — 2026-10-13: cortex ledger and chat work
 
-> Supersedes the 2026-07-29 snapshot above for the `cortex` repos. Detail is in the ledger (projects `cortex-vscode`, `mcp-local`, `ledger-server`, `cortex-stack`, `products-ideation`) and in the extension's `docs/decisions.md` (D-024 to D-028).
+> Supersedes the 2026-07-29 snapshot above for the `cortex` repos. Detail is in the ledger (projects `cortex-vscode`, `mcp-local`, `ledger-server`, `cortex-stack`, `products-ideation`, `local-lab-ai-stack`) and in the extension's `docs/decisions.md` (D-024 to D-029).
 
-**Pushed 2026-10-13 (the operator said "push"):** `ledger-core` (tag `v0.6.0`: project resolution that never creates), `mcp-local` (pin bumped to `v0.6.0`, verified with `GOWORK=off`; pin and feature are separate commits), the `cortex` docs, and this repo. Every repo of this work is in sync with its remote with nothing uncommitted.
+**State:** everything of this session is pushed (the operator said "push" after each batch): `ledger-core` through `v0.7.0`, `mcp-local` and `ledger-server` pinned to `v0.7.0` and verified with `GOWORK=off`, the extension, the `cortex` docs, this repo and `llm-agent-personal`. `mcp-local` and the extension are installed. **Reconnect `cortex` in Claude Code** for the newest `mcp-local`; the Cortex chat gets it through the gateway. Newest verified ledger backup: see `~/.local/share/mcp-local/backups/` (taken right after the last push).
 
-- `mcp-local` and the extension are installed. **Reconnect `cortex` in Claude Code** to get the newest `mcp-local`; the Cortex chat reaches it through the gateway and needs nothing.
-- Ledger backups are in `~/.local/share/mcp-local/backups/` (a verified one was taken right after this push).
+**Working conventions now in force (details in `llm-agent-personal` and the memory files):**
 
-**Open decisions for the operator (all recorded on tickets):**
+- Every `git push` needs its own "push" from the operator. Autonomous processing is only for scopes the operator names; **scope A** (a defect in this session's own work, fixed and committed locally) is a candidate and is **called out for permission each time**. Tracked in the ledger story "Autonomous processing: scopes, guardrails and when to use them".
+- `quickly:` at the start of a message: smallest fix in scope, extras become tickets, three-line report (done, checked, needs you).
+- Numbered lists mean order matters; bullets mean no order preference. Answer first; length follows need.
+- A report arrives as one line: read the evidence first. In the Cortex chat that is `/metrics`, `/flag <note>`, `/diagnostics`, and the turn log; in the ledger, the Health count and `ledger_health`.
 
-- Product 4 name and a single naming standard (Cortex suite, Solo/Federated, `cortex-*`): deferred until the current changes are done. Epic "Photon Datum's Cortex suite".
+**Open decisions for the operator (all on tickets):**
+
+- Product 4 name and a single naming standard (Cortex suite, Solo/Federated, `cortex-*`): deferred until the current changes are done.
 - `/models` later; ticket for `/tools` filed; Threat Actor Network postponed; the stack interface standard goes just before the Agent, Subagent and Autorun work.
 - Defect "Small model leaves out `limit`..." (cortex-vscode) is open, with four options.
 - The `cortex-*` renames of real projects (ledger-server task) are unblocked; each is a deliberate operation after a backup.
@@ -102,4 +106,3 @@ Outstanding: reconcile the `docs/decisions.md` / `docs/meta_local/decisions.md` 
 - A guard against UUID-shaped keys on a write is not built.
 
 **Do first next session:** the session-start load; check `git log @{u}..HEAD` in each repo before reporting state; count ledger projects and items before any model-driven run.
-
