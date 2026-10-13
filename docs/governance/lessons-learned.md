@@ -391,3 +391,41 @@ A routine "review the version, advise, then execute on approval" request (same s
 - Open WebUI's `FORWARDED_ALLOW_IPS` passes directly to Uvicorn's `--forwarded-allow-ips` and defaults to `*` (trust all) when unset, in both the official `start.sh` entrypoint and `.env.example` — a deployment that hasn't explicitly set it is unaffected by changelog entries describing this setting being newly enforced, since "enforcing a setting" has no effect when that setting is left at its permissive default.
 - Open WebUI's own application data (SQLite DB, uploaded files) lives entirely in the container's data volume (`$AI_STACK_DIR/openwebui` here) independent of whatever external Postgres the rest of the stack uses for other services — a stack-wide backup script needs to explicitly include this path; nothing about backing up the stack's shared Postgres instance covers it.
 - Full technical detail on the version comparison, the security-advisory findings, and the validation performed: see `docs/decisions.md` D-059.
+
+---
+
+## Retrospective — 2026-10-11 to 2026-10-13: cortex ledger reorganisation, `/metrics`, the tool budget, terse listing, and 52 junk projects
+
+One long multi-day session across `cortex` (ledger-core v0.4.0 to v0.6.0, mcp-local, ledger-server, the VS Code extension) and the ledger itself. Shipped: `ledger_move_item` (44 tickets moved into the right projects: 25 into `cortex-vscode`, 19 out of `cortex-backlog`, which was retired); project rename (display name, then key with an alias); collapsible status sections and project names in ledger-server; `/metrics` with a per-turn log line; a fix to the "model looked confused" rule; a visible tool-budget line plus a steering note; opt-in `terse` on `ledger_list_items`; and reads that never create projects. Product ideas went into a new `products-ideation` project (21 epics). Detail is in the ledger and in extension decisions D-024 to D-028.
+
+### LLM Agent — missteps
+
+- **Paired ticket ids with titles by position after a parallel batch of creates, and typed ids by hand: four incidents.** First, three tickets got the wrong notes or status (the membership task was marked done); the operator found it from a bad URL. Then, after the rule was in memory: a hand-typed id for a ticket that does not exist (caught by a script that checks every link written that day), a second hand-typed id in a new ticket, and a hand-typed parent id at the end (caught only because the ledger's foreign key rejected it). Writing the rule down did not install the check; the mechanical checks did. This is the SessionStart lesson again: **it needs a mechanism, not another note.** Candidates: a pass/fail link-and-id check script, and a terse create result that carries the title.
+- **Verified a UI on a page too short to show the defect, then changed a shared style without checking every message that used it.** The `/metrics` report passed a headless check with two notices, then was squeezed to 8 of 201 px in a real, long conversation (see Technical). The fix (`white-space: pre`) then made the one-line messages that share the style run off the edge. The operator found both: two rounds. Corrective: test with more content than fits and at a narrow width, assert the item's height against its content height, and check every variant of the message (empty, in progress, populated) when touching a shared style.
+- **Ran model-driven measurements through the live gateway, which wrote to the live ledger.** A read with an unknown project key creates the project (the documented first-use rule), and the small model passed project ids, some invented: 51 junk projects, plus 1 from the operator's own chat turn, which produced a confident wrong "no backlog". It was found only because a backup count read 64 projects instead of 12, not by a check after the runs. Corrective: count projects and items before and after any model-driven run, or point the tools at a scratch ledger.
+- **Quoted a number before measuring it.** The terse listing was "roughly 40% smaller" in my estimate; measured, 29% (the estimate assumed short ids, which writes cannot use).
+- **Reported repository state from memory.** Listed an already-pushed commit as pending. `git log @{u}..HEAD` is the check.
+- **My own cleanup created a new problem that only the real ledger showed.** Soft-deleting the 52 empty projects left an empty deleted `space_sim` that still answered "no items" and hid the real, renamed project; the unit tests passed. Fixed in the same pass (an empty soft-deleted project counts as not found), after a live read against the installed binary.
+- Smaller: `sed -i` quoting fails on macOS (twice) and a slice edit left a stray bracket. Use the editor tools or a script for source edits.
+
+### LLM Agent — what worked
+
+- **The new measurement paid off the same day.** The `/metrics` turn log located the false "model looked confused" (a rule that counted every refusal, where the design doc names three kinds) and the junk-project cause within minutes of a one-line report.
+- **A negative control for every guard** (the CSS `flex: none` rule, the confusion rule, terse mode, reads-never-create): remove the fix, watch the test fail, restore from a backup copy, not `git checkout`.
+- **Measured before and after on the real small model, with the sample size stated:** listing calls 22.3, then 11.3 with a steering sentence, then 1.0 with the sentence and `terse`. It said what did not move (whether the reply admits the gap) and filed the weak spot found (a missing `limit`).
+- **Backups verified (integrity and row counts) before bulk writes and after each push** — which is what exposed the pollution. Every real move and rename ran as a dry run first.
+- **The release order for a published module repeated cleanly:** tag and push the library, bump the pins, verify with `GOWORK=off`, commit the pin and the feature separately, and leave a consumer uncommitted until the tag is upstream.
+- **Explicit flags on dangerous operations** (`with_children`, `detach_parent`, a move that never creates a project) stopped the one real structural surprise, a story sitting under an unrelated epic, before it happened.
+- Numbered question lists answered one line per item; "recommend, then ask" kept decisions moving.
+
+### Technical
+
+- **A flex-column container shrinks any child that has `overflow` set** (its automatic minimum height is 0). Give such children `flex: none`. A test now fails if any chat bubble rule sets an overflow without it.
+- Only tables are preformatted; sentences wrap. Never send prose through the table style.
+- **A rule from a design doc belongs in one function that the tests quote** (`modelCausedRefusal`), and an unknown case defaults to "not the model's fault".
+- **A read tool must not have write side effects, least of all for an LLM caller.** Accept every handle the list output shows (key, old key, id, unique display name), and answer an unknown one with an error that names the likely project. Soft-delete leniency (deleted data stays readable) must not let an empty deleted row shadow a live project.
+- Reads accept a unique id prefix; writes match the exact id. So a terse listing keeps full ids.
+- Small-model tool use is steerable: one sentence in the tool note plus an opt-in lighter format took 22 calls to 1. The remaining failure is leaving out `limit`.
+- **A published library with pinned consumers means new API needs tag, push, then pin bump;** `go.work` hides a missing pin.
+- A model-driven test through the gateway reaches live data: the gateway's `mcp-local` opens the live ledger.
+

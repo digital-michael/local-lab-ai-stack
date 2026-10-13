@@ -80,3 +80,26 @@ Outstanding: reconcile the `docs/decisions.md` / `docs/meta_local/decisions.md` 
 1. Read `docs/governance/README.md` for the enrollment summary and open issues.
 2. Read the domain repo context file: `~/Documents/Entities/frameworks/llm-agent-domains/photon-datum/local-lab-ai-stack/README.md` for the full session-start load order.
 3. Check `docs/wip/plan.md` for BL item status before starting new work.
+
+---
+
+## Handoff — 2026-10-13: cortex ledger and chat work
+
+> Supersedes the 2026-07-29 snapshot above for the `cortex` repos. Detail is in the ledger (projects `cortex-vscode`, `mcp-local`, `ledger-server`, `cortex-stack`, `products-ideation`) and in the extension's `docs/decisions.md` (D-024 to D-028).
+
+**Pushed 2026-10-13 (the operator said "push"):** `ledger-core` (tag `v0.6.0`: project resolution that never creates), `mcp-local` (pin bumped to `v0.6.0`, verified with `GOWORK=off`; pin and feature are separate commits), the `cortex` docs, and this repo. Every repo of this work is in sync with its remote with nothing uncommitted.
+
+- `mcp-local` and the extension are installed. **Reconnect `cortex` in Claude Code** to get the newest `mcp-local`; the Cortex chat reaches it through the gateway and needs nothing.
+- Ledger backups are in `~/.local/share/mcp-local/backups/` (a verified one was taken right after this push).
+
+**Open decisions for the operator (all recorded on tickets):**
+
+- Product 4 name and a single naming standard (Cortex suite, Solo/Federated, `cortex-*`): deferred until the current changes are done. Epic "Photon Datum's Cortex suite".
+- `/models` later; ticket for `/tools` filed; Threat Actor Network postponed; the stack interface standard goes just before the Agent, Subagent and Autorun work.
+- Defect "Small model leaves out `limit`..." (cortex-vscode) is open, with four options.
+- The `cortex-*` renames of real projects (ledger-server task) are unblocked; each is a deliberate operation after a backup.
+- Extension tickets still in `cortex-stack` (named conversations, "show and switch what the model can do", others) were not under the moved story; moving them is a decision.
+- A guard against UUID-shaped keys on a write is not built.
+
+**Do first next session:** the session-start load; check `git log @{u}..HEAD` in each repo before reporting state; count ledger projects and items before any model-driven run.
+
