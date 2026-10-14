@@ -450,3 +450,45 @@ Recorded in the operator's personal profile (`llm-agent-personal`: `collaboratio
 - Small-model tool use is steerable: one sentence in the tool note plus an opt-in lighter format took 22 calls to 1. The remaining failure is leaving out `limit`.
 - **A published library with pinned consumers means new API needs tag, push, then pin bump;** `go.work` hides a missing pin.
 - A model-driven test through the gateway reaches live data: the gateway's `mcp-local` opens the live ledger.
+
+---
+
+## Retrospective — 2026-10-14: cortex-agent planning from a recovered Qwen export (decision D9)
+
+A planning-only session in `cortex`: a recovered local-model design conversation (a standalone Go agent with its own ABAC/RBAC engine, profiles and subagent templates) was reviewed as **reference only**, reconciled with the ledger epic *cortex-agent: delegate, agent runs and subagents* and the cortex docs, and turned into decision D9 (`cortex/docs/decisions.md`), a refreshed `goals.md` (goal 7), and a batch of ledger tickets. No code was written. Detail is in the ledger and in D9.
+
+### LLM Agent — missteps
+
+- **Two numbered lists in one message, both numbered 1–4** (eight contradictions, then four decisions). The operator answered by number, then wrote that they were concerned my answers-to-questions mapping could be wrong because I held more of the knowledge base. I had to state my mapping and ask for confirmation, and the plan approval was ambiguous until it was asked again on its own. The existing list-style rule (numbered = match back) was followed within each list and broken across them.
+- **A repeat of a known gap, caught in the same pass:** `decisions.md` had no index row for D8. Found while adding D9, fixed and committed in that pass.
+
+### LLM Agent — what worked
+
+- **Evidence before questions.** The whole export and the cortex docs were read before asking anything. The main finding came from that: most of what the export proposed already exists here under other names (access class and Reach, the capability resolver, per-bundle gateway grants), so no policy engine was adopted.
+- **Overlap claims were labelled unverified until the docs were read.** The first report said they came from ticket titles; reading the docs confirmed them and added three more.
+- **Questions sorted by what blocks the next unit.** The operator is token-limited, so the contradictions were batched: four blocked the first unit and were settled in one reply; the rest were scheduled against the tickets they affect. Two were turned into investigations for the agent, not questions for the operator.
+- **Agent-chosen details marked in the artifact itself** ("to confirm" in D9, in `goals.md`, and a ticket that says it is an assumption), the 2026-10-05 lesson applied.
+- **Ledger writes:** existing items listed before creating, four creates with the title in the result, ids paired by title, everything read back. No id slips.
+- **Defects found in the imported code were listed from reading, and said not to be compiled** (a forbidden tool allowed by default, a default-allow that contradicts the stated default-deny, an undefined method, missing imports, a panic on an empty list).
+
+### Collaboration (operator statements, 2026-10-14)
+
+- **Big ideas are goals;** capture unified, aligned units of work in the ledger and execute the most immediate.
+- **The export folder is temporary and is never persisted:** take what is needed into the ledger or code, then delete it.
+- **Go only, no Python in this solution** without a very focused discussion (default: no).
+- **Limits are enforced by code, never by the agent or its prompt.**
+- **Limited tokens (about 21 hours):** prioritise planning, then batch conflict resolution where it can wait.
+- **Side goal:** the higher-level membership roles should drive marketing descriptions that reach down into the technical detail.
+- **"Wait at least one more turn"** before starting the first build unit.
+
+### Technical
+
+- **The shell and the file reader cannot read `~/Downloads` from this app** (macOS privacy restriction, `EPERM`). Moving the folder into the repo (left untracked and uncommitted) fixed it. Do not try to bypass it.
+- **The export is incomplete by nature:** 14 distinct code blocks (7 duplicated), two cut off mid-line, no module or entry point, and a transcript ending in Ollama "unexpected EOF" crashes on `qwen3-coder-next`. Treat recovered chat artifacts as reference.
+- **`scripts/check-markdown.py` validates tables, links and anchors;** run it after editing docs (it caught nothing here, and confirmed the new index anchors).
+- **Every cortex project is its own git repository**, cloned into a path the `cortex` repo ignores. `mcp-agent` will need its own repository, a README table row and an ignore entry; recorded on the scaffold ticket.
+
+### Proposed, not yet recorded in the operator's personal profile
+
+1. **Question ids with defaults:** when a message needs several answers, number them in one series (Q1, Q2, …) across the whole message, give each a default, and let "defaults" accept all. It worked on the next turn.
+2. **Token-limited operator:** sort open questions by what blocks the next unit, ask only those, and schedule the rest against tickets.
