@@ -488,7 +488,9 @@ A planning-only session in `cortex`: a recovered local-model design conversation
 - **`scripts/check-markdown.py` validates tables, links and anchors;** run it after editing docs (it caught nothing here, and confirmed the new index anchors).
 - **Every cortex project is its own git repository**, cloned into a path the `cortex` repo ignores. `mcp-agent` will need its own repository, a README table row and an ignore entry; recorded on the scaffold ticket.
 
-### Proposed, not yet recorded in the operator's personal profile
+### Recorded in the operator's personal profile (2026-10-14, at the operator's request)
+
+Pattern P-13 and a preference entry in `llm-agent-personal`:
 
 1. **Question ids with defaults:** when a message needs several answers, number them in one series (Q1, Q2, …) across the whole message, give each a default, and let "defaults" accept all. It worked on the next turn.
 2. **Token-limited operator:** sort open questions by what blocks the next unit, ask only those, and schedule the rest against tickets.
