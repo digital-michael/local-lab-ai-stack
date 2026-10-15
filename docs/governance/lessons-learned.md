@@ -494,3 +494,50 @@ Pattern P-13 and a preference entry in `llm-agent-personal`:
 
 1. **Question ids with defaults:** when a message needs several answers, number them in one series (Q1, Q2, …) across the whole message, give each a default, and let "defaults" accept all. It worked on the next turn.
 2. **Token-limited operator:** sort open questions by what blocks the next unit, ask only those, and schedule the rest against tickets.
+
+---
+
+## Retrospective — 2026-10-14 (continued): the cortex-agent build, from definitions to a live `agent_run`
+
+The same day's planning (above) became code in the new private repository `mcp-agent` (0.1.0 to 0.4.1): agent definitions with posture ceilings, a Go port of the capability-matrix resolver, run budgets, a scope gate, and `agent_run` (Solo only), plus a local `_meta.domain` stamp in `mcp-common`. Decisions are in `cortex/docs/decisions.md` D9; tickets are under the ledger epic *cortex-agent*. The first live run (the default agent on the 9B, against a copy of the ledger) answered correctly in 83 s.
+
+### LLM Agent — missteps
+
+- **Stated a fact about data I had not read, and it went into an agreed default.** I said `agent_ready` was "verified for no model". The capability matrix records `no` for the 4B (`cortex-local-mid`, failed one task four times). My statement fed the operator's agreement to pin the default agent to that model, and into ledger text. It surfaced only when I opened the real file to build a parity check. This is the 2026-08-11 root pattern again (an unverified assumption stated as fact), and the fix was the same: read the source before the sentence, and correct every place the sentence was written (found by searching the ledger and docs).
+- **Chose a setting from reasoning, when the existing code already documented the mechanism.** I defaulted native thinking to "not requested" by omitting the field. `delegate`'s own comment says LiteLLM turns thinking on only for low/medium/high and that omission leaves the model's default, which for Qwen3.5 is thinking on. A live run hit the 90 s limit; a direct measurement showed 35 s and 211 tokens against 7 s and 33 tokens. I had not read that comment. Corrective: read the existing code's notes on a mechanism before choosing its semantics, then run it for real.
+- **A test that passed for the wrong reason.** A fake clock set in 2026 made the run's real-time context deadline already expired, so a "seconds" test ended immediately and still passed. A negative control (remove the tool-call budget check) was the only thing that exposed it. Corrective: a fake clock starts at the real time; a test of a limit must show the run doing work before the limit stops it.
+- **A placeholder link written into a ledger note** (`/t/pending`) instead of waiting for the new ticket's id: the hand-typed-id slip from the earlier lessons. Caught and fixed in the same pass.
+- **Reported a note's size wrongly and bypassed the tool.** The list-notes tool excerpts to 200 characters and offers `detail=verbose`; I said "2,000", had not loaded the deferred tool's schema, and read the SQLite file directly. The ledger held everything; the tool's message just did not name the remedy (ticket filed).
+
+### LLM Agent — what worked
+
+- **Re-verified an old finding before leaning on it.** The identity spike was a fortnight old; I re-read the installed LiteLLM source, confirmed it, and found the consequence nobody had written down (a stdio server is started per tool call, so a background subagent started by a call dies with it). That became its own spike.
+- **A parity check against the Python resolver on live data** (13 of 13 requirements gave the same pick, order and rejections), then deleted, so the repository stays Go only.
+- **Negative controls for nearly every guard** (about thirty). Two exposed real test gaps (the tool-call budget check, and the fake clock) that unit tests alone had missed.
+- **The live run went against a copy of the ledger,** with counts taken before and after (the 2026-10-13 lesson about junk projects), and used read-only scopes.
+- **Measured before changing a number:** the 83 s, 47 s and 4,000-token prompt are what moved the default from 90 s to 240 s, not intuition.
+- **Question ids with defaults** worked across the whole stretch: the operator answered "Q1 ok, Q2 ok" and spent few tokens.
+- **Corrections went into the artifacts the same pass** (D9, README, default definition, ledger notes), not only into chat.
+
+### Collaboration (operator statements, 2026-10-14)
+
+- Delegation is **sibling** fan-out (a subagent hands units to peers and judges each result); a delegating agent needs its delegate models resident, unless delegation gets cleverer.
+- A task may call MCP tools and do small local-LLM work (evaluation, summary); a subagent judges delegated work. The intended pool for tasks is several small, heavily quantized models.
+- Aspiration: get very good at decomposing math, process, coding and instruction steps.
+- "Scopes" as the vocabulary for what an agent may use (adopted).
+- Prefers limits determined **dynamically from conditions**, not hand-set numbers (ticketed, to design after measurement).
+- Paging for long details (noted).
+- Limited tokens for the next stretch: plan first, batch conflicts; "go with your default" as the usual answer.
+
+### Technical
+
+- Through LiteLLM's real MCP endpoint (`/mcp/`, trailing slash required) a tool list carries annotations and `_meta`; the REST list drops both. Names get the server key as a prefix (`cortex-`). A domain was not on any tool; `mcp-common` now stamps it (local, unreleased).
+- The 9B on this machine: prompt processing about 84 tokens/s; 22 tools cost about 4,000 prompt tokens before any work; `OLLAMA_NUM_PARALLEL=1`, so siblings on one model are serialized.
+- `reasoning_effort`: `low/medium/high` turn thinking on, `false` turns it off, omission leaves the model default.
+- The capability matrix records `agent_ready: no` for qwen3.5:4b and nothing `yes`.
+- macOS has no `timeout`; use `go test -timeout`. A test that could loop on a broken guard needs one.
+- Fake clocks and real deadlines do not mix: start the fake at the real time.
+
+### Proposed for the operator's personal profile (one entry)
+
+A failure-mode entry: *before stating a fact about data or a mechanism that a default or a recommendation will rest on, open the data or read the code's own notes; then check it by running it.* Two instances in this stretch (the `agent_ready` claim, the thinking default).
