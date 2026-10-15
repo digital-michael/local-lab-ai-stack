@@ -538,6 +538,6 @@ The same day's planning (above) became code in the new private repository `mcp-a
 - macOS has no `timeout`; use `go test -timeout`. A test that could loop on a broken guard needs one.
 - Fake clocks and real deadlines do not mix: start the fake at the real time.
 
-### Proposed for the operator's personal profile (one entry)
+### Recorded in the operator's personal profile (agent self-report, for the operator to confirm)
 
 A failure-mode entry: *before stating a fact about data or a mechanism that a default or a recommendation will rest on, open the data or read the code's own notes; then check it by running it.* Two instances in this stretch (the `agent_ready` claim, the thinking default).
